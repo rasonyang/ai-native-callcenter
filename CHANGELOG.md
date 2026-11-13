@@ -18,7 +18,9 @@ carries the one-line installer's files.
   `hangup` step gives the reason in `args`
   (`{"call": "hangup", "args": {"reason": "CALLER_GOODBYE"}}`); one without it
   now fails unless the step expects the refusal (`"isRefused": true`) (#484).
-- No migration and no API contract change.
+- No migration. API contract: additive only, an operation and a query
+  parameter (see Added); `make api-breaking BASE=v0.8.3` reports no breaking
+  change (#476).
 
 ### Changed
 
@@ -42,6 +44,22 @@ carries the one-line installer's files.
   rather than to hang up as soon as the caller seems to want to finish. The
   description and `novanet_support` also count a caller who says they have the
   wrong number as asking to end the call (`CALLER_ASKED_TO_END`) (#484).
+
+### Added
+
+- A campaign's outcome summary, `GET /campaigns/{campaignId}/outcome-summary`
+  (`campaigns:read`): finished attempts by outcome, contacts by the outcome of
+  their last call and by lead intent, opt-outs split into the customers who
+  asked on the call and the numbers skipped because they were already on the
+  do-not-call list, and the callbacks the campaign's HIGH leads filed by status
+  (open, claimed, done, dismissed). Every outcome, intent and status is listed,
+  zero included. The counts are read from the stored records each time, so a
+  revised call record moves its call from one count to another once, and each
+  count is the total of the matching listing; for that,
+  `GET /campaigns/{campaignId}/contacts` gains a `lastOutcome` filter. The
+  campaign page shows the summary on a new Outcomes tab, in English and
+  Chinese (#476, from the compliance plan in #468; thanks
+  @siyingchao007-maker).
 
 ## v0.8.3 - 2026-11-12
 

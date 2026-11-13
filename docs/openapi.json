@@ -5747,7 +5747,7 @@
           "campaigns"
         ],
         "summary": "List a campaign's contacts",
-        "description": "In import order. status and leadIntent narrow the list. Needs campaigns:read.",
+        "description": "In import order. status, leadIntent and lastOutcome narrow the list. Needs campaigns:read.",
         "parameters": [
           {
             "name": "campaignId",
@@ -5770,6 +5770,14 @@
             "in": "query",
             "schema": {
               "$ref": "#/components/schemas/CampaignLeadIntent"
+            }
+          },
+          {
+            "name": "lastOutcome",
+            "in": "query",
+            "description": "Only contacts whose latest finished attempt ended so. A contact no attempt has finished for has no lastOutcome and is never in such a list.",
+            "schema": {
+              "$ref": "#/components/schemas/CampaignOutcome"
             }
           },
           {
@@ -5986,6 +5994,63 @@
           },
           "400": {
             "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "security": [
+          {
+            "cookieSession": [
+              "campaigns:read"
+            ]
+          },
+          {
+            "apiKeyBearer": [
+              "campaigns:read"
+            ]
+          }
+        ]
+      }
+    },
+    "/campaigns/{campaignId}/outcome-summary": {
+      "get": {
+        "operationId": "getCampaignOutcomeSummary",
+        "tags": [
+          "campaigns"
+        ],
+        "summary": "Get what a campaign's calls came to",
+        "description": "Attempts by outcome, contacts by last outcome and by lead, the two kinds of opt-out, and the callbacks the campaign's leads filed, counted from what is stored when the request is made. Each count is the total of a listing filtered the same way, named on its field. Needs campaigns:read.",
+        "parameters": [
+          {
+            "name": "campaignId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The campaign's outcome summary.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CampaignOutcomeSummary"
+                }
+              }
+            }
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -12152,6 +12217,134 @@
         "required": [
           "items",
           "total"
+        ]
+      },
+      "CampaignOutcomeSummary": {
+        "type": "object",
+        "description": "What a campaign's calls came to, counted from the stored attempts, contacts and callbacks in one snapshot when it is read. Nothing is kept as a running total, so a call record revised after the call moves its attempt from one count to another once, and a read always agrees with the listings at the same moment. Every breakdown lists each value of its enum once, in the enum's order, zero included.",
+        "properties": {
+          "campaignId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "attemptsByOutcome": {
+            "type": "array",
+            "minItems": 11,
+            "maxItems": 11,
+            "items": {
+              "$ref": "#/components/schemas/CampaignOutcomeCount"
+            },
+            "description": "Finished attempts by outcome. Each count is the total of listCampaignAttempts with that outcome. An attempt still ringing or talking has no outcome yet and is in none."
+          },
+          "contactsByLastOutcome": {
+            "type": "array",
+            "minItems": 11,
+            "maxItems": 11,
+            "items": {
+              "$ref": "#/components/schemas/CampaignOutcomeCount"
+            },
+            "description": "Contacts by the outcome of their latest finished attempt (lastOutcome). Each count is the total of listCampaignContacts with that lastOutcome. A contact no attempt has finished for is in none, so these add up to contacts.total less those contacts."
+          },
+          "contactsByLeadIntent": {
+            "type": "array",
+            "minItems": 5,
+            "maxItems": 5,
+            "items": {
+              "$ref": "#/components/schemas/CampaignLeadIntentCount"
+            },
+            "description": "Contacts by the lead their calls recorded (leadIntent). Each count is the total of listCampaignContacts with that leadIntent. A contact no call recorded a lead for is in none."
+          },
+          "optOuts": {
+            "$ref": "#/components/schemas/CampaignOptOutCounts"
+          },
+          "callbacksByStatus": {
+            "type": "array",
+            "minItems": 4,
+            "maxItems": 4,
+            "items": {
+              "$ref": "#/components/schemas/CampaignCallbackStatusCount"
+            },
+            "description": "The callbacks the campaign's calls filed, by their status now; together, every callback filed. In a campaign only a HIGH lead files one, when its call ends, on the follow-up queue. Each is the callback listCallbacks returns for the callId of one of the campaign's attempts, which for a HIGH lead is the contact's lastCallId."
+          }
+        },
+        "required": [
+          "campaignId",
+          "attemptsByOutcome",
+          "contactsByLastOutcome",
+          "contactsByLeadIntent",
+          "optOuts",
+          "callbacksByStatus"
+        ]
+      },
+      "CampaignOutcomeCount": {
+        "type": "object",
+        "description": "How many attempts or contacts of a campaign have one outcome.",
+        "properties": {
+          "outcome": {
+            "$ref": "#/components/schemas/CampaignOutcome"
+          },
+          "count": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "outcome",
+          "count"
+        ]
+      },
+      "CampaignLeadIntentCount": {
+        "type": "object",
+        "description": "How many contacts of a campaign have one lead intent.",
+        "properties": {
+          "leadIntent": {
+            "$ref": "#/components/schemas/CampaignLeadIntent"
+          },
+          "count": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "leadIntent",
+          "count"
+        ]
+      },
+      "CampaignCallbackStatusCount": {
+        "type": "object",
+        "description": "How many of the callbacks a campaign's calls filed are in one status.",
+        "properties": {
+          "status": {
+            "$ref": "#/components/schemas/CallbackStatus"
+          },
+          "count": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "status",
+          "count"
+        ]
+      },
+      "CampaignOptOutCounts": {
+        "type": "object",
+        "description": "The campaign's DNC contacts by how they got there. A contact whose number was added to the list by somebody else while its call was ringing or talking is DNC and in neither count, so the two add up to contacts.dnc or less.",
+        "properties": {
+          "saidInConversation": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "The customer asked on the call: the call recorded a DO_NOT_CALL lead, and the number went on the do-not-call list when it ended. The total of listCampaignContacts with status DNC and leadIntent DO_NOT_CALL."
+          },
+          "alreadyListed": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "The number was already on the do-not-call list when the contact came up to be dialled, so it was skipped and never rang. The total of listCampaignContacts with status DNC and lastOutcome DNC_SKIPPED."
+          }
+        },
+        "required": [
+          "saidInConversation",
+          "alreadyListed"
         ]
       },
       "CampaignIntRange": {

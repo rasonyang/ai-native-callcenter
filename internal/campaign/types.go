@@ -13,6 +13,7 @@
 package campaign
 
 import (
+	"slices"
 	"time"
 
 	"github.com/google/uuid"
@@ -104,14 +105,14 @@ const (
 	LeadDoNotCall LeadIntent = "DO_NOT_CALL"
 )
 
-// IsValid reports whether i is one of the five intents.
-func (i LeadIntent) IsValid() bool {
-	switch i {
-	case LeadHigh, LeadMedium, LeadLow, LeadNone, LeadDoNotCall:
-		return true
-	}
-	return false
+// AllLeadIntents is every intent, in the order of the type's declaration. It
+// is the one list IsValid reads.
+func AllLeadIntents() []LeadIntent {
+	return []LeadIntent{LeadHigh, LeadMedium, LeadLow, LeadNone, LeadDoNotCall}
 }
+
+// IsValid reports whether i is one of the five intents.
+func (i LeadIntent) IsValid() bool { return slices.Contains(AllLeadIntents(), i) }
 
 // ContactCounts is how many contacts a campaign has in each status.
 type ContactCounts struct {
@@ -196,6 +197,9 @@ type ListFilter struct {
 type ContactFilter struct {
 	Status     ContactStatus
 	LeadIntent LeadIntent
-	Limit      int
-	Offset     int
+	// LastOutcome keeps the contacts whose latest finished attempt ended so;
+	// a contact no attempt has finished for has none and is never kept.
+	LastOutcome Outcome
+	Limit       int
+	Offset      int
 }

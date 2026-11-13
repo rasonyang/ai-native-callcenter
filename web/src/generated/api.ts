@@ -1524,7 +1524,7 @@ export interface paths {
         };
         /**
          * List a campaign's contacts
-         * @description In import order. status and leadIntent narrow the list. Needs campaigns:read.
+         * @description In import order. status, leadIntent and lastOutcome narrow the list. Needs campaigns:read.
          */
         get: operations["listCampaignContacts"];
         put?: never;
@@ -1555,6 +1555,26 @@ export interface paths {
          * @description Newest first. contactId and outcome narrow the list. Needs campaigns:read.
          */
         get: operations["listCampaignAttempts"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/campaigns/{campaignId}/outcome-summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get what a campaign's calls came to
+         * @description Attempts by outcome, contacts by last outcome and by lead, the two kinds of opt-out, and the callbacks the campaign's leads filed, counted from what is stored when the request is made. Each count is the total of a listing filtered the same way, named on its field. Needs campaigns:read.
+         */
+        get: operations["getCampaignOutcomeSummary"];
         put?: never;
         post?: never;
         delete?: never;
@@ -3794,6 +3814,42 @@ export interface components {
             items: components["schemas"]["CampaignAttempt"][];
             /** @description Total rows matching the filter, for paging. */
             total: number;
+        };
+        /** @description What a campaign's calls came to, counted from the stored attempts, contacts and callbacks in one snapshot when it is read. Nothing is kept as a running total, so a call record revised after the call moves its attempt from one count to another once, and a read always agrees with the listings at the same moment. Every breakdown lists each value of its enum once, in the enum's order, zero included. */
+        CampaignOutcomeSummary: {
+            /** Format: uuid */
+            campaignId: string;
+            /** @description Finished attempts by outcome. Each count is the total of listCampaignAttempts with that outcome. An attempt still ringing or talking has no outcome yet and is in none. */
+            attemptsByOutcome: components["schemas"]["CampaignOutcomeCount"][];
+            /** @description Contacts by the outcome of their latest finished attempt (lastOutcome). Each count is the total of listCampaignContacts with that lastOutcome. A contact no attempt has finished for is in none, so these add up to contacts.total less those contacts. */
+            contactsByLastOutcome: components["schemas"]["CampaignOutcomeCount"][];
+            /** @description Contacts by the lead their calls recorded (leadIntent). Each count is the total of listCampaignContacts with that leadIntent. A contact no call recorded a lead for is in none. */
+            contactsByLeadIntent: components["schemas"]["CampaignLeadIntentCount"][];
+            optOuts: components["schemas"]["CampaignOptOutCounts"];
+            /** @description The callbacks the campaign's calls filed, by their status now; together, every callback filed. In a campaign only a HIGH lead files one, when its call ends, on the follow-up queue. Each is the callback listCallbacks returns for the callId of one of the campaign's attempts, which for a HIGH lead is the contact's lastCallId. */
+            callbacksByStatus: components["schemas"]["CampaignCallbackStatusCount"][];
+        };
+        /** @description How many attempts or contacts of a campaign have one outcome. */
+        CampaignOutcomeCount: {
+            outcome: components["schemas"]["CampaignOutcome"];
+            count: number;
+        };
+        /** @description How many contacts of a campaign have one lead intent. */
+        CampaignLeadIntentCount: {
+            leadIntent: components["schemas"]["CampaignLeadIntent"];
+            count: number;
+        };
+        /** @description How many of the callbacks a campaign's calls filed are in one status. */
+        CampaignCallbackStatusCount: {
+            status: components["schemas"]["CallbackStatus"];
+            count: number;
+        };
+        /** @description The campaign's DNC contacts by how they got there. A contact whose number was added to the list by somebody else while its call was ringing or talking is DNC and in neither count, so the two add up to contacts.dnc or less. */
+        CampaignOptOutCounts: {
+            /** @description The customer asked on the call: the call recorded a DO_NOT_CALL lead, and the number went on the do-not-call list when it ended. The total of listCampaignContacts with status DNC and leadIntent DO_NOT_CALL. */
+            saidInConversation: number;
+            /** @description The number was already on the do-not-call list when the contact came up to be dialled, so it was skipped and never rang. The total of listCampaignContacts with status DNC and lastOutcome DNC_SKIPPED. */
+            alreadyListed: number;
         };
         /** @description An inclusive integer range. */
         CampaignIntRange: {
@@ -6510,6 +6566,8 @@ export interface operations {
             query?: {
                 status?: components["schemas"]["CampaignContactStatus"];
                 leadIntent?: components["schemas"]["CampaignLeadIntent"];
+                /** @description Only contacts whose latest finished attempt ended so. A contact no attempt has finished for has no lastOutcome and is never in such a list. */
+                lastOutcome?: components["schemas"]["CampaignOutcome"];
                 limit?: number;
                 offset?: number;
             };
@@ -6605,6 +6663,32 @@ export interface operations {
                 };
             };
             400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    getCampaignOutcomeSummary: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                campaignId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The campaign's outcome summary. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CampaignOutcomeSummary"];
+                };
+            };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];

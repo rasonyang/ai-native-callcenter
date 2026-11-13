@@ -30,6 +30,11 @@ export type CampaignContactStatus = components['schemas']['CampaignContactStatus
 export type CampaignLeadIntent = components['schemas']['CampaignLeadIntent']
 export type CampaignOutcome = components['schemas']['CampaignOutcome']
 export type CampaignAttempt = components['schemas']['CampaignAttempt']
+export type CampaignOutcomeSummary = components['schemas']['CampaignOutcomeSummary']
+export type CampaignOutcomeCount = components['schemas']['CampaignOutcomeCount']
+export type CampaignLeadIntentCount = components['schemas']['CampaignLeadIntentCount']
+export type CampaignCallbackStatusCount = components['schemas']['CampaignCallbackStatusCount']
+export type CampaignOptOutCounts = components['schemas']['CampaignOptOutCounts']
 export type CampaignContactRow = components['schemas']['CampaignContactRow']
 export type CampaignImportResult = components['schemas']['CampaignImportResult']
 export type CampaignImportRowResult = components['schemas']['CampaignImportRowResult']
@@ -79,6 +84,7 @@ export interface CampaignFilter {
 export interface ContactFilter {
   status?: CampaignContactStatus
   leadIntent?: CampaignLeadIntent
+  lastOutcome?: CampaignOutcome
   limit?: number
   offset?: number
 }
@@ -117,6 +123,7 @@ export const campaignApi = {
     request<components['schemas']['CampaignAttemptList']>(
       `/campaigns/${id}/attempts${query({ ...filter })}`,
     ),
+  outcomeSummary: (id: string) => request<CampaignOutcomeSummary>(`/campaigns/${id}/outcome-summary`),
 }
 
 // --- Cache keys and queries -------------------------------------------------
@@ -126,6 +133,7 @@ const LIST_KEY = ['campaigns', 'list'] as const
 export const campaignKey = (id: string) => ['campaigns', 'detail', id] as const
 const contactsKey = (id: string) => ['campaigns', 'contacts', id] as const
 const attemptsKey = (id: string) => ['campaigns', 'attempts', id] as const
+const outcomeSummaryKey = (id: string) => ['campaigns', 'outcome-summary', id] as const
 
 export function useCampaigns(filter: CampaignFilter) {
   return useQuery({
@@ -164,6 +172,18 @@ export function useCampaignAttempts(id: string, filter: AttemptFilter) {
   return useQuery({
     queryKey: [...attemptsKey(id), filter],
     queryFn: () => campaignApi.attempts(id, filter),
+  })
+}
+
+/**
+ * What the campaign's calls came to. Counted by the server on every read, so
+ * it is fetched only while it is on screen and refetched when the campaign's
+ * counters move (applyCampaignUpdated).
+ */
+export function useCampaignOutcomeSummary(id: string) {
+  return useQuery({
+    queryKey: outcomeSummaryKey(id),
+    queryFn: () => campaignApi.outcomeSummary(id),
   })
 }
 
@@ -263,10 +283,12 @@ export function applyCampaignUpdated(
   if (hasStatusChanged || (!isListed && !detail)) {
     void queryClient.invalidateQueries({ queryKey: LIST_KEY })
   }
-  // The counters moved, so a contacts or attempts table that is on screen is
-  // behind. Only a mounted table refetches; the rest wait until opened.
+  // The counters moved, so a contacts or attempts table, or the outcome
+  // summary, that is on screen is behind. Only a mounted query refetches; the
+  // rest wait until opened.
   void queryClient.invalidateQueries({ queryKey: contactsKey(payload.campaignId) })
   void queryClient.invalidateQueries({ queryKey: attemptsKey(payload.campaignId) })
+  void queryClient.invalidateQueries({ queryKey: outcomeSummaryKey(payload.campaignId) })
 }
 
 /** Reads the payload out of a stream envelope, or undefined when it is not one. */

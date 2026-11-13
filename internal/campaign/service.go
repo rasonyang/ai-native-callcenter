@@ -118,6 +118,9 @@ type Repository interface {
 	ListContacts(ctx context.Context, campaignID uuid.UUID, f ContactFilter) ([]Contact, int64, error)
 	// ListAttempts pages a campaign's attempts, newest first.
 	ListAttempts(ctx context.Context, campaignID uuid.UUID, f AttemptFilter) ([]Attempt, int64, error)
+	// OutcomeSummary counts what a campaign's calls came to, in one snapshot;
+	// ErrNotFound when there is no such campaign.
+	OutcomeSummary(ctx context.Context, campaignID uuid.UUID) (OutcomeSummary, error)
 }
 
 // Controller moves a campaign between statuses. The API asks, the controller
@@ -364,6 +367,13 @@ func (s *Service) ListAttempts(ctx context.Context, id uuid.UUID, f AttemptFilte
 		return nil, 0, err
 	}
 	return s.repo.ListAttempts(ctx, id, f)
+}
+
+// OutcomeSummary reads what a campaign's calls came to: attempts by outcome,
+// contacts by last outcome and by lead, the two kinds of opt-out and the
+// callbacks its leads filed.
+func (s *Service) OutcomeSummary(ctx context.Context, id uuid.UUID) (OutcomeSummary, error) {
+	return s.repo.OutcomeSummary(ctx, id)
 }
 
 // NewService builds the service. A nil controller means RepoController.
@@ -719,6 +729,9 @@ func (s *Service) ListContacts(ctx context.Context, id uuid.UUID, f ContactFilte
 	}
 	if f.LeadIntent != "" && !f.LeadIntent.IsValid() {
 		return nil, 0, invalid("leadIntent", "UNKNOWN_INTENT", "%q is not a lead intent", f.LeadIntent)
+	}
+	if f.LastOutcome != "" && !f.LastOutcome.IsValid() {
+		return nil, 0, invalid("lastOutcome", "UNKNOWN_OUTCOME", "%q is not an outcome", f.LastOutcome)
 	}
 	if _, err := s.repo.Get(ctx, id); err != nil {
 		return nil, 0, err

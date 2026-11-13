@@ -176,6 +176,7 @@ OPS = {
     "getCampaign":              (["campaigns:read"], S, True),
     "getCampaignSettings":      (["campaigns:read"], S, True),
     "listCampaignContacts":     (["campaigns:read"], S, True),
+    "getCampaignOutcomeSummary":(["campaigns:read"], S, True),
     "createCampaign":           (["campaigns:write"], S, True),
     "updateCampaign":           (["campaigns:write"], S, True),
     "deleteCampaign":           (["campaigns:write"], S, True),

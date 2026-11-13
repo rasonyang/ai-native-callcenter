@@ -1777,6 +1777,12 @@ type CampaignBackoffWrite struct {
 	Factor  *int `json:"factor,omitempty"`
 }
 
+// CampaignCallbackStatusCount How many of the callbacks a campaign's calls filed are in one status.
+type CampaignCallbackStatusCount struct {
+	Count  int            `json:"count"`
+	Status CallbackStatus `json:"status"`
+}
+
 // CampaignCallingWindow When a contact may be dialled, in that contact's own time zone (its timeZone, else the campaign's). It binds in addition to the deployment's outer calling hours (AICC_OUTBOUND_HOURS, default 08:00-21:00), and every range must lie wholly inside them: otherwise CAMPAIGN_WINDOW_OUTSIDE_LIMIT, on create and on every change. Ranges of one window may not overlap. A closed window does not pause the campaign.
 type CampaignCallingWindow struct {
 	Days   []Weekday           `json:"days"`
@@ -1911,6 +1917,14 @@ type CampaignIntervalSec map[string]int
 // CampaignLeadIntent What a call concluded about the customer. Absent on a contact no call has recorded a lead for, which is not the same as NONE.
 type CampaignLeadIntent string
 
+// CampaignLeadIntentCount How many contacts of a campaign have one lead intent.
+type CampaignLeadIntentCount struct {
+	Count int `json:"count"`
+
+	// LeadIntent What a call concluded about the customer. Absent on a contact no call has recorded a lead for, which is not the same as NONE.
+	LeadIntent CampaignLeadIntent `json:"leadIntent"`
+}
+
 // CampaignList defines model for CampaignList.
 type CampaignList struct {
 	Items []Campaign `json:"items"`
@@ -1919,8 +1933,44 @@ type CampaignList struct {
 	Total int `json:"total"`
 }
 
+// CampaignOptOutCounts The campaign's DNC contacts by how they got there. A contact whose number was added to the list by somebody else while its call was ringing or talking is DNC and in neither count, so the two add up to contacts.dnc or less.
+type CampaignOptOutCounts struct {
+	// AlreadyListed The number was already on the do-not-call list when the contact came up to be dialled, so it was skipped and never rang. The total of listCampaignContacts with status DNC and lastOutcome DNC_SKIPPED.
+	AlreadyListed int `json:"alreadyListed"`
+
+	// SaidInConversation The customer asked on the call: the call recorded a DO_NOT_CALL lead, and the number went on the do-not-call list when it ended. The total of listCampaignContacts with status DNC and leadIntent DO_NOT_CALL.
+	SaidInConversation int `json:"saidInConversation"`
+}
+
 // CampaignOutcome How an attempt ended (design 10 section 7.2). A contact's lastOutcome is the latest attempt's.
 type CampaignOutcome string
+
+// CampaignOutcomeCount How many attempts or contacts of a campaign have one outcome.
+type CampaignOutcomeCount struct {
+	Count int `json:"count"`
+
+	// Outcome How an attempt ended (design 10 section 7.2). A contact's lastOutcome is the latest attempt's.
+	Outcome CampaignOutcome `json:"outcome"`
+}
+
+// CampaignOutcomeSummary What a campaign's calls came to, counted from the stored attempts, contacts and callbacks in one snapshot when it is read. Nothing is kept as a running total, so a call record revised after the call moves its attempt from one count to another once, and a read always agrees with the listings at the same moment. Every breakdown lists each value of its enum once, in the enum's order, zero included.
+type CampaignOutcomeSummary struct {
+	// AttemptsByOutcome Finished attempts by outcome. Each count is the total of listCampaignAttempts with that outcome. An attempt still ringing or talking has no outcome yet and is in none.
+	AttemptsByOutcome []CampaignOutcomeCount `json:"attemptsByOutcome"`
+
+	// CallbacksByStatus The callbacks the campaign's calls filed, by their status now; together, every callback filed. In a campaign only a HIGH lead files one, when its call ends, on the follow-up queue. Each is the callback listCallbacks returns for the callId of one of the campaign's attempts, which for a HIGH lead is the contact's lastCallId.
+	CallbacksByStatus []CampaignCallbackStatusCount `json:"callbacksByStatus"`
+	CampaignID        openapi_types.UUID            `json:"campaignId"`
+
+	// ContactsByLastOutcome Contacts by the outcome of their latest finished attempt (lastOutcome). Each count is the total of listCampaignContacts with that lastOutcome. A contact no attempt has finished for is in none, so these add up to contacts.total less those contacts.
+	ContactsByLastOutcome []CampaignOutcomeCount `json:"contactsByLastOutcome"`
+
+	// ContactsByLeadIntent Contacts by the lead their calls recorded (leadIntent). Each count is the total of listCampaignContacts with that leadIntent. A contact no call recorded a lead for is in none.
+	ContactsByLeadIntent []CampaignLeadIntentCount `json:"contactsByLeadIntent"`
+
+	// OptOuts The campaign's DNC contacts by how they got there. A contact whose number was added to the list by somebody else while its call was ringing or talking is DNC and in neither count, so the two add up to contacts.dnc or less.
+	OptOuts CampaignOptOutCounts `json:"optOuts"`
+}
 
 // CampaignPatch A change to a campaign. Fields present replace the stored ones; fields absent are left alone; null clears defaultCountryCode and followUpQueueId (the only two that can be unset). callingWindow and retryPolicy replace the stored object as a whole. In DRAFT every field may change; in RUNNING and PAUSED only maxConcurrent, callingWindow and retryPolicy, and they affect later admissions, not calls in flight; in a terminal status none. A field sent with the value it already has is not a change.
 type CampaignPatch struct {
@@ -3479,8 +3529,11 @@ type ListCampaignAttemptsParams struct {
 type ListCampaignContactsParams struct {
 	Status     *CampaignContactStatus `form:"status,omitempty" json:"status,omitempty"`
 	LeadIntent *CampaignLeadIntent    `form:"leadIntent,omitempty" json:"leadIntent,omitempty"`
-	Limit      *int                   `form:"limit,omitempty" json:"limit,omitempty"`
-	Offset     *int                   `form:"offset,omitempty" json:"offset,omitempty"`
+
+	// LastOutcome Only contacts whose latest finished attempt ended so. A contact no attempt has finished for has no lastOutcome and is never in such a list.
+	LastOutcome *CampaignOutcome `form:"lastOutcome,omitempty" json:"lastOutcome,omitempty"`
+	Limit       *int             `form:"limit,omitempty" json:"limit,omitempty"`
+	Offset      *int             `form:"offset,omitempty" json:"offset,omitempty"`
 }
 
 // ListCDRsParams defines parameters for ListCDRs.
@@ -3874,6 +3927,9 @@ type ServerInterface interface {
 	// ImportCampaignContacts Import contacts
 	// (POST /campaigns/{campaignId}/contacts)
 	ImportCampaignContacts(w http.ResponseWriter, r *http.Request, campaignID openapi_types.UUID)
+	// GetCampaignOutcomeSummary Get what a campaign's calls came to
+	// (GET /campaigns/{campaignId}/outcome-summary)
+	GetCampaignOutcomeSummary(w http.ResponseWriter, r *http.Request, campaignID openapi_types.UUID)
 	// PauseCampaign Pause a campaign
 	// (POST /campaigns/{campaignId}/pause)
 	PauseCampaign(w http.ResponseWriter, r *http.Request, campaignID openapi_types.UUID)
@@ -4384,6 +4440,12 @@ func (_ Unimplemented) ListCampaignContacts(w http.ResponseWriter, r *http.Reque
 // ImportCampaignContacts Import contacts
 // (POST /campaigns/{campaignId}/contacts)
 func (_ Unimplemented) ImportCampaignContacts(w http.ResponseWriter, r *http.Request, campaignID openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetCampaignOutcomeSummary Get what a campaign's calls came to
+// (GET /campaigns/{campaignId}/outcome-summary)
+func (_ Unimplemented) GetCampaignOutcomeSummary(w http.ResponseWriter, r *http.Request, campaignID openapi_types.UUID) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -6171,6 +6233,19 @@ func (siw *ServerInterfaceWrapper) ListCampaignContacts(w http.ResponseWriter, r
 		return
 	}
 
+	// ------------- Optional query parameter "lastOutcome" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "lastOutcome", r.URL.Query(), &params.LastOutcome, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "lastOutcome"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "lastOutcome", Err: err})
+		}
+		return
+	}
+
 	// ------------- Optional query parameter "limit" -------------
 
 	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
@@ -6225,6 +6300,32 @@ func (siw *ServerInterfaceWrapper) ImportCampaignContacts(w http.ResponseWriter,
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ImportCampaignContacts(w, r, campaignID)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetCampaignOutcomeSummary operation middleware
+func (siw *ServerInterfaceWrapper) GetCampaignOutcomeSummary(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "campaignId" -------------
+	var campaignID openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "campaignId", chi.URLParam(r, "campaignId"), &campaignID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "campaignId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetCampaignOutcomeSummary(w, r, campaignID)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -8186,6 +8287,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/campaigns/{campaignId}/contacts", wrapper.ImportCampaignContacts)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/campaigns/{campaignId}/outcome-summary", wrapper.GetCampaignOutcomeSummary)
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/campaigns/{campaignId}/pause", wrapper.PauseCampaign)

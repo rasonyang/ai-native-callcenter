@@ -970,6 +970,7 @@
       "contacts": "联系人",
       "leads": "线索",
       "attempts": "呼叫记录",
+      "outcomes": "结果统计",
       "settings": "设置"
     },
     "number": "号码",
@@ -1023,6 +1024,22 @@
     "talkTime": "通话时长",
     "call": "通话",
     "openCall": "查看通话",
+    "summary": {
+      "byOutcome": "按呼叫结果",
+      "attempts": "呼叫次数",
+      "contactsLastOutcome": "联系人（最后一次呼叫）",
+      "byLead": "线索",
+      "contacts": "联系人",
+      "optOuts": "免打扰",
+      "reason": "原因",
+      "saidInConversation": "通话中要求免打扰",
+      "alreadyListed": "已在名单中，已跳过",
+      "optOutsNote": "通话进行中被他人加入免打扰名单的号码计入“免打扰”，但不计入以上两行。",
+      "callbacks": "已创建的回访",
+      "callbackStatus": "状态",
+      "callbackCount": "回访",
+      "total": "合计"
+    },
     "weekdays": {
       "MON": "周一",
       "TUE": "周二",

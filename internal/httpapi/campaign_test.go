@@ -1120,6 +1120,7 @@ func TestOnlyScopedCredentialsReachCampaigns(t *testing.T) {
 		{"list", http.MethodGet, "/campaigns", nil, false},
 		{"get", http.MethodGet, "/campaigns/" + c.ID, nil, false},
 		{"list contacts", http.MethodGet, "/campaigns/" + c.ID + "/contacts", nil, false},
+		{"outcome summary", http.MethodGet, "/campaigns/" + c.ID + "/outcome-summary", nil, false},
 		{"create", http.MethodPost, "/campaigns", campaignBody(didID, func(b map[string]any) { b["name"] = "By key" }), true},
 		{"patch", http.MethodPatch, "/campaigns/" + c.ID, map[string]any{"maxConcurrent": 6}, true},
 		{"start", http.MethodPost, "/campaigns/" + uuid.NewString() + "/start", nil, true},

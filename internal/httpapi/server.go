@@ -397,6 +397,7 @@ func (s *Server) router() chi.Router {
 					private.Post("/campaigns/{campaignId}/cancel", op.CancelCampaign)
 					private.Get("/campaigns/{campaignId}/contacts", op.ListCampaignContacts)
 					private.Get("/campaigns/{campaignId}/attempts", op.ListCampaignAttempts)
+					private.Get("/campaigns/{campaignId}/outcome-summary", op.GetCampaignOutcomeSummary)
 					private.Post("/campaigns/{campaignId}/contacts", op.ImportCampaignContacts)
 				}
 

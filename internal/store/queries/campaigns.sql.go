@@ -27,6 +27,75 @@ func (q *Queries) ArmCampaignContacts(ctx context.Context, campaignID uuid.UUID)
 	return result.RowsAffected(), nil
 }
 
+const campaignAttemptOutcomes = `-- name: CampaignAttemptOutcomes :many
+SELECT outcome, count(*)::bigint AS n
+FROM campaign_attempts
+WHERE campaign_id = $1 AND state = 'FINISHED'
+GROUP BY outcome
+`
+
+type CampaignAttemptOutcomesRow struct {
+	Outcome *string `json:"outcome"`
+	N       int64   `json:"n"`
+}
+
+// Only a FINISHED attempt has an outcome (ck_campaign_attempts_finished).
+func (q *Queries) CampaignAttemptOutcomes(ctx context.Context, campaignID uuid.UUID) ([]CampaignAttemptOutcomesRow, error) {
+	rows, err := q.db.Query(ctx, campaignAttemptOutcomes, campaignID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []CampaignAttemptOutcomesRow{}
+	for rows.Next() {
+		var i CampaignAttemptOutcomesRow
+		if err := rows.Scan(&i.Outcome, &i.N); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const campaignCallbackStatuses = `-- name: CampaignCallbackStatuses :many
+SELECT cb.status, count(*)::bigint AS n
+FROM callbacks cb
+JOIN campaign_attempts a ON a.call_id = cb.call_id
+WHERE a.campaign_id = $1
+GROUP BY cb.status
+`
+
+type CampaignCallbackStatusesRow struct {
+	Status string `json:"status"`
+	N      int64  `json:"n"`
+}
+
+// The callbacks the campaign's calls filed, by status. A campaign call files
+// at most one, for a HIGH lead (InsertCallbackForCall), under its own call id,
+// so they are found through the attempts' call ids and never by phone number.
+func (q *Queries) CampaignCallbackStatuses(ctx context.Context, campaignID uuid.UUID) ([]CampaignCallbackStatusesRow, error) {
+	rows, err := q.db.Query(ctx, campaignCallbackStatuses, campaignID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []CampaignCallbackStatusesRow{}
+	for rows.Next() {
+		var i CampaignCallbackStatusesRow
+		if err := rows.Scan(&i.Status, &i.N); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const campaignContactCounts = `-- name: CampaignContactCounts :many
 SELECT campaign_id, status, count(*)::bigint AS n
 FROM campaign_contacts
@@ -60,6 +129,50 @@ func (q *Queries) CampaignContactCounts(ctx context.Context, campaignIds []uuid.
 	return items, nil
 }
 
+const campaignContactGroups = `-- name: CampaignContactGroups :many
+SELECT status, last_outcome, lead_intent, count(*)::bigint AS n
+FROM campaign_contacts
+WHERE campaign_id = $1
+GROUP BY status, last_outcome, lead_intent
+`
+
+type CampaignContactGroupsRow struct {
+	Status      string  `json:"status"`
+	LastOutcome *string `json:"lastOutcome"`
+	LeadIntent  *string `json:"leadIntent"`
+	N           int64   `json:"n"`
+}
+
+// The outcome summary (GET /campaigns/{campaignId}/outcome-summary). Nothing
+// is kept as a running total: every count is read here, grouped by the
+// columns the listings filter on, so a count is the total of a listing with
+// the same filter. The contacts by status, last_outcome and lead_intent
+// (CountCampaignContacts); the attempts by outcome (CountCampaignAttempts).
+func (q *Queries) CampaignContactGroups(ctx context.Context, campaignID uuid.UUID) ([]CampaignContactGroupsRow, error) {
+	rows, err := q.db.Query(ctx, campaignContactGroups, campaignID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []CampaignContactGroupsRow{}
+	for rows.Next() {
+		var i CampaignContactGroupsRow
+		if err := rows.Scan(
+			&i.Status,
+			&i.LastOutcome,
+			&i.LeadIntent,
+			&i.N,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const cancelCampaign = `-- name: CancelCampaign :execrows
 UPDATE campaigns
 SET status = 'CANCELLED', pause_reason = NULL, finished_at = now(), updated_at = now()
@@ -79,16 +192,23 @@ SELECT count(*) FROM campaign_contacts
 WHERE campaign_id = $1
   AND ($2::text = '' OR status = $2)
   AND ($3::text = '' OR lead_intent = $3)
+  AND ($4::text = '' OR last_outcome = $4)
 `
 
 type CountCampaignContactsParams struct {
-	CampaignID uuid.UUID `json:"campaignId"`
-	Status     string    `json:"status"`
-	LeadIntent string    `json:"leadIntent"`
+	CampaignID  uuid.UUID `json:"campaignId"`
+	Status      string    `json:"status"`
+	LeadIntent  string    `json:"leadIntent"`
+	LastOutcome string    `json:"lastOutcome"`
 }
 
 func (q *Queries) CountCampaignContacts(ctx context.Context, arg CountCampaignContactsParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countCampaignContacts, arg.CampaignID, arg.Status, arg.LeadIntent)
+	row := q.db.QueryRow(ctx, countCampaignContacts,
+		arg.CampaignID,
+		arg.Status,
+		arg.LeadIntent,
+		arg.LastOutcome,
+	)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -378,16 +498,18 @@ SELECT id, campaign_id, number_e164, number_raw, time_zone, slots, status, attem
 WHERE campaign_id = $1
   AND ($2::text = '' OR status = $2)
   AND ($3::text = '' OR lead_intent = $3)
+  AND ($4::text = '' OR last_outcome = $4)
 ORDER BY created_at, id
-LIMIT $5 OFFSET $4
+LIMIT $6 OFFSET $5
 `
 
 type ListCampaignContactsParams struct {
-	CampaignID uuid.UUID `json:"campaignId"`
-	Status     string    `json:"status"`
-	LeadIntent string    `json:"leadIntent"`
-	PageOffset int32     `json:"pageOffset"`
-	PageLimit  int32     `json:"pageLimit"`
+	CampaignID  uuid.UUID `json:"campaignId"`
+	Status      string    `json:"status"`
+	LeadIntent  string    `json:"leadIntent"`
+	LastOutcome string    `json:"lastOutcome"`
+	PageOffset  int32     `json:"pageOffset"`
+	PageLimit   int32     `json:"pageLimit"`
 }
 
 func (q *Queries) ListCampaignContacts(ctx context.Context, arg ListCampaignContactsParams) ([]CampaignContact, error) {
@@ -395,6 +517,7 @@ func (q *Queries) ListCampaignContacts(ctx context.Context, arg ListCampaignCont
 		arg.CampaignID,
 		arg.Status,
 		arg.LeadIntent,
+		arg.LastOutcome,
 		arg.PageOffset,
 		arg.PageLimit,
 	)

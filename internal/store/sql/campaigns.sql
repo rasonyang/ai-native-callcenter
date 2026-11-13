@@ -123,6 +123,7 @@ SELECT * FROM campaign_contacts
 WHERE campaign_id = sqlc.arg('campaign_id')
   AND (sqlc.arg('status')::text = '' OR status = sqlc.arg('status'))
   AND (sqlc.arg('lead_intent')::text = '' OR lead_intent = sqlc.arg('lead_intent'))
+  AND (sqlc.arg('last_outcome')::text = '' OR last_outcome = sqlc.arg('last_outcome'))
 ORDER BY created_at, id
 LIMIT sqlc.arg('page_limit') OFFSET sqlc.arg('page_offset');
 
@@ -130,4 +131,33 @@ LIMIT sqlc.arg('page_limit') OFFSET sqlc.arg('page_offset');
 SELECT count(*) FROM campaign_contacts
 WHERE campaign_id = sqlc.arg('campaign_id')
   AND (sqlc.arg('status')::text = '' OR status = sqlc.arg('status'))
-  AND (sqlc.arg('lead_intent')::text = '' OR lead_intent = sqlc.arg('lead_intent'));
+  AND (sqlc.arg('lead_intent')::text = '' OR lead_intent = sqlc.arg('lead_intent'))
+  AND (sqlc.arg('last_outcome')::text = '' OR last_outcome = sqlc.arg('last_outcome'));
+
+-- The outcome summary (GET /campaigns/{campaignId}/outcome-summary). Nothing
+-- is kept as a running total: every count is read here, grouped by the
+-- columns the listings filter on, so a count is the total of a listing with
+-- the same filter. The contacts by status, last_outcome and lead_intent
+-- (CountCampaignContacts); the attempts by outcome (CountCampaignAttempts).
+-- name: CampaignContactGroups :many
+SELECT status, last_outcome, lead_intent, count(*)::bigint AS n
+FROM campaign_contacts
+WHERE campaign_id = $1
+GROUP BY status, last_outcome, lead_intent;
+
+-- Only a FINISHED attempt has an outcome (ck_campaign_attempts_finished).
+-- name: CampaignAttemptOutcomes :many
+SELECT outcome, count(*)::bigint AS n
+FROM campaign_attempts
+WHERE campaign_id = $1 AND state = 'FINISHED'
+GROUP BY outcome;
+
+-- The callbacks the campaign's calls filed, by status. A campaign call files
+-- at most one, for a HIGH lead (InsertCallbackForCall), under its own call id,
+-- so they are found through the attempts' call ids and never by phone number.
+-- name: CampaignCallbackStatuses :many
+SELECT cb.status, count(*)::bigint AS n
+FROM callbacks cb
+JOIN campaign_attempts a ON a.call_id = cb.call_id
+WHERE a.campaign_id = $1
+GROUP BY cb.status;
