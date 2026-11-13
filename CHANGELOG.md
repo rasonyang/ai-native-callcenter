@@ -11,13 +11,26 @@ carries the one-line installer's files.
 
 - The built-in `hangup` now takes a required argument, `reason`:
   `CALLER_GOODBYE`, `CALLER_DECLINED_MORE_HELP`, `CALLER_ASKED_TO_END` or
-  `FLOW_INSTRUCTED`. A flow needs no change to keep working, but one whose
-  instructions order a hangup for the flow's own reasons (a wrong party, a
-  do-not-call request, a refusal to talk) should say "call hangup with reason
-  FLOW_INSTRUCTED", as the shipped flows now do. Flow simulator scenarios: a
-  `hangup` step gives the reason in `args`
+  `FLOW_INSTRUCTED`. A flow whose instructions order a hangup for the flow's
+  own reasons (a wrong party, a do-not-call request, a refusal to talk) should
+  say "call hangup with reason FLOW_INSTRUCTED", as the shipped flows now do,
+  and must declare the phase (next note). Flow simulator scenarios: a `hangup`
+  step gives the reason in `args`
   (`{"call": "hangup", "args": {"reason": "CALLER_GOODBYE"}}`); one without it
   now fails unless the step expects the refusal (`"isRefused": true`) (#484).
+- **Breaking for stored flows.** `hangup` accepts the reason `FLOW_INSTRUCTED`
+  only in a phase that declares `"isFlowHangupAllowed": true`. In any other
+  phase such a hangup is refused and the call goes on. A phase that orders a
+  `FLOW_INSTRUCTED` hangup, in its instruction or through a global rule, must
+  now declare the field, or the hangup is refused; there is no compatibility
+  default. Stored and published flows are not changed for you: add the field to
+  those phases, save and publish again. The shipped flows declare it
+  (`campaign_lead_followup` `talk`, `early_collections` `greet` and `remind`,
+  `plan_change` `need_transfer`), but a deployment that seeded them earlier
+  keeps its stored copies until it does the same. The field is refused on a
+  terminal phase. A simulator scenario whose `hangup` step gives
+  `FLOW_INSTRUCTED` in a phase without the field now fails unless the step
+  expects the refusal (#553).
 - No migration. API contract: additive only, an operation and a query
   parameter (see Added); `make api-breaking BASE=v0.8.3` reports no breaking
   change (#476).
@@ -33,8 +46,8 @@ carries the one-line installer's files.
   repeating the current question. The silence is counted as any other (#555).
   The guard judges only the bot's own words, refuses once per caller turn,
   cannot judge a `hangup` that arrives before the reply's first words (that
-  case is logged), and leaves a real goodbye alone ("No, that's all, bye"
-  still ends the call, with the closing line heard). A
+  case is logged, and counted, see below), and leaves a real goodbye alone
+  ("No, that's all, bye" still ends the call, with the closing line heard). A
   `hangup` without a valid `reason` is refused as well and changes nothing. The
   reason is written to the log and, for a call the bot hung up, to the CDR's
   `userData.botReason` (not on a call an agent placed to a bot number, whose
@@ -57,6 +70,19 @@ carries the one-line installer's files.
   can do the same (`docs/flow-authoring.md` 5.3). Flow simulator scenarios can
   check the reason of the last hangup that succeeded (`expect.hangupReason`)
   (#554).
+- A `hangup` whose reason is `FLOW_INSTRUCTED` is refused in a phase that does
+  not declare `isFlowHangupAllowed` (see Upgrade notes): the bot is told the
+  flow orders no ending there and to end the call only when the caller says
+  goodbye, declines more help or asks to end it. A bot that answered a
+  caller's question with a bare hangup and that reason ended the call on the
+  question; it now goes on. A `hangup` from a reply that had said nothing
+  before it, which the answer guard cannot judge, is counted in the new metric
+  `aicc_bot_wordless_hangups_total{reason,caller_turn,provider}`: `caller_turn`
+  is `QUESTION` when the caller's last words ended in a question, `OTHER` when
+  they did not, `UNKNOWN` when the call ended before they were transcribed,
+  with one `wordless hangup counted` log line each. The count changes nothing
+  about the call. On doubao every hangup is counted, since its tool call is a
+  turn of its own (#553).
 
 ### Added
 

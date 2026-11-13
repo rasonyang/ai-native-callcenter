@@ -137,6 +137,17 @@ func TestBrokenFlowsAreCaught(t *testing.T) {
 			wantScenario: "three silences close the call",
 			wantFailure:  `the call is in phase "greet", want "finish"`,
 		},
+		{
+			// #553: a phase that orders a FLOW_INSTRUCTED hangup must declare
+			// it, or the hangup is refused and nothing ends the call.
+			name: "a phase that orders a hangup no longer declares it",
+			break_: func(doc map[string]any) {
+				delete(nodeOf(doc, "greet"), "isFlowHangupAllowed")
+			},
+			wantScenario: "the answerer is not the owner",
+			wantFailure: `the hangup in phase "greet" gives reason FLOW_INSTRUCTED, but the phase does not ` +
+				`declare "isFlowHangupAllowed": true`,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

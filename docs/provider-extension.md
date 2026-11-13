@@ -356,7 +356,11 @@ both `response.audio_transcript.delta` and `response.output_audio_transcript.del
 doubao maps `response.output_text.delta`). A new client needs nothing more than
 to emit its deltas before the tool call they precede, in wire order. A client
 that synthesises a tool call as a turn of its own (doubao) never has words in
-that turn, so the guard never fires there; that is not a trait to set. The
+that turn, so the guard never fires there; that is not a trait to set. For the
+same reason every hangup on such a client counts in
+`aicc_bot_wordless_hangups_total` (issue [#553](https://github.com/rasonyang/ai-native-callcenter/issues/553)),
+which counts a hangup that ran from a response with no words, by what the caller
+last said; the count changes nothing about the call. The
 refusal is held and decided at the response's end only on a client that
 implements `QuietToolAnswerer` (below), and there it asks for no turn whenever
 its response spoke and nothing else in that response needs one (issue

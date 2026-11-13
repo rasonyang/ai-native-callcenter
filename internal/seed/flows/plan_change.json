@@ -196,6 +196,7 @@
         "zh": "这项业务无法自助办理(判定:{slots.plan_check.decision},原因:{slots.plan_check.reason})。向用户简短道歉并说明原因,然后立即调用 transfer_to_agent,queue 用 “support-zh”;summary 里写明判定结果、原因,以及是否有核验不通过或提交被拒的情况。如果转接被拒绝(例如非营业时间),向用户说明并主动提出留言,用户同意后调用 take_message,随后调用 hangup(reason 填 FLOW_INSTRUCTED)。",
         "en": "This cannot be handled by self-service (decision: {slots.plan_check.decision}, reason: {slots.plan_check.reason}). Apologise briefly and say why, then immediately call transfer_to_agent with queue \"support-en\"; put the decision and the reason in the summary, and say whether an identity check failed or a submission was refused. If the transfer is refused (for example outside business hours), explain and offer to take a message; if the caller agrees call take_message, then hangup with reason FLOW_INSTRUCTED."
       },
+      "isFlowHangupAllowed": true,
       "tools": [
         "take_message"
       ]

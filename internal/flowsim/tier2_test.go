@@ -452,3 +452,32 @@ func TestTier2RefusesAHangupWithNoReason(t *testing.T) {
 		t.Errorf("the refusal is not in the log:\n%s", log)
 	}
 }
+
+// #553: a FLOW_INSTRUCTED hangup in a phase that does not declare
+// isFlowHangupAllowed is refused, as the application refuses it: not a tool
+// that ran, no end of the call. The same bot then hanging up with the caller's
+// reason ends it.
+func TestTier2RefusesAFlowHangupWhereThePhaseOrdersNone(t *testing.T) {
+	backend := MockBackends()
+	spec := earlyCollections(t)
+	greet := spec.Nodes["greet"]
+	greet.IsFlowHangupAllowed = false
+	spec.Nodes["greet"] = greet
+	sc := scenarioOf(t, `{"name":"flow reason","caller":"92223333","callerPersona":{"goal":"g"},
+		"model":{"ending":"hangup"}}`)
+	bot := queue(tool("hangup", `{"reason":"FLOW_INSTRUCTED"}`), text("Is there anything else?"),
+		tool("hangup", `{"reason":"CALLER_DECLINED_MORE_HELP"}`), text("bye"))
+	r := RunModel(context.Background(), spec, backend,
+		ModelConfig{Bot: bot, Caller: queue(text("no, that's all")), Runs: 1, MaxCallerTurns: 3}, []Scenario{sc})[0]
+	run := r.Runs[0]
+	if !run.Passed() {
+		t.Fatalf("the run failed: %s\n%s", run.Failure, strings.Join(run.Log, "\n"))
+	}
+	if got := strings.Join(run.ToolsRun, ","); got != "hangup" {
+		t.Errorf("tools run = %s, want the one hangup with the caller's reason", got)
+	}
+	log := strings.Join(run.Log, "\n")
+	if !strings.Contains(log, `TOOL hangup({"reason":"FLOW_INSTRUCTED"}) -> {"error":"the call was not ended`) {
+		t.Errorf("the refusal is not in the log:\n%s", log)
+	}
+}

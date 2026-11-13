@@ -179,6 +179,14 @@ func (e *Engine) toolPhase() Node {
 	return e.current
 }
 
+// isFlowHangupAllowed reports whether the phase a tool call is judged in
+// (toolPhase, as the allowlist is) lets the flow order a hangup
+// (Node.IsFlowHangupAllowed), and names that phase.
+func (e *Engine) isFlowHangupAllowed() (isAllowed bool, phase string) {
+	node := e.toolPhase()
+	return node.IsFlowHangupAllowed, node.id
+}
+
 // CanMoveOnTool reports whether a result of the tool could move the call to
 // another phase: some rule of the phase the tool is judged in, or a flow-wide
 // one, fires on that tool's result and leads somewhere else. It looks at the

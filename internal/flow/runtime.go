@@ -397,6 +397,14 @@ func hangupReason(args map[string]any) string {
 	return strings.ToUpper(strings.TrimSpace(stringArg(args, "reason")))
 }
 
+// ParseHangupReason is the reason of a hangup's arguments, as the runtime
+// judges and records it (trimmed and upper-cased, empty when there is none),
+// for the application and the flow simulator, which see the arguments as the
+// model sent them.
+func ParseHangupReason(arguments string) string {
+	return hangupReason(parseArguments(arguments))
+}
+
 // isHangupReasonJudged reports whether a hangup made now has its reason judged:
 // the call is not in a terminal phase, and its ending is not already under way
 // (EndingState). Either way the closing paths answer a hangup as they did
@@ -418,8 +426,15 @@ func (r *Runtime) isHangupReasonJudged() bool {
 // logging anything. The flow simulator asks it before the call, as it asks
 // IsToolAllowed.
 func (r *Runtime) IsHangupReasonRefused(arguments string) bool {
-	return r.isHangupReasonJudged() &&
-		!slices.Contains(HangupReasons, hangupReason(parseArguments(arguments)))
+	if !r.isHangupReasonJudged() {
+		return false
+	}
+	reason := ParseHangupReason(arguments)
+	if !slices.Contains(HangupReasons, reason) {
+		return true
+	}
+	isAllowed, _ := r.engine.isFlowHangupAllowed()
+	return reason == HangupFlowInstructed && !isAllowed
 }
 
 // refuseHangupReason judges hangup's reason (#484). A hangup with no reason, or
@@ -430,11 +445,22 @@ func (r *Runtime) IsHangupReasonRefused(arguments string) bool {
 // moves to the goodbye on any hangup result does not move on a refused one. A
 // stray argument beside the reason (isFarewellSpoken, from a model that still
 // believes in it) is ignored.
+//
+// FLOW_INSTRUCTED is refused the same way in a phase that does not declare
+// isFlowHangupAllowed (#553, refuseFlowInstructed). It is judged in the phase
+// the tool batch was made in, as the allowlist is: a move made earlier in the
+// same response neither grants it nor takes it away.
 func (r *Runtime) refuseHangupReason(args map[string]any) (output string, isRefused bool) {
 	if !r.isHangupReasonJudged() {
 		return "", false
 	}
 	reason := hangupReason(args)
+	if reason == HangupFlowInstructed {
+		if isAllowed, phase := r.engine.isFlowHangupAllowed(); !isAllowed {
+			return r.refuseFlowInstructed(phase), true
+		}
+		return "", false
+	}
 	if slices.Contains(HangupReasons, reason) {
 		return "", false
 	}
@@ -453,6 +479,36 @@ func (r *Runtime) refuseHangupReason(args map[string]any) (output string, isRefu
 		}
 	}
 	return Failed(message, r.phasePreamble()+r.engine.Instruction()).asToolOutput(), true
+}
+
+// refuseFlowInstructed is the answer to a hangup with reason FLOW_INSTRUCTED in
+// a phase that does not declare isFlowHangupAllowed (#553): the flow orders no
+// ending here, so the one reason that needs no act of the caller does not
+// apply. On qwen flash a probe flow had the model answer a caller's question
+// with a hangup and nothing else, reason FLOW_INSTRUCTED; the answer guard,
+// which judges the bot's words, had none to judge.
+//
+// It is refused like a reason outside the enum: ok=0, the current phase's
+// instruction as the way on, nothing run. The error says the call goes on,
+// to answer or carry on with the caller, and to end the call only on one of
+// the caller's three reasons, which it names. It does not name FLOW_INSTRUCTED
+// again: a refusal that offered it back would invite the same call. phase is
+// the phase the call was judged in, for the log.
+func (r *Runtime) refuseFlowInstructed(phase string) string {
+	r.log.Info("hangup refused: the phase does not let the flow order a hangup", "tool", ToolHangup,
+		"node", phase, "reason", HangupFlowInstructed)
+	message := "the call was not ended: the flow does not order an ending in this phase. " +
+		"Answer the caller, or carry on with them where you were. Call " + ToolHangup +
+		" only when the caller says goodbye (reason " + HangupCallerGoodbye + "), says they need " +
+		"nothing more after you asked whether there is anything else (" + HangupCallerDeclinedMoreHelp +
+		"), or asks to end the call (" + HangupCallerAskedToEnd + ")"
+	if r.engine.Lang() == LangZH {
+		message = "通话没有结束：当前环节的流程没有要求结束通话。回答来电者，或者接着刚才的话题继续和对方交谈。" +
+			"只有在来电者道别（reason 填 " + HangupCallerGoodbye + "）、你问过还有没有其他需要而对方说没有了（" +
+			HangupCallerDeclinedMoreHelp + "）、或者来电者要求结束通话（" + HangupCallerAskedToEnd +
+			"）时，才调用 " + ToolHangup
+	}
+	return Failed(message, r.phasePreamble()+r.engine.Instruction()).asToolOutput()
 }
 
 // CanMoveOnTool is Engine.CanMoveOnTool for a tool the phase allows. A tool the

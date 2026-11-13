@@ -66,6 +66,7 @@
         "zh": "开场白已经报过号码尾数,并问过对方是不是机主本人:不要重复、改动或补充任何号码数字。根据对方的回答处理:对方确认是机主本人,立即调用 bill_lookup 查询账单。对方不是本人:不透露任何信息,不要自己道歉或道别,立即调用 hangup(reason 填 FLOW_INSTRUCTED),致歉和结束语由系统说。对方明确表示不想聊、不愿继续通话:不要自己道别,也不要追问,立即调用 hangup(reason 填 FLOW_INSTRUCTED),结束语由系统说。对方问你们是谁、有什么事:用一句话简短回答,不提账单和金额,然后再问一次对方是不是机主本人。对方的话听不清、只有一两个字,或者没有回答这个问题:直接再问一次对方是不是机主本人。确认身份之前不要问“有什么可以帮您”,也不要报任何号码。",
         "en": "The opening line has already named the number's last digits and asked whether you are speaking with the account holder: never repeat, change or add to any digits of a number. Go by the caller's answer. If they confirm they are the account holder: call bill_lookup immediately. If the answerer is not the account holder: disclose nothing and call hangup immediately with reason FLOW_INSTRUCTED, without apologizing or saying goodbye yourself; the apology and goodbye are spoken for you. If they say they do not want to talk or continue the call: do not say goodbye yourself and do not ask anything more; call hangup immediately with reason FLOW_INSTRUCTED, the closing line is spoken for you. If they ask who is calling or why: answer in one short sentence without mentioning the bill or any amount, then ask again whether you are speaking with the account holder. If their answer is unclear, only a word or two, or does not answer the question: just ask again whether you are speaking with the account holder. Until they have confirmed, never ask how you can help, and never say any number."
       },
+      "isFlowHangupAllowed": true,
       "tools": [
         "bill_lookup"
       ],
@@ -98,6 +99,7 @@
         "zh": "友好提醒:您有一笔 {slots.bill_lookup.amount} 元的账单,应缴日期是 {slots.bill_lookup.due_date},目前已过期 {slots.bill_lookup.days_overdue} 天,可能是忘记缴了。询问用户大概什么时候方便处理。用户给出时间:复述确认后调用 promise_record 记录。用户表示已缴、金额不对或有其它异议:不要争辩,简要确认异议内容后调用 dispute_record 记录。用户明确拒绝沟通:不纠缠,立即调用 hangup(reason 填 FLOW_INSTRUCTED),不要自己道别;结束语(含缴费渠道提示)由系统说。",
         "en": "Friendly reminder: there is a bill of {slots.bill_lookup.amount} yuan due on {slots.bill_lookup.due_date}, now {slots.bill_lookup.days_overdue} days overdue — likely just an oversight (translate dates to English naturally). Ask when it would be convenient to settle it. If the caller gives a time: restate it, confirm, and call promise_record. If they say it is wrong, already paid, or dispute anything: do not argue — summarize the dispute briefly and call dispute_record. If they refuse to engage: do not push; call hangup immediately with reason FLOW_INSTRUCTED, without saying goodbye yourself; the closing line, which mentions the app and service centers, is spoken for you."
       },
+      "isFlowHangupAllowed": true,
       "tools": [
         "promise_record",
         "dispute_record"

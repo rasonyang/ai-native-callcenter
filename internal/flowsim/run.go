@@ -229,9 +229,17 @@ func (r *runner) call(name string, args map[string]any) error {
 		}
 	} else if name == flow.ToolHangup && r.runtime.IsHangupReasonRefused(string(encoded)) {
 		// hangup takes a required reason (#484); one without it is refused
-		// and runs nothing, as the application refuses it.
+		// and runs nothing, as the application refuses it. So is
+		// FLOW_INSTRUCTED in a phase that does not let the flow order a
+		// hangup (#553).
 		r.lastRefused = true
 		if !r.expectsRefusal() {
+			if flow.ParseHangupReason(string(encoded)) == flow.HangupFlowInstructed {
+				return fmt.Errorf("the hangup in phase %q gives reason %s, but the phase does not declare "+
+					"\"isFlowHangupAllowed\": true, so it is refused and nothing ends the call. Declare it on "+
+					"the phase if its instructions order the hangup, give one of the caller's reasons, or mark "+
+					"the step \"isRefused\"", node, flow.HangupFlowInstructed)
+			}
 			return fmt.Errorf("the hangup in phase %q has no valid reason (args %s), so it is refused and "+
 				"nothing ends the call. Give it \"args\": {\"reason\": ...}, one of %s, or mark the step \"isRefused\"",
 				node, encoded, strings.Join(flow.HangupReasons, ", "))

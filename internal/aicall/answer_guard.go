@@ -45,9 +45,14 @@ import (
 // the response's transcript as it stood when the call arrived on the wire
 // (Event.soFar, read at emit like the cut of #403). Its blind spot is a
 // response whose call arrives before any of its words: there is nothing to
-// judge and the hangup passes. A hangup that passes with audio of its own
-// queued and no words yet is logged, because that order is what the live round
-// needs to count.
+// judge and the hangup passes, logged whether or not the response had queued
+// audio. Two things stand there since #553. The runtime refuses the reason
+// FLOW_INSTRUCTED in a phase that does not declare isFlowHangupAllowed, so the
+// one reason that needs no act of the caller cannot end a call the flow did not
+// order ended (flow.Runtime.refuseFlowInstructed). A wordless hangup that runs
+// anyway, with a caller's reason the caller may never have given, is counted
+// by what the caller last said (wordless_hangup.go); the count changes nothing
+// about the call.
 //
 // It does not judge:
 //
@@ -74,10 +79,15 @@ import (
 const answerGuardMinHalfWords = 8
 
 // answerGuard is the guard's state across one call, owned by drive: whether it
-// has refused since the caller last spoke with words, and the dead air a quiet
-// refusal after a statement left owed the anything-else cue.
+// has refused since the caller last spoke with words, the dead air a quiet
+// refusal after a statement left owed the anything-else cue, and the count of
+// the hangups it had no words to judge.
 type answerGuard struct {
 	isSpent bool
+	// wordless counts the hangups whose response had said nothing (#553,
+	// wordless_hangup.go). drive gives it the provider's name and the call's
+	// log.
+	wordless wordlessHangups
 	// anythingElse is the turn whose answer the owed cue follows, and the
 	// phase it was given in; turn zero is none. It is for the next dead air
 	// only, and is dropped before it by anything that makes the answer not the
@@ -106,13 +116,19 @@ type answerGuard struct {
 }
 
 // onCallerWords is a final caller transcript with words: the guard may refuse
-// again, and the caller is not silent.
+// again, the caller is not silent, and a wordless hangup waiting for the
+// caller's words is counted.
 func (g *answerGuard) onCallerWords(text string) {
 	if strings.TrimSpace(text) != "" {
 		g.isSpent = false
 		g.forgetAnythingElse()
+		g.wordless.onCallerWords(text)
 	}
 }
+
+// onCallerSpeech is the caller beginning to speak (CALLER_SPEECH): the words of
+// their newest turn are owed until its transcript arrives.
+func (g *answerGuard) onCallerSpeech() { g.wordless.onCallerSpeech() }
 
 // onCallerActed is a keypress, or a barge-in over the bot.
 func (g *answerGuard) onCallerActed() { g.forgetAnythingElse() }
@@ -172,8 +188,9 @@ func anythingElseCue(lang string) string {
 
 // refusesHangup decides whether the hangup this TOOL_CALL asks for is refused
 // as made while answering the caller, and logs the decisions that matter: a
-// refusal, a pass because the guard was spent, and a pass on an empty snapshot
-// over audio the response had already queued.
+// refusal, a pass because the guard was spent, and a pass on an empty snapshot,
+// with or without audio the response had already queued (the guard's blind
+// spot; the runtime still judges the reason, FLOW_INSTRUCTED included).
 func (o *Orchestrator) refusesHangup(event Event, guard *answerGuard, runtime *flow.Runtime,
 	actions *callActions, log *slog.Logger) bool {
 
@@ -187,10 +204,8 @@ func (o *Orchestrator) refusesHangup(event Event, guard *answerGuard, runtime *f
 	fields := []any{"turn", event.Turn, "textRunes", utf8.RuneCountInString(text),
 		"turnAudioMs", soFar.audio.Milliseconds(), "queuedMs", soFar.queued.Milliseconds()}
 	if text == "" {
-		if soFar.audio > 0 {
-			log.Info("a hangup arrived before any words of its response, with its audio already queued; "+
-				"the answer guard has nothing to judge and lets it through", fields...)
-		}
+		log.Info("a hangup arrived before any words of its response; "+
+			"the answer guard has nothing to judge and lets it through", fields...)
 		return false
 	}
 	if !isSubstantiveAnswer(text) {

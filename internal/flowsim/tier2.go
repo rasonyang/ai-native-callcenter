@@ -313,7 +313,8 @@ func (m *modelRun) botTurn(ctx context.Context) error {
 		for _, call := range resp.ToolCalls {
 			// A refused call is not a tool that ran: one outside the phase,
 			// record_lead in a phase that declares its lead, and a hangup with
-			// no valid reason (#484).
+			// no valid reason (#484) or with FLOW_INSTRUCTED in a phase that
+			// does not let the flow order one (#553).
 			isAllowed := m.runtime.IsToolAllowed(call.Name) &&
 				!(call.Name == flow.ToolRecordLead && m.runtime.IsLeadSetByPhase()) &&
 				!(call.Name == flow.ToolHangup && m.runtime.IsHangupReasonRefused(call.Arguments))

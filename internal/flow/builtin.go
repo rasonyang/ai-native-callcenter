@@ -41,7 +41,9 @@ var LeadIntents = []string{LeadHigh, LeadMedium, LeadLow, LeadNone, LeadDoNotCal
 // Hangup reasons, the values hangup's reason argument accepts (#484). The model
 // says why it ends the call, in one of these words. The reason is an audit of
 // that choice, kept in the log and the call's record; it claims nothing about
-// what was said or heard, and nothing but its presence is judged.
+// what was said or heard. What is judged is its presence, and where
+// FLOW_INSTRUCTED may be given (#553): only in a phase that declares
+// Node.IsFlowHangupAllowed.
 const (
 	// HangupCallerGoodbye: the caller said goodbye.
 	HangupCallerGoodbye = "CALLER_GOODBYE"
@@ -53,7 +55,9 @@ const (
 	// someone else they were looking for).
 	HangupCallerAskedToEnd = "CALLER_ASKED_TO_END"
 	// HangupFlowInstructed: the current phase's instructions say to end the
-	// call now (a wrong party, a DO_NOT_CALL, a refusal to talk).
+	// call now (a wrong party, a DO_NOT_CALL, a refusal to talk). It needs no
+	// act of the caller, so it is accepted only in a phase that declares
+	// Node.IsFlowHangupAllowed and refused anywhere else (#553).
 	HangupFlowInstructed = "FLOW_INSTRUCTED"
 )
 
@@ -117,10 +121,11 @@ type MessageRequest struct {
 // carries no claim about speech (#441).
 type HangupRequest struct {
 	// Reason is why the model ends the call: one of HangupReasons, upper-cased
-	// and trimmed, once the runtime has judged it (#484). A hangup over an
-	// ending already under way, or in a terminal phase, is not judged (the
-	// closing paths answer it as they always did), and carries whatever the
-	// model sent, possibly nothing.
+	// and trimmed, once the runtime has judged it (#484), and FLOW_INSTRUCTED
+	// only from a phase that declares Node.IsFlowHangupAllowed (#553). A hangup
+	// over an ending already under way, or in a terminal phase, is not judged
+	// (the closing paths answer it as they always did), and carries whatever
+	// the model sent, possibly nothing.
 	Reason string
 }
 
@@ -276,7 +281,8 @@ func builtinSchemas(lang string, queues []string) map[string]Tool {
 	// though the caller was answering the greeting's question, not asking one.
 	hangupDescription := "End the call. Call it only when the caller has said goodbye, has " +
 		"asked to end the call, or has said they need nothing more after you asked whether " +
-		"there is anything else, or when your current instructions tell you to end the call. " +
+		"there is anything else, or when the instructions of the current phase tell you to end " +
+		"the call. " +
 		"When the caller says this call is a mistake (they have the wrong number, did not mean " +
 		"to call, or were looking for someone else), they are asking to end it: call it " +
 		"straight away with reason CALLER_ASKED_TO_END, saying nothing first, with no " +
@@ -300,7 +306,7 @@ func builtinSchemas(lang string, queues []string) map[string]Tool {
 			"工具返回后再按提示播报转接话术。"
 		messageDescription = "记录留言与回电号码，用于无人接听或非营业时间。"
 		hangupDescription = "结束通话。只在以下情况调用：来电者已经道别；来电者要求结束通话；" +
-			"你问过还有没有其他需要，来电者说没有了；或者当前指令要求你结束通话。" +
+			"你问过还有没有其他需要，来电者说没有了；或者当前环节的指令要求你结束通话。" +
 			"来电者说这通电话打错了（拨错号码、不小心打来，或者要找的是别人），就是要求结束通话：" +
 			"直接调用，reason 用 CALLER_ASKED_TO_END，调用前什么都不要说，" +
 			"不要先说“没关系”这类的话，也不要再问有什么可以帮您。" +
@@ -349,17 +355,21 @@ func builtinSchemas(lang string, queues []string) map[string]Tool {
 
 // hangupParameters is hangup's schema: the one required argument, reason, an
 // enum of HangupReasons with each value's meaning, in the call's language.
+// FLOW_INSTRUCTED is described as what it is accepted for, a phase whose
+// instructions order the ending (#553), and not as a way to end a
+// conversation the caller has not ended: that is the hangup it is refused for.
 func hangupParameters(isZH bool) json.RawMessage {
 	description := "Why the call ends. CALLER_GOODBYE: the caller said goodbye. " +
 		"CALLER_DECLINED_MORE_HELP: you asked whether they need anything else and they said no. " +
 		"CALLER_ASKED_TO_END: the caller asked to end the call, or said this call is a mistake " +
 		"(the wrong number, a call they did not mean to make, someone else they were looking for). " +
-		"FLOW_INSTRUCTED: your current instructions tell you to end the call now."
+		"FLOW_INSTRUCTED: only when the instructions of the current phase order you to end the call now; " +
+		"never to end a conversation the caller has not ended."
 	if isZH {
 		description = "结束通话的原因。CALLER_GOODBYE：来电者道别了。" +
 			"CALLER_DECLINED_MORE_HELP：你问过还有没有其他需要，来电者说没有了。" +
 			"CALLER_ASKED_TO_END：来电者要求结束通话，或者说这通电话打错了（拨错号码、不小心打来、要找的是别人）。" +
-			"FLOW_INSTRUCTED：当前指令要求你现在结束通话。"
+			"FLOW_INSTRUCTED：只在当前环节的指令要求你现在结束通话时使用；来电者没有结束对话时不要用它。"
 	}
 	schema, err := json.Marshal(map[string]any{
 		"type": "object",

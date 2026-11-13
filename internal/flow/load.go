@@ -192,6 +192,9 @@ func (s *Spec) validate() error {
 		if node.IsCallerNext && !node.Announce.IsEmpty() {
 			report("phase %q declares isCallerNext but has an announce: the line is the next turn, not the caller's", id)
 		}
+		if node.IsFlowHangupAllowed && node.IsTerminal {
+			report("phase %q is terminal but declares isFlowHangupAllowed: a hangup's reason is not judged in a terminal phase", id)
+		}
 		s.validateTransitions("phase "+id, node.Transitions, &problems)
 		if node.Lead != nil {
 			validateDeclaredLead(id, node.Lead, report)
