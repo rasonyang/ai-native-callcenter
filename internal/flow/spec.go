@@ -215,6 +215,16 @@ type Node struct {
 	// turn on every result. Rejected on a terminal phase and on a phase with an
 	// announce, which both owe the caller a turn of their own.
 	IsCallerNext bool `json:"isCallerNext,omitempty"`
+	// IsFlowHangupAllowed says the flow may order a hangup in this phase: its
+	// instruction, or a global rule that applies here, tells the model to end
+	// the call for the flow's own reasons (a wrong party, a do-not-call
+	// request, a refusal to talk). Only here does hangup accept the reason
+	// FLOW_INSTRUCTED; in any other phase a hangup with that reason is refused
+	// as a conversation and runs nothing (#553), because it is the one reason
+	// that needs no act of the caller, and so the one a wrong hangup carries.
+	// Absent means not allowed. Rejected on a terminal phase, where a hangup's
+	// reason is not judged.
+	IsFlowHangupAllowed bool `json:"isFlowHangupAllowed,omitempty"`
 	// Lead is the campaign lead the call records on entering this phase
 	// (DeclaredLead). Optional, and ignored on a call that is not a campaign
 	// call.

@@ -52,10 +52,22 @@ func (a *underwayActions) IsEndingUnderway() bool {
 	return a.isUnderway
 }
 
+// declaredReasonFlow is reasonFlow with talk declaring that the flow may order
+// a hangup there (#553), so that FLOW_INSTRUCTED is accepted in it.
+var declaredReasonFlow = strings.Replace(reasonFlow,
+	`"talk": {"instruction": "Help the caller.", "tools": []}`,
+	`"talk": {"instruction": "Help the caller.", "tools": [], "isFlowHangupAllowed": true}`, 1)
+
 // reasonRuntime is a runtime on reasonFlow whose log is kept.
 func reasonRuntime(t *testing.T, actions Actions, lang string) (*Runtime, *bytes.Buffer) {
 	t.Helper()
-	spec, err := Load([]byte(reasonFlow))
+	return reasonRuntimeOn(t, reasonFlow, actions, lang)
+}
+
+// reasonRuntimeOn is reasonRuntime on a flow of the test's own.
+func reasonRuntimeOn(t *testing.T, flowJSON string, actions Actions, lang string) (*Runtime, *bytes.Buffer) {
+	t.Helper()
+	spec, err := Load([]byte(flowJSON))
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
@@ -249,12 +261,14 @@ func TestAHangupWithoutAValidReasonIsRefusedAndRunsNothing(t *testing.T) {
 	}
 }
 
+// In a phase that lets the flow order a hangup, every reason is accepted;
+// elsewhere FLOW_INSTRUCTED is not (#553, below).
 func TestEveryReasonIsAcceptedAndReachesTheApplication(t *testing.T) {
 	t.Parallel()
 	for _, value := range HangupReasons {
 		for _, written := range []string{value, " " + strings.ToLower(value) + " "} {
 			actions := &fakeActions{}
-			r, logs := reasonRuntime(t, actions, LangEN)
+			r, logs := reasonRuntimeOn(t, declaredReasonFlow, actions, LangEN)
 			if r.IsHangupReasonRefused(`{"reason":"` + written + `"}`) {
 				t.Errorf("%q: IsHangupReasonRefused says it would be refused", written)
 			}

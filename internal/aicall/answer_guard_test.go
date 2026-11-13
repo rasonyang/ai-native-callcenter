@@ -287,7 +287,8 @@ func TestAHeldRefusalThatCannotGoQuietAsksForATurn(t *testing.T) {
 
 // Qwen's other order: the call comes before any of the response's words. The
 // guard has nothing to judge and lets it through: this is its blind spot, and
-// the pass is logged when the response had already queued audio.
+// the pass is logged whether or not the response had already queued audio
+// (#553: before, a response with no audio left no line at all).
 func TestAHangupBeforeAnyWordsPasses(t *testing.T) {
 	for name, hasAudio := range map[string]bool{"with audio queued": true, "with nothing yet": false} {
 		t.Run(name, func(t *testing.T) {
@@ -305,8 +306,8 @@ func TestAHangupBeforeAnyWordsPasses(t *testing.T) {
 			if h.node() != "farewell" || !h.actions.isArmed() {
 				t.Errorf("node %q, armed %v: want the hangup run", h.node(), h.actions.isArmed())
 			}
-			if got := strings.Contains(h.logs.String(), guardBlindLog); got != hasAudio {
-				t.Errorf("blind-spot line logged = %v, want %v:\n%s", got, hasAudio, h.logs.String())
+			if !strings.Contains(h.logs.String(), guardBlindLog) {
+				t.Errorf("the blind spot's pass was not logged:\n%s", h.logs.String())
 			}
 			if strings.Contains(h.logs.String(), guardRefusedLog) {
 				t.Error("the guard refused a hangup with nothing said before it")
@@ -508,10 +509,12 @@ func TestAHangupWithoutAReasonIsRefusedThroughTheCall(t *testing.T) {
 	}
 }
 
+// In a phase that lets the flow order a hangup (#553), every reason ends the
+// call; the hangup said nothing, so it is counted by the caller's last words.
 func TestEveryHangupReasonEndsTheCallAndReachesTheRecord(t *testing.T) {
 	for _, reason := range flow.HangupReasons {
 		t.Run(reason, func(t *testing.T) {
-			h := newGuardHarness(t, provider.OpenAIProfile(), "en", true)
+			h := newGuardHarnessWith(t, provider.OpenAIProfile(), declaredGuardFlow, "en", true, quietConfig())
 			h.callerSays("No, that's all, thanks.")
 			h.started()
 			// A stray argument beside the reason is ignored.
@@ -535,6 +538,9 @@ func TestEveryHangupReasonEndsTheCallAndReachesTheRecord(t *testing.T) {
 			logs := h.logs.String()
 			if !strings.Contains(logs, `msg="tool ran"`) || !strings.Contains(logs, "reason="+reason) {
 				t.Errorf("the reason is not in the log:\n%s", logs)
+			}
+			if !strings.Contains(logs, wordlessCountedLog+`" reason=`+reason+" callerTurn=OTHER") {
+				t.Errorf("the wordless hangup was not counted as OTHER:\n%s", logs)
 			}
 		})
 	}

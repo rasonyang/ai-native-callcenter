@@ -588,8 +588,12 @@ func (o *Orchestrator) drive(ctx context.Context, session *Session,
 	// while it was being made reports no audio (the flush emptied the queue),
 	// yet it spoke: closeToolBatch needs to know.
 	var bargedTurn int
-	// guard is the answer guard of #484 (answer_guard.go).
-	var guard answerGuard
+	// guard is the answer guard of #484 (answer_guard.go), with the count of
+	// the hangups it has no words to judge (#553, wordless_hangup.go). A
+	// wordless hangup still waiting for the caller's words when the call ends
+	// is counted then, whichever way drive returns.
+	guard := answerGuard{wordless: wordlessHangups{providerName: o.cfg.Profile.Name, log: log}}
+	defer guard.wordless.onCallEnded()
 	events := session.Events()
 	for {
 		select {
@@ -658,6 +662,7 @@ func (o *Orchestrator) drive(ctx context.Context, session *Session,
 
 			case EventTypeCallerSpeech:
 				fw.onCallerSpoke()
+				guard.onCallerSpeech()
 
 			case EventTypeBotSaid:
 				// Words of a muted turn (answerToolCall) were not heard: not
@@ -983,15 +988,21 @@ const hangupCauseMediaOrProvider = "MEDIA_OR_PROVIDER_FAILURE"
 // that cannot be held goes at once, the ordinary way, and tells the model to
 // ask whether anything else is needed. The guard is judged first; a hangup it
 // lets through has its reason judged in Dispatch
-// (flow.Runtime.refuseHangupReason).
+// (flow.Runtime.refuseHangupReason: FLOW_INSTRUCTED only where the phase lets
+// the flow order a hangup, #553). One that had no words to judge and runs is
+// counted by what the caller last said (wordless_hangup.go).
 func (o *Orchestrator) answerToolCall(ctx context.Context, event Event, batch *toolBatch,
 	guard *answerGuard, session *Session, runtime *flow.Runtime, actions *callActions,
 	recorder *callRecorder, log *slog.Logger) {
 
 	recorder.toolCall(event.ToolName, event.ToolArgs)
 	// Asked before the call runs: Dispatch can move the phase, and the tool is
-	// judged in the phase it was called in.
+	// judged in the phase it was called in. So is whether this is a hangup the
+	// guard has no words to judge, counted if it runs (#553), and the phase the
+	// call is in as it arrives, which the count names.
 	isSlotTool := runtime.IsSlotTool(event.ToolName)
+	isWordless := isWordlessHangup(event, runtime, actions)
+	node := runtime.Engine().NodeID()
 	var output, moved string
 	isGuardRefusal := false
 	switch {
@@ -1008,6 +1019,10 @@ func (o *Orchestrator) answerToolCall(ctx context.Context, event Event, batch *t
 		output = runtime.RefuseAsAcknowledgement(event.ToolName)
 	default:
 		output, moved = o.dispatch(ctx, event, batch, session, runtime, actions, log)
+		if isWordless && flow.IsToolOutputOK(output) {
+			// Counted, never acted on: the hangup runs as it would anyway.
+			guard.wordless.onHangupPassed(flow.ParseHangupReason(event.ToolArgs), event.Turn, node)
+		}
 	}
 
 	// Into a closing phase that has a line of its own, the line is the only

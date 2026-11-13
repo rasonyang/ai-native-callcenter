@@ -51,6 +51,7 @@ var (
 	botSessionLimits   metric.Int64Counter
 	botUnbacked        metric.Int64Counter
 	botClaimCues       metric.Int64Counter
+	botWordlessHangups metric.Int64Counter
 	botFirstMedia      metric.Int64Histogram
 	botFirstAudio      metric.Int64Histogram
 	botSlots           metric.Int64UpDownCounter
@@ -165,6 +166,15 @@ func init() {
 			"from the bot's own transcript, so a signal rather than proof; counted before "+
 			"anything acts on it, and labelled by provider to say whether one engine "+
 			"does it and the others do not."))
+	botWordlessHangups, _ = meter.Int64Counter("aicc_bot_wordless_hangups_total",
+		metric.WithDescription("Hangups the bot made in a response that had said nothing "+
+			"when the call arrived, and that ran (the call's ending was armed), by reason "+
+			"(the hangup's own), caller_turn (QUESTION: the caller's last words ended in a "+
+			"question; OTHER: they did not; UNKNOWN: the call ended before they were "+
+			"transcribed) and provider. The answer guard judges the bot's words and has none "+
+			"to judge here, so this is how often a hangup it cannot see follows a question. "+
+			"Read from the caller's transcript, so a signal rather than proof. On doubao a "+
+			"tool call is a turn of its own, so every hangup there counts."))
 	botClaimCues, _ = meter.Int64Counter("aicc_bot_claim_cues_total",
 		metric.WithDescription("Cues the platform sent after a bot turn claimed a lookup, "+
 			"transfer or message no tool call backed, by claim, provider, trigger "+
@@ -536,6 +546,34 @@ func RecordUnbackedClaim(claim, provider string) {
 	}
 	botUnbacked.Add(context.Background(), 1, metric.WithAttributes(
 		attribute.String("claim", claim), attribute.String("provider", provider)))
+}
+
+// What the caller's last turn was before a wordless hangup
+// (RecordWordlessHangup).
+const (
+	// CallerTurnQuestion: the caller's last words ended in a question.
+	CallerTurnQuestion = "QUESTION"
+	// CallerTurnOther: they did not.
+	CallerTurnOther = "OTHER"
+	// CallerTurnUnknown: the call ended before they were transcribed.
+	CallerTurnUnknown = "UNKNOWN"
+)
+
+// RecordWordlessHangup counts one hangup that ran from a response that had said
+// nothing when the call arrived (#553): the answer guard of #484 judges the
+// bot's words and had none, so nothing but the tool's description and the
+// flow's rules stood between a caller's question and the end of the call.
+// reason is the hangup's own (flow.HangupReasons), callerTurn what the caller
+// last said (CallerTurn*). It changes nothing about the call: what an operator
+// asks is how often it follows a question, on which engine and with which
+// reason, and the answer decides whether the platform must step in.
+func RecordWordlessHangup(reason, callerTurn, provider string) {
+	if botWordlessHangups == nil {
+		return
+	}
+	botWordlessHangups.Add(context.Background(), 1, metric.WithAttributes(
+		attribute.String("reason", reason), attribute.String("caller_turn", callerTurn),
+		attribute.String("provider", provider)))
 }
 
 // Outcome values of a claim cue (RecordClaimCue).

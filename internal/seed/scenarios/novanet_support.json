@@ -100,6 +100,19 @@
       "expect": {"path": ["welcome", "farewell"], "ending": "hangup", "toolsRun": ["hangup"]}
     },
     {
+      "name": "a hangup the flow did not order is refused: welcome does not declare isFlowHangupAllowed (#553)",
+      "lang": "zh",
+      "caller": "8005550110",
+      "steps": [
+        {"say": "宽带多少钱？"},
+        {"call": "hangup", "args": {"reason": "FLOW_INSTRUCTED"}, "expect": {"isRefused": true, "phase": "welcome",
+          "result": {"ok": "0"}}},
+        {"say": "好的，就这些，再见。"},
+        {"call": "hangup", "args": {"reason": "CALLER_GOODBYE"}, "expect": {"phase": "farewell"}}
+      ],
+      "expect": {"path": ["welcome", "farewell"], "ending": "hangup", "toolsRun": ["hangup"]}
+    },
+    {
       "name": "three silences end the call",
       "lang": "en",
       "caller": "8005550105",

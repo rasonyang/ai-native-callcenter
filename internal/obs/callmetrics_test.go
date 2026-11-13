@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 )
@@ -285,6 +286,49 @@ func TestTheEchoSuppressorCountsCallsByStateAndItsFrames(t *testing.T) {
 	} {
 		if d := got[key] - before[key]; d != want {
 			t.Errorf("%s moved by %d, want %d (all: %v)", key, d, want, got)
+		}
+	}
+}
+
+func TestAWordlessHangupIsCountedByReasonCallerTurnAndProvider(t *testing.T) {
+	reader := useTestReader()
+	read := func() map[string]int64 {
+		var rm metricdata.ResourceMetrics
+		if err := reader.Collect(context.Background(), &rm); err != nil {
+			t.Fatal(err)
+		}
+		out := map[string]int64{}
+		for _, sm := range rm.ScopeMetrics {
+			for _, m := range sm.Metrics {
+				if m.Name != "aicc_bot_wordless_hangups_total" {
+					continue
+				}
+				for _, dp := range m.Data.(metricdata.Sum[int64]).DataPoints {
+					var key []string
+					for _, name := range []string{"reason", "caller_turn", "provider"} {
+						v, _ := dp.Attributes.Value(attribute.Key(name))
+						key = append(key, v.AsString())
+					}
+					out[strings.Join(key, "/")] += dp.Value
+				}
+			}
+		}
+		return out
+	}
+	before := read()
+	RecordWordlessHangup("FLOW_INSTRUCTED", CallerTurnQuestion, "qwen")
+	RecordWordlessHangup("CALLER_GOODBYE", CallerTurnQuestion, "qwen")
+	RecordWordlessHangup("CALLER_GOODBYE", CallerTurnQuestion, "qwen")
+	RecordWordlessHangup("CALLER_GOODBYE", CallerTurnUnknown, "doubao")
+	after := read()
+	for key, want := range map[string]int64{
+		"FLOW_INSTRUCTED/QUESTION/qwen": 1,
+		"CALLER_GOODBYE/QUESTION/qwen":  2,
+		"CALLER_GOODBYE/UNKNOWN/doubao": 1,
+		"CALLER_GOODBYE/OTHER/qwen":     0,
+	} {
+		if got := after[key] - before[key]; got != want {
+			t.Errorf("%s gained %d, want %d (before %v, after %v)", key, got, want, before, after)
 		}
 	}
 }

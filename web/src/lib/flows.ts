@@ -77,6 +77,12 @@ export interface FlowNode {
    */
   isCallerNext?: boolean
   /**
+   * The flow may order a hangup in this phase: only here does hangup accept
+   * the reason FLOW_INSTRUCTED; elsewhere it is refused. Rejected on a terminal
+   * phase.
+   */
+  isFlowHangupAllowed?: boolean
+  /**
    * The campaign lead the call records on entering this phase, as a
    * record_lead call would. Ignored on a call that is not a campaign call.
    * While the call is in this phase the model's record_lead is refused.
