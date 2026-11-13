@@ -116,11 +116,15 @@ func assessSteppedContact(rv RegionView, cv ContactView, key string, dialogs []c
 		res.Attempts[1].RetryLatenessMs = &ms
 		col.That(late >= -inviteSlack, "the retry did not start before nextAttemptAt (it started %s after it)"+switchTime, late)
 		if len(dialogs) >= 2 {
-			gap := dialogs[1].InviteAt.Sub(dialogs[0].InviteAt)
-			gapMs := float64(gap.Milliseconds())
-			res.Attempts[1].InviteGapMs = &gapMs
-			col.That(gap >= RetryIntervalSec*time.Second-inviteSlack,
-				"the two INVITEs are at least the %d s retry interval apart (%s)", RetryIntervalSec, gap.Round(time.Millisecond))
+			// Read on the simulator's monotonic timeline: a step of the wall
+			// clock between the two INVITEs would move a wall-clock gap by
+			// its size (issue #515).
+			second, first := inviteMoment(dialogs[1]), inviteMoment(dialogs[0])
+			gapMs, wallMs := second.sinceMs(first), second.wallSinceMs(first)
+			res.Attempts[1].InviteGapMs, res.Attempts[1].InviteGapWallMs = &gapMs, &wallMs
+			col.That(gapMs >= durMs(RetryIntervalSec*time.Second-inviteSlack),
+				"the two INVITEs are at least the %d s retry interval apart (%.0f ms on the simulator's monotonic clock; wall clock %.0f ms)",
+				RetryIntervalSec, gapMs, wallMs)
 		}
 	}
 
@@ -335,16 +339,22 @@ func FirstAudioTable(rows []FirstAudioRow) string {
 // Without that, a platform that dialled nothing from the retry's due time on
 // would pass for one that skipped the number.
 //
-// Every ordering here is read on one clock, the host's wall clock, which the
-// driver, the simulator and the dialer share. The retry falls due
-// RetryIntervalSec after the callee's final response to attempt 1; the
-// listing is held to that response, not to the attempt's finishedAt or the
-// contact's nextAttemptAt, which are stamped from the switch's clock, which
-// part ways with the host's wall clock (issues #504, #506). Those two are only
-// printed, marked as switch time. A dialog with no final response fails each
-// check that needs it; nothing is skipped.
+// The retry falls due RetryIntervalSec after the callee's final response to
+// attempt 1, not after the attempt's finishedAt or the contact's
+// nextAttemptAt, which are stamped from the switch's clock (issues #504,
+// #506); those two are only printed, marked as switch time. Orders between
+// two of the simulator's events (the control's INVITE and the record's read
+// against the retry's due moment) are read on the simulator's monotonic
+// timeline (issue #515). That the listing came after the final response, and
+// after the INVITE, is not read on a clock at all: the driver lists only once
+// it has read attempt 1 finished, and the listing keeps what it read
+// (Listing.FirstAttempt); a finish with the cause the switch gives the
+// callee's response cannot precede that response. Whether the listing came
+// before the retry was due is read on the wall clock the driver and the
+// simulator share, with a minute of margin. A dialog with no final response
+// fails each check that needs it; nothing is skipped.
 func assessListedMidRun(rv RegionView, cv ContactView, key string, dialogs, control []calleesim.DialogRecord,
-	cdrs map[string][]api.CDR, calleeReadAt time.Time) ScenarioResult {
+	cdrs map[string][]api.CDR, calleeReadAt time.Time, calleeTakenMs float64) ScenarioResult {
 	cs := cv.Case
 	res := ScenarioResult{
 		Region: rv.Region.Code, ID: cs.ID, Kind: cs.Kind, Number: cv.Number, DialKey: key, Callee: cs.Callee,
@@ -378,13 +388,16 @@ func assessListedMidRun(rv RegionView, cv ContactView, key string, dialogs, cont
 
 	// The listing: after attempt 1, confirmed on the list, and before the
 	// retry came due; otherwise the case would not test what it claims to.
-	// Both moments are the callee's final response (simulator clock) and the
-	// retry interval after it.
+	// The due moment is the callee's final response plus the retry interval,
+	// on the simulator's wall clock (final, due) and on its monotonic timeline
+	// (dueMs).
 	var final, due time.Time
+	var dueMs float64
 	hasFinal := len(dialogs) > 0 && dialogs[0].Final != nil
 	if hasFinal {
 		final = dialogs[0].Final.SentAt
 		due = final.Add(RetryIntervalSec * time.Second)
+		dueMs = dialogs[0].Final.AfterStartMs + durMs(RetryIntervalSec*time.Second)
 	}
 	col.That(cv.Listing != nil, "the driver listed the number mid-run")
 	if l := cv.Listing; l != nil {
@@ -394,14 +407,18 @@ func assessListedMidRun(rv RegionView, cv ContactView, key string, dialogs, cont
 			col.That(margin > 0, "the number was listed %s before the retry came due (the callee's final response %s + %d s = %s, listed %s; the contact's nextAttemptAt reads %s [switch time])",
 				margin.Round(time.Millisecond), final.Format(time.RFC3339Nano), RetryIntervalSec, due.Format(time.RFC3339Nano),
 				l.ListedAt.Format(time.RFC3339Nano), l.NextAttemptAt.Format(time.RFC3339Nano))
-			col.That(!l.PostedAt.Before(final), "the number was listed at or after the callee's final response to attempt 1 (%s after the %d, simulator clock)",
-				l.PostedAt.Sub(final).Round(time.Millisecond), dialogs[0].Final.Status)
 		} else {
 			col.That(false, "the number was listed before the retry came due (the simulator recorded no final response to attempt 1, so the due moment is unknown)")
-			col.That(false, "the number was listed at or after the callee's final response to attempt 1 (the simulator recorded no final response)")
 		}
+		afterFinal, read := listedAfterFinal(cs, cv, dialogs)
+		wall := "the simulator recorded no final response"
+		if hasFinal {
+			wall = fmt.Sprintf("posted %s after the %d", l.PostedAt.Sub(final).Round(time.Millisecond), dialogs[0].Final.Status)
+		}
+		col.That(afterFinal, "the number was listed at or after the callee's final response to attempt 1: the driver had read attempt 1 finished with the cause the switch gives that response before it posted (%s; wall clock, not compared: %s)",
+			read, wall)
 		if len(dialogs) > 0 {
-			col.That(dialogs[0].InviteAt.Before(l.PostedAt), "the only INVITE (%s) came before the listing (%s)",
+			col.That(afterFinal, "the only INVITE (%s) came before the listing (%s): it is the one the callee answered with the response attempt 1 finished on, read before the listing was posted",
 				dialogs[0].InviteAt.Format(time.RFC3339Nano), l.PostedAt.Format(time.RFC3339Nano))
 		}
 	}
@@ -438,13 +455,16 @@ func assessListedMidRun(rv RegionView, cv ContactView, key string, dialogs, cont
 			col.That(false, "the control's second INVITE came at or after the moment %s's retry was due (the simulator recorded no final response to attempt 1)", cs.ID)
 			col.That(false, "the simulator's record was read after the retry came due (the simulator recorded no final response to attempt 1)")
 		default:
+			// Both on the simulator's monotonic timeline, with the wall
+			// clock's reading beside.
 			if len(control) == 2 {
-				late := control[1].InviteAt.Sub(due)
-				col.That(late >= -inviteSlack, "the control's second INVITE (%s) came at or after the moment %s's retry was due (%s after)",
-					control[1].InviteAt.Format(time.RFC3339Nano), cs.ID, late.Round(time.Millisecond))
+				lateMs := control[1].InviteAfterStartMs - dueMs
+				col.That(lateMs >= -durMs(inviteSlack), "the control's second INVITE (%s) came at or after the moment %s's retry was due (%.0f ms after, on the simulator's monotonic clock; wall clock %s after)",
+					control[1].InviteAt.Format(time.RFC3339Nano), cs.ID, lateMs, control[1].InviteAt.Sub(due).Round(time.Millisecond))
 			}
-			col.That(calleeReadAt.After(due),
-				"the simulator's record was read (%s) after the retry came due (%s)", calleeReadAt.Format(time.RFC3339Nano), due.Format(time.RFC3339Nano))
+			col.That(calleeTakenMs > dueMs,
+				"the simulator's record was read (%s) after the retry came due (%s): taken %.0f ms after the retry was due, on the simulator's monotonic clock; wall clock: read %s after it",
+				calleeReadAt.Format(time.RFC3339Nano), due.Format(time.RFC3339Nano), calleeTakenMs-dueMs, calleeReadAt.Sub(due).Round(time.Millisecond))
 		}
 	}
 
@@ -454,6 +474,43 @@ func assessListedMidRun(rv RegionView, cv ContactView, key string, dialogs, cont
 	}
 	res.Passed = len(res.Failures) == 0
 	return res
+}
+
+// listedAfterFinal judges, without a clock, whether a mid-run listing came at
+// or after the callee's final response to attempt 1. The driver and the
+// simulator are two processes, so their wall clocks are the only clock they
+// share, and it steps (issue #515). The order is causal instead: the driver
+// posts the listing only after it has read the contact's first attempt
+// FINISHED (listMidRun), and the platform finishes a refused attempt from the
+// switch's hangup, whose cause the switch has only once the callee's response
+// arrived. So the listing came after that response when the attempt the driver
+// had read is attempt 1, FINISHED with the step's outcome and cause, and the
+// simulator sent attempt 1's INVITE the response that cause stands for. read
+// describes what the driver had read, for the check's text.
+func listedAfterFinal(cs Case, cv ContactView, dialogs []calleesim.DialogRecord) (ok bool, read string) {
+	l := cv.Listing
+	if len(cs.Steps) != 1 || l == nil {
+		return false, "the case has no single step to hold the listing to"
+	}
+	st := cs.Steps[0]
+	want := fmt.Sprintf("want attempt 1 %s as %s/%s, the switch's reading of the callee's %d", attemptFinished, st.Outcome, st.Cause, st.SIPStatus)
+	sent := "the simulator sent no final response"
+	sentOK := len(dialogs) > 0 && dialogs[0].Final != nil && dialogs[0].Final.Status == st.SIPStatus
+	if len(dialogs) > 0 && dialogs[0].Final != nil {
+		sent = fmt.Sprintf("the simulator sent %d", dialogs[0].Final.Status)
+	}
+	a := l.FirstAttempt
+	if a == nil {
+		return false, want + "; the listing records no attempt read before it; " + sent
+	}
+	sameAttempt := len(cv.Attempts) > 0 && a.CallID == cv.Attempts[0].CallID
+	read = fmt.Sprintf("%s; read %s as %s/%s, call %s", want, a.State, deref(a.Outcome), deref(a.HangupCause), a.CallID)
+	if !sameAttempt {
+		read += ", not attempt 1's"
+	}
+	ok = sameAttempt && a.State == attemptFinished && st.Cause != "" &&
+		deref(a.Outcome) == st.Outcome && deref(a.HangupCause) == st.Cause && sentOK
+	return ok, read + "; " + sent
 }
 
 // assessSkippedAttempt checks the attempt the do-not-call sweep skipped: it

@@ -29,41 +29,30 @@ const (
 	MetricDialerBlocked = "aicc_dialer_admission_blocked_total"
 )
 
-// dialogEnd is when a dialog stopped holding a line: the BYE or CANCEL that
-// ended it, or the error response that refused it. ok is false for one that
-// has not ended.
-func dialogEnd(d calleesim.DialogRecord) (time.Time, bool) {
-	if d.End != nil {
-		return d.End.At, true
-	}
-	if d.Final != nil && d.Final.Status != 200 {
-		return d.Final.SentAt, true
-	}
-	return time.Time{}, false
-}
-
 // PeakConcurrent is the largest number of dialogs that were up at the same
-// moment, each from its INVITE to its end (dialogEnd). At one instant an end
-// is counted before a start, since a line handed back is free for the next
-// call. A dialog that never ended counts as up to the end of the record, and
-// unended says how many did.
+// moment, each from its INVITE to its end (dialogEnd), read on the
+// simulator's monotonic timeline: a step of the wall clock between one
+// dialog's end and the next one's INVITE would otherwise show them up
+// together. At one instant an end is counted before a start, since a line
+// handed back is free for the next call. A dialog that never ended counts as
+// up to the end of the record, and unended says how many did.
 func PeakConcurrent(dialogs []calleesim.DialogRecord) (peak, unended int) {
 	type edge struct {
-		at    time.Time
+		ms    float64
 		delta int
 	}
 	edges := make([]edge, 0, 2*len(dialogs))
 	for _, d := range dialogs {
-		edges = append(edges, edge{d.InviteAt, +1})
+		edges = append(edges, edge{d.InviteAfterStartMs, +1})
 		if end, ok := dialogEnd(d); ok {
-			edges = append(edges, edge{end, -1})
+			edges = append(edges, edge{end.ms, -1})
 		} else {
 			unended++
 		}
 	}
 	sort.SliceStable(edges, func(i, j int) bool {
-		if !edges[i].at.Equal(edges[j].at) {
-			return edges[i].at.Before(edges[j].at)
+		if edges[i].ms != edges[j].ms {
+			return edges[i].ms < edges[j].ms
 		}
 		return edges[i].delta < edges[j].delta
 	})
@@ -85,12 +74,13 @@ func downlinkPeak(d calleesim.DialogRecord) (float64, int) {
 	return peak, d.Downlink.Frames
 }
 
-func msSince(t0, t time.Time) float64 { return float64(t.Sub(t0).Milliseconds()) }
-
 func ptr[T any](v T) *T { return &v }
 
-// row condenses one call for the report.
-func row(region, id, number string, d *calleesim.DialogRecord, cdrs []api.CDR, t0 time.Time) CapacityRow {
+// row condenses one call for the report. Its times from the run's first
+// INVITE are wall-clock readings, reported only; its hold is read on the
+// simulator's monotonic clock (K3 asserts it), with the wall clock's reading
+// beside it.
+func row(region, id, number string, d *calleesim.DialogRecord, cdrs []api.CDR, t0 simMoment) CapacityRow {
 	r := CapacityRow{Region: region, ID: id, Number: number}
 	if len(cdrs) == 1 {
 		r.CallID = cdrs[0].CallID.String()
@@ -100,18 +90,18 @@ func row(region, id, number string, d *calleesim.DialogRecord, cdrs []api.CDR, t
 	if d == nil {
 		return r
 	}
-	r.InviteAtMs = msSince(t0, d.InviteAt)
-	if d.Final != nil {
+	r.InviteAtMs = inviteMoment(*d).wallSinceMs(t0)
+	if fin, ok := finalMoment(*d); ok {
 		r.FinalStatus = d.Final.Status
 		if d.Final.Status == 200 {
-			r.AnswerAtMs = ptr(msSince(t0, d.Final.SentAt))
+			r.AnswerAtMs = ptr(fin.wallSinceMs(t0))
 		}
 	}
 	if end, ok := dialogEnd(*d); ok {
-		r.EndAtMs = ptr(msSince(t0, end))
-		if d.Final != nil && d.Final.Status == 200 {
-			r.HoldMs = ptr(float64(end.Sub(d.Final.SentAt).Milliseconds()))
-		}
+		r.EndAtMs = ptr(end.wallSinceMs(t0))
+	}
+	if ms, wallMs, ok := holdMsOf(*d); ok {
+		r.HoldMs, r.HoldWallMs = ptr(ms), ptr(wallMs)
 	}
 	if d.End != nil {
 		r.EndedBy = d.End.By + " " + d.End.Method
@@ -120,24 +110,30 @@ func row(region, id, number string, d *calleesim.DialogRecord, cdrs []api.CDR, t
 	return r
 }
 
-// firstInvite is the earliest INVITE of the run, the zero of the report's
-// times.
-func firstInvite(v *RunView) time.Time {
-	var t0 time.Time
-	consider := func(t time.Time) {
-		if t0.IsZero() || t.Before(t0) {
-			t0 = t
+// firstInvite is the earliest INVITE of the run on the simulator's monotonic
+// timeline, the zero of the report's times.
+func firstInvite(v *RunView) simMoment {
+	var t0 simMoment
+	seen := false
+	consider := func(d calleesim.DialogRecord) {
+		if m := inviteMoment(d); !seen || m.before(t0) {
+			t0, seen = m, true
 		}
 	}
 	for _, d := range v.Dialogs {
-		consider(d.InviteAt)
+		consider(d)
 	}
 	for _, dc := range v.Direct {
 		if dc.Dialog != nil {
-			consider(dc.Dialog.InviteAt)
+			consider(*dc.Dialog)
 		}
 	}
 	return t0
+}
+
+// atMs prints a moment of the run on both clocks, from the run's first INVITE.
+func atMs(m, t0 simMoment) string {
+	return fmt.Sprintf("%.0f ms (wall clock %.0f ms)", m.sinceMs(t0), m.wallSinceMs(t0))
 }
 
 func metricDelta(v *RunView, name string, match map[string]string) (float64, int) {
@@ -188,48 +184,50 @@ func AssessOverflow(v *RunView, hold time.Duration, c *Checks) (contacts, direct
 	c.That(len(calls) == 3 && counts["ANSWERED"] == 1 && counts[outcomeOverflow] == 2,
 		"of the 3 contacts that answered together, 1 reached the bot and 2 were OVERFLOW (%d contacts: %v)", len(calls), counts)
 
-	// What makes the split the only possible one.
-	var lastInvite, firstAnswer, lastOverflowEnd time.Time
-	answered := 0
+	// What makes the split the only possible one. The order is read on the
+	// simulator's monotonic timeline; the times printed run from the first
+	// INVITE, with the wall clock's reading beside each.
+	var lastInvite, firstAnswer, lastOverflowEnd simMoment
+	hasInvite, answered, overflowEnded := false, 0, false
 	for _, cc := range calls {
 		for _, d := range cc.dialogs {
-			if d.InviteAt.After(lastInvite) {
-				lastInvite = d.InviteAt
+			if inv := inviteMoment(d); !hasInvite || lastInvite.before(inv) {
+				lastInvite, hasInvite = inv, true
 			}
-			if d.Final != nil && d.Final.Status == 200 {
-				answered++
-				if firstAnswer.IsZero() || d.Final.SentAt.Before(firstAnswer) {
-					firstAnswer = d.Final.SentAt
+			if fin, ok := finalMoment(d); ok && d.Final.Status == 200 {
+				if answered == 0 || fin.before(firstAnswer) {
+					firstAnswer = fin
 				}
+				answered++
 			}
-			if end, ok := dialogEnd(d); ok && cc.outcome == outcomeOverflow && end.After(lastOverflowEnd) {
-				lastOverflowEnd = end
+			if end, ok := dialogEnd(d); ok && cc.outcome == outcomeOverflow && (!overflowEnded || lastOverflowEnd.before(end)) {
+				lastOverflowEnd, overflowEnded = end, true
 			}
 		}
 	}
-	c.That(answered == 3 && lastInvite.Before(firstAnswer),
-		"precondition: all 3 contacts were ringing at once, every INVITE before the first answer (%d answered; last INVITE at %.0f ms, first answer at %.0f ms)",
-		answered, msSince(t0, lastInvite), msSince(t0, firstAnswer))
-	var lastHolderAnswer, firstHolderEnd time.Time
-	holders := 0
+	c.That(answered == 3 && lastInvite.before(firstAnswer),
+		"precondition: all 3 contacts were ringing at once, every INVITE before the first answer (%d answered; last INVITE at %s, first answer at %s)",
+		answered, atMs(lastInvite, t0), atMs(firstAnswer, t0))
+	var lastHolderAnswer, firstHolderEnd simMoment
+	holders, holderEnded := 0, false
 	for _, dc := range v.Direct {
 		if !dc.IsAnswered() {
 			continue
 		}
-		holders++
-		if dc.Dialog.Final.SentAt.After(lastHolderAnswer) {
-			lastHolderAnswer = dc.Dialog.Final.SentAt
+		if fin, _ := finalMoment(*dc.Dialog); holders == 0 || lastHolderAnswer.before(fin) {
+			lastHolderAnswer = fin
 		}
-		if end, ok := dialogEnd(*dc.Dialog); ok && (firstHolderEnd.IsZero() || end.Before(firstHolderEnd)) {
-			firstHolderEnd = end
+		holders++
+		if end, ok := dialogEnd(*dc.Dialog); ok && (!holderEnded || end.before(firstHolderEnd)) {
+			firstHolderEnd, holderEnded = end, true
 		}
 	}
-	c.That(len(v.Direct) == 2 && holders == 2 && lastHolderAnswer.Before(firstAnswer),
-		"precondition: both direct calls were answered, taking their slots, before the first contact answered (%d of %d answered; last at %.0f ms, first contact answer at %.0f ms)",
-		holders, len(v.Direct), msSince(t0, lastHolderAnswer), msSince(t0, firstAnswer))
-	c.That(!lastOverflowEnd.IsZero() && firstHolderEnd.After(lastOverflowEnd),
-		"precondition: both direct calls still held their slots when the last OVERFLOW leg was hung up (first direct call ended at %.0f ms, last overflow at %.0f ms)",
-		msSince(t0, firstHolderEnd), msSince(t0, lastOverflowEnd))
+	c.That(len(v.Direct) == 2 && holders == 2 && answered > 0 && lastHolderAnswer.before(firstAnswer),
+		"precondition: both direct calls were answered, taking their slots, before the first contact answered (%d of %d answered; last at %s, first contact answer at %s)",
+		holders, len(v.Direct), atMs(lastHolderAnswer, t0), atMs(firstAnswer, t0))
+	c.That(overflowEnded && holderEnded && lastOverflowEnd.before(firstHolderEnd),
+		"precondition: both direct calls still held their slots when the last OVERFLOW leg was hung up (first direct call ended at %s, last overflow at %s)",
+		atMs(firstHolderEnd, t0), atMs(lastOverflowEnd, t0))
 
 	// Each contact.
 	var answers []float64
@@ -432,6 +430,12 @@ func assessCapacityRun(v *RunView, unexpectedBase int, c *Checks) {
 		b.ScriptsFailed, a.ScriptsFailed, b.Unmatched, a.Unmatched, b.ToolCalls, a.ToolCalls)
 }
 
+// capacityTimesNote heads the tables of the capacity runs: which clock each
+// time column is read on.
+const capacityTimesNote = "Times in ms. Answered at and ended at run from the run's first INVITE on the simulator's wall clock; reported, never asserted. " +
+	"Answer to end is read on the simulator's monotonic clock (K3 asserts it for its refused calls); answer to end (wall) is the same interval on the wall clock, " +
+	"and differs from it when that clock stepped."
+
 // CapacityTable renders a capacity run as Markdown.
 func CapacityTable(rep *CapacityReport) string {
 	var b strings.Builder
@@ -448,9 +452,9 @@ func CapacityTable(rep *CapacityReport) string {
 		}
 		fmt.Fprintf(&b, "- %s = %s\n", k, v)
 	}
-	b.WriteString("\nTimes from the run's first INVITE, in ms; reported, never asserted.\n\n")
-	b.WriteString("| region | call | number | outcome | cause | contact | INVITEs | final | answered at | ended at | answer to end | ended by | bot leg | downlink frames | peak rms |\n")
-	b.WriteString("|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|\n")
+	b.WriteString("\n" + capacityTimesNote + "\n\n")
+	b.WriteString("| region | call | number | outcome | cause | contact | INVITEs | final | answered at | ended at | answer to end | answer to end (wall) | ended by | bot leg | downlink frames | peak rms |\n")
+	b.WriteString("|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|\n")
 	opt := func(p *float64) string {
 		if p == nil {
 			return "-"
@@ -459,9 +463,9 @@ func CapacityTable(rep *CapacityReport) string {
 	}
 	for _, list := range [][]CapacityRow{rep.Contacts, rep.Direct} {
 		for _, r := range list {
-			fmt.Fprintf(&b, "| %s | %s | %s | %s | %s | %s | %d | %d | %s | %s | %s | %s | %v | %d | %.0f |\n",
+			fmt.Fprintf(&b, "| %s | %s | %s | %s | %s | %s | %d | %d | %s | %s | %s | %s | %s | %v | %d | %.0f |\n",
 				r.Region, r.ID, r.Number, r.Outcome, r.HangupCause, r.ContactEnd, r.Invites, r.FinalStatus,
-				opt(r.AnswerAtMs), opt(r.EndAtMs), opt(r.HoldMs), r.EndedBy, r.HasBotLeg, r.DownlinkFrames, r.DownlinkPeakRMS)
+				opt(r.AnswerAtMs), opt(r.EndAtMs), opt(r.HoldMs), opt(r.HoldWallMs), r.EndedBy, r.HasBotLeg, r.DownlinkFrames, r.DownlinkPeakRMS)
 		}
 	}
 	if len(rep.Lines) > 0 {

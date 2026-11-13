@@ -21,11 +21,26 @@ const (
 const energyWindowMs = 100
 
 // Report is everything the simulator saw, in the order the dialogs began.
+//
+// Every event is recorded on two clocks. The xxxAt stamps are the wall clock,
+// which can step (on Colima the VM's is set from the host every 10 s, issues
+// #506 and #515). The xxxMs values beside them are the simulator's monotonic
+// clock, which does not: afterInviteMs is a time inside one dialog, and
+// afterStartMs places an event on the one timeline every dialog of this
+// process shares, counted from the simulator's start. A duration or an order
+// is read from the monotonic values; the gap between a monotonic value and the
+// matching difference of wall stamps is how a step of the wall clock shows up.
 type Report struct {
 	// Failed is set when any dialog was unexpected.
-	Failed          bool           `json:"failed"`
-	UnexpectedCount int            `json:"unexpectedCount"`
-	Dialogs         []DialogRecord `json:"dialogs"`
+	Failed          bool `json:"failed"`
+	UnexpectedCount int  `json:"unexpectedCount"`
+	// StartedAt is when the simulator started, on the wall clock: the zero of
+	// every afterStartMs.
+	StartedAt time.Time `json:"startedAt"`
+	// AfterStartMs is when this report was taken, on the simulator's
+	// monotonic clock: every INVITE that arrived before that moment is in it.
+	AfterStartMs float64        `json:"afterStartMs"`
+	Dialogs      []DialogRecord `json:"dialogs"`
 }
 
 // WriteFile saves the report as indented JSON.
@@ -37,7 +52,8 @@ func (r Report) WriteFile(path string) error {
 	return os.WriteFile(path, append(data, '\n'), 0o644)
 }
 
-// DialogRecord is one INVITE's history. Timestamps are UTC.
+// DialogRecord is one INVITE's history. Timestamps are UTC wall-clock stamps;
+// the monotonic values beside them are described on Report.
 type DialogRecord struct {
 	CallID string `json:"callId"`
 	// Number is the user part of the Request-URI; Attempt counts the dialogs
@@ -48,9 +64,12 @@ type DialogRecord struct {
 	IsExpected bool   `json:"isExpected"`
 	RemoteAddr string `json:"remoteAddr"`
 
-	InviteAt      time.Time         `json:"inviteAt"`
-	RequestURI    string            `json:"requestUri"`
-	InviteHeaders map[string]string `json:"inviteHeaders"`
+	InviteAt time.Time `json:"inviteAt"`
+	// InviteAfterStartMs is InviteAt on the simulator's monotonic timeline:
+	// how long after the simulator started the INVITE arrived.
+	InviteAfterStartMs float64           `json:"inviteAfterStartMs"`
+	RequestURI         string            `json:"requestUri"`
+	InviteHeaders      map[string]string `json:"inviteHeaders"`
 
 	Provisionals []ProvisionalRecord `json:"provisionals"`
 	Final        *FinalRecord        `json:"final,omitempty"`
@@ -73,6 +92,12 @@ type ProvisionalRecord struct {
 type FinalRecord struct {
 	Status int       `json:"status"`
 	SentAt time.Time `json:"sentAt"`
+	// AfterInviteMs is how long after the INVITE the response was sent, and
+	// AfterStartMs how long after the simulator started, both on its monotonic
+	// clock. SentAt minus the dialog's InviteAt is the wall clock's reading of
+	// the first; the two differ when the wall clock stepped in between.
+	AfterInviteMs float64 `json:"afterInviteMs"`
+	AfterStartMs  float64 `json:"afterStartMs"`
 }
 
 // EndRecord is the request that ended the dialog: a BYE from either side, or
@@ -81,11 +106,12 @@ type EndRecord struct {
 	Method string    `json:"method"`
 	By     string    `json:"by"`
 	At     time.Time `json:"at"`
-	// AfterInviteMs is how long after the INVITE this request arrived, on the
-	// simulator's monotonic clock. At minus the dialog's InviteAt is the wall
-	// clock's reading of the same interval; the two differ when the wall clock
-	// stepped in between.
+	// AfterInviteMs is how long after the INVITE this request arrived, and
+	// AfterStartMs how long after the simulator started, both on its monotonic
+	// clock. At minus the dialog's InviteAt is the wall clock's reading of the
+	// first; the two differ when the wall clock stepped in between.
 	AfterInviteMs float64 `json:"afterInviteMs"`
+	AfterStartMs  float64 `json:"afterStartMs"`
 }
 
 // Downlink is the audio the caller sent.

@@ -355,17 +355,18 @@ func TestCancelDuringRingingIsAnswered487AndRecorded(t *testing.T) {
 	eventually(t, "the ACK to the 487", func() bool { return only(t, sim.Report()).AckAt != nil })
 }
 
-// afterInviteBounds fails unless got lies between hold (the test waited that
-// long between two events it saw in order) and elapsed (the test's own time
-// from before the INVITE to after the report was read): the simulator's
-// interval is contained in the test's. elapsed is taken after Report returns,
-// since a BYE's 200 is sent before the End record is written. Both sides keep
+// afterInviteBounds fails unless got, an interval the simulator read on its
+// monotonic clock, lies between hold (the test waited that long between two
+// events it saw in order) and elapsed (the test's own time from before the
+// first event to after the report was read): the simulator's interval is
+// contained in the test's. elapsed is taken after Report returns, since a
+// BYE's 200 is sent before the End record is written. Both sides keep
 // sub-millisecond precision.
 func afterInviteBounds(t *testing.T, what string, got float64, hold, elapsed time.Duration) {
 	t.Helper()
 	ms := func(d time.Duration) float64 { return float64(d) / float64(time.Millisecond) }
 	if got < ms(hold) || got > ms(elapsed) {
-		t.Errorf("%s: AfterInviteMs = %.3f, want between %.3f and %.3f", what, got, ms(hold), ms(elapsed))
+		t.Errorf("%s: %.3f ms on the simulator's monotonic clock, want between %.3f and %.3f", what, got, ms(hold), ms(elapsed))
 	}
 }
 
@@ -389,6 +390,151 @@ func TestCancelRecordsTheWaitOnTheMonotonicClock(t *testing.T) {
 		t.Fatalf("end = %+v", rec.End)
 	}
 	afterInviteBounds(t, "CANCEL", rec.End.AfterInviteMs, hold, elapsed)
+	// The 487 is sent at the CANCEL's arrival, read once for both records.
+	if rec.Final == nil || rec.Final.Status != 487 || rec.Final.AfterInviteMs != rec.End.AfterInviteMs || rec.Final.AfterStartMs != rec.End.AfterStartMs {
+		t.Errorf("final %+v, end %+v: the 487 is not on the CANCEL's reading", rec.Final, rec.End)
+	}
+}
+
+// onTheTimeline fails unless an event's afterStartMs is its dialog's INVITE
+// on the timeline plus its afterInviteMs: the two are one reading of one
+// monotonic clock, so they agree to the rounding of float64 milliseconds.
+func onTheTimeline(t *testing.T, what string, rec DialogRecord, afterInviteMs, afterStartMs float64) {
+	t.Helper()
+	if diff := afterStartMs - (rec.InviteAfterStartMs + afterInviteMs); diff > 1e-6 || diff < -1e-6 {
+		t.Errorf("%s: afterStartMs %.6f, but the INVITE's %.6f plus afterInviteMs %.6f is %.6f",
+			what, afterStartMs, rec.InviteAfterStartMs, afterInviteMs, rec.InviteAfterStartMs+afterInviteMs)
+	}
+}
+
+// The answer and the end of a dialog are read on one monotonic clock, so the
+// time between them (K3's hold, issue #515) is their difference: at least
+// what the test waited between the two, at most the test's whole run.
+func TestTheAnswerAndTheEndShareTheMonotonicClock(t *testing.T) {
+	const hold = 400 * time.Millisecond
+	t.Run("caller", func(t *testing.T) {
+		sim := startSim(t, loopback, scenarioOf(t, map[string][]Behaviour{"1": {{FinalAfterMs: 150}}}), nil)
+		uac := newUAC(t, loopback, sim.Addr(), "1")
+		start := time.Now()
+		uac.invite()
+		uac.waitResponse(200, "INVITE")
+		time.Sleep(hold)
+		uac.bye()
+		uac.waitResponse(200, "BYE")
+		rec := only(t, sim.Report())
+		elapsed := time.Since(start)
+		if rec.Final == nil || rec.Final.Status != 200 || rec.End == nil || rec.End.By != EndedByCaller {
+			t.Fatalf("final %+v, end %+v", rec.Final, rec.End)
+		}
+		afterInviteBounds(t, "the 200", rec.Final.AfterInviteMs, 0, elapsed)
+		afterInviteBounds(t, "the 200 to the caller's BYE", rec.End.AfterInviteMs-rec.Final.AfterInviteMs, hold, elapsed)
+		onTheTimeline(t, "the 200", rec, rec.Final.AfterInviteMs, rec.Final.AfterStartMs)
+		onTheTimeline(t, "the BYE", rec, rec.End.AfterInviteMs, rec.End.AfterStartMs)
+	})
+	t.Run("callee", func(t *testing.T) {
+		// The callee's BYE is timed from the answer on the monotonic clock, so
+		// the difference is at least the scripted time, as K3's R1 reads it.
+		const after = 400
+		sim := startSim(t, loopback, scenarioOf(t, map[string][]Behaviour{"1": {{FinalAfterMs: 150, ByeAfterMs: intp(after)}}}), nil)
+		uac := newUAC(t, loopback, sim.Addr(), "1")
+		start := time.Now()
+		uac.invite()
+		uac.waitFinal()
+		eventually(t, "the callee's BYE", func() bool { return uac.byeCount() > 0 })
+		rec := only(t, sim.Report())
+		elapsed := time.Since(start)
+		if rec.Final == nil || rec.Final.Status != 200 || rec.End == nil || rec.End.By != EndedByCallee {
+			t.Fatalf("final %+v, end %+v", rec.Final, rec.End)
+		}
+		afterInviteBounds(t, "the 200 to the callee's BYE", rec.End.AfterInviteMs-rec.Final.AfterInviteMs, after*time.Millisecond, elapsed)
+		onTheTimeline(t, "the 200", rec, rec.Final.AfterInviteMs, rec.Final.AfterStartMs)
+		onTheTimeline(t, "the BYE", rec, rec.End.AfterInviteMs, rec.End.AfterStartMs)
+	})
+}
+
+// A refusal records its final response on both clocks too.
+func TestARefusalRecordsItsResponseOnTheMonotonicClock(t *testing.T) {
+	sim := startSim(t, loopback, scenarioOf(t, map[string][]Behaviour{
+		"1": {{Provisionals: []Provisional{{Status: 180}}, FinalAfterMs: 200, FinalStatus: 486}},
+	}), nil)
+	uac := newUAC(t, loopback, sim.Addr(), "1")
+	start := time.Now()
+	uac.invite()
+	uac.waitResponse(180, "INVITE")
+	busy := uac.waitResponse(486, "INVITE")
+	rec := only(t, sim.Report())
+	if rec.Final == nil || rec.Final.Status != 486 {
+		t.Fatalf("final %+v", rec.Final)
+	}
+	afterInviteBounds(t, "the 486", rec.Final.AfterInviteMs, 0, busy.at.Sub(start))
+	onTheTimeline(t, "the 486", rec, rec.Final.AfterInviteMs, rec.Final.AfterStartMs)
+}
+
+// Every dialog of one simulator is on one monotonic timeline, counted from its
+// start: the gap between two INVITEs (C04's retry interval) and the order of
+// events across dialogs (K1's and K3's preconditions) are read from it. The
+// report says when it was taken on that timeline, which is after every event
+// it holds (C10's read after the retry fell due).
+func TestDialogsShareOneMonotonicTimeline(t *testing.T) {
+	const lead, gap = 150 * time.Millisecond, 300 * time.Millisecond
+	before := time.Now()
+	sim := startSim(t, loopback, scenarioOf(t, map[string][]Behaviour{
+		"1": {{FinalStatus: 486}, {FinalStatus: 486}},
+	}), nil)
+	created := time.Now()
+	time.Sleep(lead)
+
+	first := newUAC(t, loopback, sim.Addr(), "1")
+	sent := time.Now()
+	first.invite()
+	first.waitFinal()
+	time.Sleep(gap)
+	second := newUAC(t, loopback, sim.Addr(), "1")
+	second.invite()
+	second.waitFinal()
+	eventually(t, "both ACKs", func() bool {
+		r := sim.Report()
+		return len(r.Dialogs) == 2 && r.Dialogs[0].AckAt != nil && r.Dialogs[1].AckAt != nil
+	})
+	report := sim.Report()
+	end := time.Since(before)
+
+	if len(report.Dialogs) != 2 {
+		t.Fatalf("dialogs = %d, want 2", len(report.Dialogs))
+	}
+	one, two := report.Dialogs[0], report.Dialogs[1]
+	// The simulator started after before and before created; the first INVITE
+	// arrived after sent.
+	afterInviteBounds(t, "the first INVITE after the start", one.InviteAfterStartMs, sent.Sub(created), end)
+	// The test sent the second INVITE gap after it had the first one's answer.
+	afterInviteBounds(t, "the second INVITE after the first", two.InviteAfterStartMs-one.InviteAfterStartMs, gap, time.Since(sent))
+	// The 486 was sent before the test had it, and after the test sent the
+	// INVITE it answers.
+	afterInviteBounds(t, "the first 486 to the second INVITE", two.InviteAfterStartMs-one.Final.AfterStartMs, gap, time.Since(sent))
+	for i, rec := range report.Dialogs {
+		if rec.Final == nil {
+			t.Fatalf("dialog %d has no final response", i)
+		}
+		onTheTimeline(t, fmt.Sprintf("dialog %d's 486", i), rec, rec.Final.AfterInviteMs, rec.Final.AfterStartMs)
+	}
+	if report.AfterStartMs < two.Final.AfterStartMs || report.AfterStartMs > float64(end)/float64(time.Millisecond) {
+		t.Errorf("the report was taken at %.3f ms, want after the last event (%.3f ms) and within the test's %s",
+			report.AfterStartMs, two.Final.AfterStartMs, end)
+	}
+	if !report.StartedAt.Equal(sim.startedAt) || report.StartedAt.Location() != time.UTC {
+		t.Errorf("startedAt %v, want the simulator's start %v in UTC", report.StartedAt, sim.startedAt)
+	}
+
+	// The monotonic values travel under their own names, beside the stamps.
+	data, err := json.Marshal(report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{`"startedAt":`, `"afterStartMs":`, `"inviteAfterStartMs":`, `"afterInviteMs":`} {
+		if !strings.Contains(string(data), key) {
+			t.Errorf("the report's JSON has no %s", key)
+		}
+	}
 }
 
 func TestByeFromEachSideRecordsTheWaitOnTheMonotonicClock(t *testing.T) {
@@ -443,6 +589,10 @@ func TestTheInviteTimeKeepsItsMonotonicReading(t *testing.T) {
 	sim.mu.Unlock()
 	if !strings.Contains(at.String(), " m=") {
 		t.Errorf("the INVITE time %q has no monotonic reading", at.String())
+	}
+	// The same holds for the zero of the timeline every afterStartMs is read on.
+	if !strings.Contains(sim.startedAt.String(), " m=") {
+		t.Errorf("the start time %q has no monotonic reading", sim.startedAt.String())
 	}
 }
 

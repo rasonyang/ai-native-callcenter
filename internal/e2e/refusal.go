@@ -66,8 +66,12 @@ type RefusalFacts struct {
 	Channels map[string]string `json:"channels"`
 	// HolderOnBotAt is when the driver saw the holder answered, on the bot
 	// (a slot in use, a session open on the mock), before it placed the
-	// first refused call.
-	HolderOnBotAt *time.Time `json:"holderOnBotAt,omitempty"`
+	// first refused call, on its wall clock. HolderOnBotAfterRunStartMs is the
+	// same moment on the driver's monotonic timeline, the value the order
+	// against the calls' placing (DirectCall.PlacedAfterRunStartMs) is read
+	// from.
+	HolderOnBotAt              *time.Time `json:"holderOnBotAt,omitempty"`
+	HolderOnBotAfterRunStartMs *float64   `json:"holderOnBotAfterRunStartMs,omitempty"`
 }
 
 // RefusalRow is one call of a K3 run, condensed.
@@ -88,11 +92,13 @@ type refusalCall struct {
 }
 
 type refusalRun struct {
-	sc       RefusalScenario
-	calls    []*refusalCall
-	facts    RefusalFacts
-	queue    api.Queue
-	campDID  api.DID
+	sc      RefusalScenario
+	calls   []*refusalCall
+	facts   RefusalFacts
+	queue   api.Queue
+	campDID api.DID
+	// holderAt is when the driver saw the holder on the bot, with its
+	// monotonic reading (RefusalFacts.HolderOnBotAfterRunStartMs).
 	holderAt time.Time
 }
 
@@ -127,11 +133,12 @@ func RunRefusal(ctx context.Context, cfg CampaignConfig, sc RefusalScenario) (*R
 		return nil, err
 	}
 
+	started := time.Now()
 	rep := &RefusalReport{
-		Scenario: sc.ID, StartedAt: time.Now().UTC(), DialForm: string(pre.form), AppEnv: env, SwitchRTPRange: swRange,
+		Scenario: sc.ID, StartedAt: started.UTC(), DialForm: string(pre.form), AppEnv: env, SwitchRTPRange: swRange,
 		Latency: map[string]float64{}, Calls: []RefusalRow{}, SwitchProbes: []SwitchProbe{},
 	}
-	d := &driver{cfg: cfg, c: pre.c, form: pre.form, rep: &CampaignReport{Latency: rep.Latency}, plan: sc.Plan}
+	d := &driver{cfg: cfg, c: pre.c, form: pre.form, rep: &CampaignReport{Latency: rep.Latency}, plan: sc.Plan, runStart: started}
 	rr := &refusalRun{sc: sc, facts: RefusalFacts{Channels: map[string]string{}}}
 	view, runErr := rr.run(ctx, d)
 
@@ -384,7 +391,8 @@ func (rr *refusalRun) run(ctx context.Context, d *driver) (*RunView, error) {
 	v := d.view(post)
 	v.Dialogs = campaignDialogs
 	v.Direct = directs
-	rr.facts.HolderOnBotAt = &rr.holderAt
+	rr.facts.HolderOnBotAt = ptr(rr.holderAt.UTC())
+	rr.facts.HolderOnBotAfterRunStartMs = ptr(d.sinceRunStartMs(rr.holderAt))
 	return v, nil
 }
 
@@ -467,7 +475,8 @@ func (rr *refusalRun) place(ctx context.Context, d *driver, rc *refusalCall) err
 	callID := uuid.Must(uuid.NewV7())
 	did := rc.did.Number
 	var created api.CreateCallResponse
-	rc.direct.Placed = time.Now().UTC()
+	placed := time.Now()
+	rc.direct.Placed, rc.direct.PlacedAfterRunStartMs = placed.UTC(), d.sinceRunStartMs(placed)
 	if err := d.c.do(ctx, http.MethodPost, "/calls", api.CreateCallRequest{CallID: &callID, Kind: &kind, To: rc.direct.Number, DID: &did}, &created, http.StatusCreated); err != nil {
 		return fmt.Errorf("place %s (%s): %w", rc.spec.ID, rc.direct.Number, err)
 	}
@@ -510,7 +519,7 @@ func (rr *refusalRun) waitHolderOnBot(ctx context.Context, d *driver, holder *re
 			answered := dlg != nil && dlg.Final != nil && dlg.Final.Status == 200 && dlg.End == nil
 			last = fmt.Sprintf("answered and up %v, bot slots in use %.0f, mock sessions live %d", answered, inUse, s.Live)
 			if answered && inUse == 1 && s.Live == 1 {
-				rr.holderAt = time.Now().UTC()
+				rr.holderAt = time.Now() // keeps its monotonic reading
 				return nil
 			}
 		}

@@ -79,7 +79,9 @@ type RunView struct {
 	MetricsAfter  Metrics
 	// Callbacks is the whole callback queue, read after the run settled.
 	Callbacks []api.Callback
-	// CalleeReadAt is when the simulator's record (Callee) was read.
+	// CalleeReadAt is when the driver read the simulator's record (Callee),
+	// on its wall clock; Callee.AfterStartMs is when the simulator took it,
+	// on the simulator's monotonic timeline.
 	CalleeReadAt time.Time
 	// Cases are the run's cases, the same in every region.
 	Cases []Case
@@ -122,7 +124,8 @@ type ContactView struct {
 // list while the contact waited for its retry.
 type Listing struct {
 	// PostedAt is just before the request, ListedAt when the API answered it
-	// and ConfirmedAt when the list read back held the number.
+	// and ConfirmedAt when the list read back held the number. They are the
+	// driver's wall clock.
 	PostedAt    time.Time `json:"postedAt"`
 	ListedAt    time.Time `json:"listedAt"`
 	ConfirmedAt time.Time `json:"confirmedAt"`
@@ -132,6 +135,14 @@ type Listing struct {
 	// switch time (the switch's finish stamp plus the interval), so checks do
 	// not order anything against it; they print it for reference.
 	NextAttemptAt time.Time `json:"nextAttemptAt"`
+	// FirstAttempt and ContactBefore are what the driver had read before it
+	// posted the listing: the contact's first attempt, finished, and the
+	// contact as it stood with it (its retry due). The listing is held to
+	// come after the callee's final response by them, not by a clock: the
+	// platform finishes a refused attempt with the cause the switch reports
+	// once it has the callee's response (issue #515).
+	FirstAttempt  *api.CampaignAttempt `json:"firstAttemptBeforeListing,omitempty"`
+	ContactBefore *api.CampaignContact `json:"contactBeforeListing,omitempty"`
 }
 
 // ProviderCount is the mock provider's counters, read before the campaigns
@@ -149,6 +160,9 @@ type DirectCall struct {
 	DID     string    `json:"did"`
 	CallID  string    `json:"callId"`
 	Placed  time.Time `json:"placedAt"`
+	// PlacedAfterRunStartMs is Placed on the driver's monotonic timeline
+	// (driver.sinceRunStartMs).
+	PlacedAfterRunStartMs float64 `json:"placedAfterRunStartMs"`
 	// IsExpectedNoBot says the call is answered and is meant to meet no bot
 	// (K3's refused calls): it opens no provider session and its CDR has no
 	// BOT leg.
