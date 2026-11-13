@@ -1,8 +1,9 @@
 import { screen } from '@testing-library/react'
 import { describe } from 'vitest'
 
-import type {
-  Campaign, CampaignAttempt, CampaignContact,
+import {
+  CAMPAIGN_OUTCOMES, LEAD_INTENTS,
+  type Campaign, type CampaignAttempt, type CampaignContact, type CampaignOutcomeSummary,
 } from '@/lib/campaigns'
 import i18n from '@/lib/i18n'
 import { renderApp, waitForRows } from '@/test/app'
@@ -10,8 +11,8 @@ import { asciiRun, chineseRun, digits, longUrl, maxLengthOf, mixedNote } from '@
 import { expectLayout, layoutTest, restoreLanguage } from '@/test/layout'
 
 /**
- * One campaign: header, counters, and the contacts, leads and attempts tabs
- * (the settings tab is a form, covered with the other forms). The name is
+ * One campaign: header, counters, and the contacts, leads, attempts and
+ * outcomes tabs (the settings tab is a form, covered with the other forms). The name is
  * bounded by the contract; the DID number, the time zone, a contact's number,
  * the lead notes and an attempt's hangup cause are not.
  */
@@ -108,12 +109,37 @@ function attempts(overrides: Partial<CampaignAttempt> = {}): CampaignAttempt[] {
   ]
 }
 
+/** Every outcome, intent and callback status with the count count(i) gives the i-th. */
+function outcomeSummary(count: (i: number) => number): CampaignOutcomeSummary {
+  return {
+    campaignId: CAMPAIGN_ID,
+    attemptsByOutcome: CAMPAIGN_OUTCOMES.map((outcome, i) => ({ outcome, count: count(i) })),
+    contactsByLastOutcome: CAMPAIGN_OUTCOMES.map((outcome, i) => ({ outcome, count: count(i + 11) })),
+    contactsByLeadIntent: LEAD_INTENTS.map((leadIntent, i) => ({ leadIntent, count: count(i + 22) })),
+    optOuts: { saidInConversation: count(27), alreadyListed: count(28) },
+    callbacksByStatus: (['OPEN', 'CLAIMED', 'DONE', 'DISMISSED'] as const).map((status, i) => ({
+      status, count: count(i + 29),
+    })),
+  }
+}
+
+/** A campaign a few days in: 12,000 contacts, about 20,000 attempts. */
+const ordinarySummary = outcomeSummary((i) => [
+  2900, 610, 240, 9800, 3100, 820, 140, 600, 310, 120, 80,
+  2850, 600, 240, 2300, 700, 210, 40, 30, 15, 120, 80,
+  95, 180, 260, 410, 60, 60, 80, 40, 25, 20, 10,
+][i])
+
 function render(
-  data: { campaign?: Campaign; contacts?: CampaignContact[]; attempts?: CampaignAttempt[] } = {},
+  data: {
+    campaign?: Campaign; contacts?: CampaignContact[]; attempts?: CampaignAttempt[]
+    summary?: CampaignOutcomeSummary
+  } = {},
 ) {
   const detail = data.campaign ?? campaign()
   const contactRows = data.contacts ?? contacts()
   const attemptRows = data.attempts ?? attempts()
+  const summaryReply = data.summary ?? ordinarySummary
   return renderApp(`/admin/campaigns/${CAMPAIGN_ID}`, {
     handle: ({ path, method }) => {
       if (method !== 'GET') return undefined
@@ -125,6 +151,7 @@ function render(
         return { items, total: items.length === contactRows.length ? 120 : items.length }
       }
       if (path.startsWith(`/campaigns/${CAMPAIGN_ID}/attempts`)) return { items: attemptRows, total: 120 }
+      if (path === `/campaigns/${CAMPAIGN_ID}/outcome-summary`) return summaryReply
       return undefined
     },
   })
@@ -325,6 +352,26 @@ describe('campaign detail, leads tab', () => {
     await drawn()
     await openTab(user, 'campaign.tabs.leads')
     await screen.findAllByText(i18n.t('campaign.openCall'))
+    await expectLayout(ctx)
+  })
+})
+
+describe('campaign detail, outcomes tab', () => {
+  layoutTest('campaigns/$campaignId outcomes (ordinary data)', async (ctx) => {
+    const { user } = render()
+    await drawn()
+    await openTab(user, 'campaign.tabs.outcomes')
+    await screen.findByText(i18n.t('campaign.summary.optOutsNote'))
+    await expectLayout(ctx)
+  })
+
+  // The largest count the contract's integer carries, in every row: the
+  // column totals are eleven of them, an eleven-digit number.
+  layoutTest('campaigns/$campaignId outcomes (largest counts)', async (ctx) => {
+    const { user } = render({ summary: outcomeSummary(() => 2147483647) })
+    await drawn()
+    await openTab(user, 'campaign.tabs.outcomes')
+    await screen.findAllByText('23622320117')
     await expectLayout(ctx)
   })
 })

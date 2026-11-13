@@ -432,13 +432,14 @@ func (c *CampaignStore) ListContacts(ctx context.Context, campaignID uuid.UUID,
 	}
 	rows, err := c.q.ListCampaignContacts(ctx, queries.ListCampaignContactsParams{
 		CampaignID: campaignID, Status: string(f.Status), LeadIntent: string(f.LeadIntent),
-		PageLimit: int32(f.Limit), PageOffset: int32(f.Offset),
+		LastOutcome: string(f.LastOutcome), PageLimit: int32(f.Limit), PageOffset: int32(f.Offset),
 	})
 	if err != nil {
 		return nil, 0, fmt.Errorf("list contacts of campaign %s: %w", campaignID, err)
 	}
 	total, err := c.q.CountCampaignContacts(ctx, queries.CountCampaignContactsParams{
 		CampaignID: campaignID, Status: string(f.Status), LeadIntent: string(f.LeadIntent),
+		LastOutcome: string(f.LastOutcome),
 	})
 	if err != nil {
 		return nil, 0, fmt.Errorf("count contacts of campaign %s: %w", campaignID, err)
@@ -452,6 +453,53 @@ func (c *CampaignStore) ListContacts(ctx context.Context, campaignID uuid.UUID,
 		out = append(out, ct)
 	}
 	return out, total, nil
+}
+
+// OutcomeSummary counts what a campaign's calls came to. The three reads run
+// in one read-only REPEATABLE READ transaction, so the attempts, the contacts
+// and the callbacks are counted at the same moment: a call that finishes
+// meanwhile is in all of them or in none.
+func (c *CampaignStore) OutcomeSummary(ctx context.Context, campaignID uuid.UUID) (campaign.OutcomeSummary, error) {
+	tx, err := c.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
+	if err != nil {
+		return campaign.OutcomeSummary{}, fmt.Errorf("summarise campaign %s: %w", campaignID, err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	q := c.q.WithTx(tx)
+
+	if _, err := q.GetCampaign(ctx, campaignID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return campaign.OutcomeSummary{}, campaign.NewNotFound()
+		}
+		return campaign.OutcomeSummary{}, fmt.Errorf("read campaign %s: %w", campaignID, err)
+	}
+	out := campaign.NewOutcomeSummary(campaignID)
+
+	contacts, err := q.CampaignContactGroups(ctx, campaignID)
+	if err != nil {
+		return campaign.OutcomeSummary{}, fmt.Errorf("count contacts of campaign %s: %w", campaignID, err)
+	}
+	for _, r := range contacts {
+		out.AddContacts(campaign.ContactStatus(r.Status), campaign.Outcome(deref(r.LastOutcome)),
+			campaign.LeadIntent(deref(r.LeadIntent)), int(r.N))
+	}
+
+	attempts, err := q.CampaignAttemptOutcomes(ctx, campaignID)
+	if err != nil {
+		return campaign.OutcomeSummary{}, fmt.Errorf("count attempts of campaign %s: %w", campaignID, err)
+	}
+	for _, r := range attempts {
+		out.AttemptsByOutcome[campaign.Outcome(deref(r.Outcome))] += int(r.N)
+	}
+
+	callbacks, err := q.CampaignCallbackStatuses(ctx, campaignID)
+	if err != nil {
+		return campaign.OutcomeSummary{}, fmt.Errorf("count callbacks of campaign %s: %w", campaignID, err)
+	}
+	for _, r := range callbacks {
+		out.CallbacksByStatus[campaign.CallbackStatus(r.Status)] += int(r.N)
+	}
+	return out, tx.Commit(ctx)
 }
 
 func campaignOf(r queries.Campaign, didNumber string) (campaign.Campaign, error) {

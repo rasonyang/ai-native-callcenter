@@ -165,6 +165,13 @@ func (r *fakeRepo) ListContacts(context.Context, uuid.UUID, ContactFilter) ([]Co
 	return nil, 0, nil
 }
 
+func (r *fakeRepo) OutcomeSummary(ctx context.Context, id uuid.UUID) (OutcomeSummary, error) {
+	if _, err := r.Get(ctx, id); err != nil {
+		return OutcomeSummary{}, err
+	}
+	return NewOutcomeSummary(id), nil
+}
+
 // Test flows.
 
 func testSpec(t *testing.T, nodeTools []string, extra func(m map[string]any)) *flow.Spec {

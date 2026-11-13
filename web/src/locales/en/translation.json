@@ -974,6 +974,7 @@
       "contacts": "Contacts",
       "leads": "Leads",
       "attempts": "Attempts",
+      "outcomes": "Outcomes",
       "settings": "Settings"
     },
     "number": "Number",
@@ -1027,6 +1028,22 @@
     "talkTime": "Talk time",
     "call": "Call",
     "openCall": "Open call",
+    "summary": {
+      "byOutcome": "By outcome",
+      "attempts": "Attempts",
+      "contactsLastOutcome": "Contacts (last call)",
+      "byLead": "Leads",
+      "contacts": "Contacts",
+      "optOuts": "Opt-outs",
+      "reason": "Reason",
+      "saidInConversation": "Asked on the call",
+      "alreadyListed": "Already on the list, skipped",
+      "optOutsNote": "A number someone else put on the list while its call was in progress counts as Do not call, but in neither row.",
+      "callbacks": "Callbacks filed",
+      "callbackStatus": "Status",
+      "callbackCount": "Callbacks",
+      "total": "Total"
+    },
     "weekdays": {
       "MON": "Mon",
       "TUE": "Tue",

@@ -6,6 +6,7 @@ import { useTranslation } from 'react-i18next'
 import { CampaignFormView } from '@/components/campaign-form'
 import { CampaignImportDialog } from '@/components/campaign-import'
 import { CampaignLeads } from '@/components/campaign-leads'
+import { CampaignOutcomes } from '@/components/campaign-outcomes'
 import { CampaignState } from '@/components/campaign-state'
 import { ConfirmAction } from '@/components/confirm-action'
 import { KpiCard } from '@/components/kpi-card'
@@ -29,7 +30,7 @@ import { formatDuration } from '@/lib/ledger'
 
 /**
  * One campaign: its state and counters (live), its settings, its contacts,
- * the leads it produced and every attempt it made.
+ * the leads it produced, every attempt it made and what they came to.
  */
 export const Route = createFileRoute('/_app/admin/campaigns/$campaignId')({
   beforeLoad: ({ context }) => requireRole(context.user, 'ADMIN', 'SUPERVISOR'),
@@ -176,6 +177,7 @@ function CampaignDetail() {
           <TabsTrigger value="contacts">{t('campaign.tabs.contacts')}</TabsTrigger>
           <TabsTrigger value="leads">{t('campaign.tabs.leads')}</TabsTrigger>
           <TabsTrigger value="attempts">{t('campaign.tabs.attempts')}</TabsTrigger>
+          <TabsTrigger value="outcomes">{t('campaign.tabs.outcomes')}</TabsTrigger>
           <TabsTrigger value="settings">{t('campaign.tabs.settings')}</TabsTrigger>
         </TabsList>
         <TabsContent value="contacts" className="pt-4">
@@ -186,6 +188,9 @@ function CampaignDetail() {
         </TabsContent>
         <TabsContent value="attempts" className="pt-4">
           <AttemptsTab campaign={data} />
+        </TabsContent>
+        <TabsContent value="outcomes" className="pt-4">
+          <CampaignOutcomes campaign={data} />
         </TabsContent>
         <TabsContent value="settings" className="pt-4">
           <SettingsTab key={data.id} campaign={data} />

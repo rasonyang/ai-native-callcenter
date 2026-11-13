@@ -1060,13 +1060,32 @@ Contract first in `docs/openapi.json`; final shapes come with the PR.
   later admissions and not calls in flight; anything else is `CAMPAIGN_FIELD_LOCKED`. `DELETE` only
   in `DRAFT`.
 - `POST /campaigns/{campaignId}/start | pause | resume | cancel`
-- `POST/GET /campaigns/{campaignId}/contacts` (filter by `status`, `leadIntent`). A contact carries
-  `lastCallId` and `lastAttemptId`, required and `null` until its first attempt finishes (§3.2).
+- `POST/GET /campaigns/{campaignId}/contacts` (filter by `status`, `leadIntent`, `lastOutcome`). A
+  contact carries `lastCallId` and `lastAttemptId`, required and `null` until its first attempt
+  finishes (§3.2).
 - `GET /callbacks?callId=` (#188): only the callbacks one call filed. A campaign call files at most
   one, so a `HIGH` lead resolves to its callback with the contact's `lastCallId`, never by comparing
   phone numbers: one number can hold callbacks from several calls and campaigns, and `numberRaw` and
   `phoneNumber` need not share a format.
 - `GET /campaigns/{campaignId}/attempts`
+- `GET /campaigns/{campaignId}/outcome-summary` (`campaigns:read`, #476): what the calls came to,
+  its own operation so that a page of campaigns pays for no aggregate. Every count is read from the
+  rows when it is asked for, in one read-only snapshot; nothing is kept as a running total, so a
+  revised CDR moves its attempt from one count to another once. Each breakdown lists every value of
+  its enum, in order, zero included, and each count is the total of a listing filtered the same way:
+  - `attemptsByOutcome`: finished attempts by `outcome` (`listCampaignAttempts?outcome=`);
+  - `contactsByLastOutcome`: contacts by `lastOutcome` (`listCampaignContacts?lastOutcome=`);
+  - `contactsByLeadIntent` (`listCampaignContacts?leadIntent=`);
+  - `optOuts.saidInConversation`: `DNC` contacts whose call recorded a `DO_NOT_CALL` lead
+    (`?status=DNC&leadIntent=DO_NOT_CALL`); `optOuts.alreadyListed`: `DNC` contacts whose last
+    attempt was `DNC_SKIPPED` (`?status=DNC&lastOutcome=DNC_SKIPPED`). A contact listed by somebody
+    else while its call was in flight (§12) is `DNC` and in neither, so the two add up to
+    `contacts.dnc` or less;
+  - `callbacksByStatus`: the callbacks the campaign's calls filed, joined through the attempts'
+    `call_id` (a campaign files only `HIGH` leads' callbacks, one per call), by `OPEN`, `CLAIMED`,
+    `DONE` and `DISMISSED`; each is `listCallbacks?callId=` of one attempt's call.
+
+  No schema change: every fact is in `campaign_attempts`, `campaign_contacts` and `callbacks`.
 - `GET /campaigns/settings` (`campaigns:read`): the rules a write is held to, so a form does not
   mirror them. `outboundHours` is `AICC_OUTBOUND_HOURS` as a `CampaignTimeRange` (callee-local; a
   range whose end is before its start crosses midnight, and a window range is inside it only within
@@ -1154,6 +1173,8 @@ configuration today, so only the env names `AICC_OVERFLOW_HOLD` and the like app
     (§7.2), whatever the call's outcome, so the lead row's `lastCallId` always names the call that
     recorded the lead and filed its callback. The link is still hidden when `lastOutcome` is
     `UNKNOWN`, because the ledger may hold no CDR for that call.
+- outcomes: a tab on the campaign page reads the outcome summary while it is open, and again on
+  each `CAMPAIGN_UPDATED` of that campaign;
 - DNC list: view, add, remove;
 - the DID form gains `maxOutboundChannels`.
 

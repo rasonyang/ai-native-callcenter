@@ -34,6 +34,7 @@ type CampaignService interface {
 	ImportContacts(ctx context.Context, id uuid.UUID, rows []campaign.ImportRow) (campaign.ImportResult, error)
 	ListContacts(ctx context.Context, id uuid.UUID, f campaign.ContactFilter) ([]campaign.Contact, int64, error)
 	ListAttempts(ctx context.Context, id uuid.UUID, f campaign.AttemptFilter) ([]campaign.Attempt, int64, error)
+	OutcomeSummary(ctx context.Context, id uuid.UUID) (campaign.OutcomeSummary, error)
 	Settings() campaign.Settings
 	ReadyDIDs(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]bool, error)
 }
@@ -215,10 +216,11 @@ func (s *Server) campaignMove(w http.ResponseWriter, r *http.Request,
 func (s *Server) ListCampaignContacts(w http.ResponseWriter, r *http.Request,
 	campaignID openapi_types.UUID, params api.ListCampaignContactsParams) {
 	items, total, err := s.campaigns.ListContacts(r.Context(), campaignID, campaign.ContactFilter{
-		Status:     campaign.ContactStatus(stringOr(params.Status)),
-		LeadIntent: campaign.LeadIntent(stringOr(params.LeadIntent)),
-		Limit:      intOr(params.Limit, 50),
-		Offset:     intOr(params.Offset, 0),
+		Status:      campaign.ContactStatus(stringOr(params.Status)),
+		LeadIntent:  campaign.LeadIntent(stringOr(params.LeadIntent)),
+		LastOutcome: campaign.Outcome(stringOr(params.LastOutcome)),
+		Limit:       intOr(params.Limit, 50),
+		Offset:      intOr(params.Offset, 0),
 	})
 	if err != nil {
 		s.writeCampaignError(w, r, err)
@@ -249,6 +251,47 @@ func (s *Server) ListCampaignAttempts(w http.ResponseWriter, r *http.Request,
 		out = append(out, campaignAttemptOut(a))
 	}
 	writeJSON(w, http.StatusOK, api.CampaignAttemptList{Items: out, Total: int(total)})
+}
+
+// GetCampaignOutcomeSummary counts what a campaign's calls came to.
+func (s *Server) GetCampaignOutcomeSummary(w http.ResponseWriter, r *http.Request, campaignID openapi_types.UUID) {
+	sum, err := s.campaigns.OutcomeSummary(r.Context(), campaignID)
+	if err != nil {
+		s.writeCampaignError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, campaignOutcomeSummaryOut(sum))
+}
+
+// campaignOutcomeSummaryOut lists every value of each enum once, in the
+// enum's order, so a value nothing had is a zero and not a missing row.
+func campaignOutcomeSummaryOut(s campaign.OutcomeSummary) api.CampaignOutcomeSummary {
+	outcomes := func(counts map[campaign.Outcome]int) []api.CampaignOutcomeCount {
+		out := make([]api.CampaignOutcomeCount, 0, len(campaign.AllOutcomes()))
+		for _, o := range campaign.AllOutcomes() {
+			out = append(out, api.CampaignOutcomeCount{Outcome: api.CampaignOutcome(o), Count: counts[o]})
+		}
+		return out
+	}
+	leads := make([]api.CampaignLeadIntentCount, 0, len(campaign.AllLeadIntents()))
+	for _, l := range campaign.AllLeadIntents() {
+		leads = append(leads, api.CampaignLeadIntentCount{LeadIntent: api.CampaignLeadIntent(l), Count: s.ContactsByLeadIntent[l]})
+	}
+	callbacks := make([]api.CampaignCallbackStatusCount, 0, len(campaign.AllCallbackStatuses()))
+	for _, st := range campaign.AllCallbackStatuses() {
+		callbacks = append(callbacks, api.CampaignCallbackStatusCount{Status: api.CallbackStatus(st), Count: s.CallbacksByStatus[st]})
+	}
+	return api.CampaignOutcomeSummary{
+		CampaignID:            s.CampaignID,
+		AttemptsByOutcome:     outcomes(s.AttemptsByOutcome),
+		ContactsByLastOutcome: outcomes(s.ContactsByLastOutcome),
+		ContactsByLeadIntent:  leads,
+		OptOuts: api.CampaignOptOutCounts{
+			SaidInConversation: s.OptOuts.SaidInConversation,
+			AlreadyListed:      s.OptOuts.AlreadyListed,
+		},
+		CallbacksByStatus: callbacks,
+	}
 }
 
 func campaignAttemptOut(a campaign.Attempt) api.CampaignAttempt {

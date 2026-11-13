@@ -564,6 +564,17 @@ describe('the event stream updating the cache', () => {
     expect(stale()).toBe(true)
   })
 
+  it('marks that campaign’s outcome summary stale, and no other campaign’s', () => {
+    const queryClient = seeded()
+    queryClient.setQueryData(['campaigns', 'outcome-summary', ID], { campaignId: ID })
+    queryClient.setQueryData(['campaigns', 'outcome-summary', OTHER], { campaignId: OTHER })
+    const stale = (id: string) =>
+      queryClient.getQueryCache().find({ queryKey: ['campaigns', 'outcome-summary', id] })?.state.isInvalidated
+    applyCampaignUpdated(queryClient, payload())
+    expect(stale(ID)).toBe(true)
+    expect(stale(OTHER)).toBe(false)
+  })
+
   it('refetches the lists for a campaign nobody has loaded yet', () => {
     const queryClient = seeded()
     const stale = () =>

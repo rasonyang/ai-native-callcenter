@@ -50,6 +50,10 @@ func (stubCampaigns) ListAttempts(context.Context, uuid.UUID, campaign.AttemptFi
 	return nil, 0, nil
 }
 
+func (stubCampaigns) OutcomeSummary(_ context.Context, id uuid.UUID) (campaign.OutcomeSummary, error) {
+	return campaign.NewOutcomeSummary(id), nil
+}
+
 func (stubCampaigns) Settings() campaign.Settings { return campaign.Settings{} }
 func (stubCampaigns) ReadyDIDs(context.Context, []uuid.UUID) (map[uuid.UUID]bool, error) {
 	return nil, nil
