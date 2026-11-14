@@ -1,4 +1,4 @@
-import { screen, waitFor } from '@testing-library/react'
+import { fireEvent, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ReactElement } from 'react'
 
@@ -127,4 +127,18 @@ describe('recordings', () => {
     )
     expect(await screen.findByLabelText(/seek within the recording/i)).toBeInTheDocument()
   })
+})
+
+// The filter matches either end, so a customer's number finds the call whichever
+// way it went (an AI outbound call is stored from the DID to the customer).
+it('filters by number, not by caller number', async () => {
+  const { api } = await renderMyCalls({ myCDRs: [cdrFixture()] })
+  await screen.findByText(/not filed/i)
+
+  fireEvent.change(screen.getByPlaceholderText('Number…'), { target: { value: '13800000000' } })
+
+  await waitFor(() =>
+    expect(api.requests.some((r) => r.path.startsWith('/cdrs/mine') && r.path.includes('number=13800000000'))).toBe(true),
+  )
+  expect(api.requests.some((r) => r.path.includes('fromNumber='))).toBe(false)
 })

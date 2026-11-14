@@ -31,9 +31,9 @@ carries the one-line installer's files.
   terminal phase. A simulator scenario whose `hangup` step gives
   `FLOW_INSTRUCTED` in a phase without the field now fails unless the step
   expects the refusal (#553).
-- No migration. API contract: additive only, an operation and a query
-  parameter (see Added); `make api-breaking BASE=v0.8.3` reports no breaking
-  change (#476).
+- No migration. API contract: additive only, an operation and query
+  parameters (see Added and Fixed); `make api-breaking BASE=v0.8.3` reports
+  no breaking change (#476, #567).
 
 ### Changed
 
@@ -99,6 +99,19 @@ carries the one-line installer's files.
   campaign page shows the summary on a new Outcomes tab, in English and
   Chinese (#476, from the compliance plan in #468; thanks
   @siyingchao007-maker).
+
+### Fixed
+
+- The CDR pages show a call the platform placed (an AI outbound or campaign
+  call) from the line it went out on to the customer it rang. They showed the
+  line as both the caller and the number dialed, so the customer's number
+  appeared nowhere. The list's columns are now From and To (the DID column
+  always repeated one end and is gone), the detail page is titled from → to
+  with the DID as a fact of its own, and the number filter on the CDR list and
+  on My Calls matches either end. `GET /cdrs` and `GET /cdrs/mine` take a new
+  `number` parameter that matches a substring of either end; `fromNumber`
+  keeps its meaning. The stored records, the CDR API and the CDR webhook were
+  already right (#567).
 
 ## v0.8.3 - 2026-11-12
 

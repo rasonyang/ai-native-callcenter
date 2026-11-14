@@ -318,8 +318,10 @@ type CDRFilter struct {
 	DID     string
 	// FromNumber matches as a substring, for finding a caller.
 	FromNumber string
-	Limit      int
-	Offset     int
+	// Number matches as a substring of either end, whichever way the call went.
+	Number string
+	Limit  int
+	Offset int
 }
 
 // ListCDRs pages through the ledger, newest first, with the total for paging.
@@ -337,6 +339,7 @@ func (l *LedgerStore) ListCDRs(ctx context.Context, filter CDRFilter) ([]CDR, in
 		Status:     filter.Status,
 		Did:        filter.DID,
 		FromNumber: filter.FromNumber,
+		Number:     filter.Number,
 		PageLimit:  int32(filter.Limit),
 		PageOffset: int32(filter.Offset),
 	})
@@ -352,6 +355,7 @@ func (l *LedgerStore) ListCDRs(ctx context.Context, filter CDRFilter) ([]CDR, in
 		Status:     filter.Status,
 		Did:        filter.DID,
 		FromNumber: filter.FromNumber,
+		Number:     filter.Number,
 	})
 	if err != nil {
 		return nil, 0, err

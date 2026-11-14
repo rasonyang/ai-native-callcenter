@@ -113,6 +113,8 @@ WHERE started_at >= coalesce($1::timestamptz, '-infinity'::timestamptz)
   AND ($6::text = '' OR status = $6)
   AND ($7::text = '' OR did = $7)
   AND ($8::text = '' OR from_number LIKE '%' || $8 || '%')
+  AND ($9::text = '' OR from_number LIKE '%' || $9 || '%'
+       OR to_number LIKE '%' || $9 || '%')
 `
 
 type CountCDRsParams struct {
@@ -124,6 +126,7 @@ type CountCDRsParams struct {
 	Status     string             `json:"status"`
 	Did        string             `json:"did"`
 	FromNumber string             `json:"fromNumber"`
+	Number     string             `json:"number"`
 }
 
 func (q *Queries) CountCDRs(ctx context.Context, arg CountCDRsParams) (int64, error) {
@@ -136,6 +139,7 @@ func (q *Queries) CountCDRs(ctx context.Context, arg CountCDRsParams) (int64, er
 		arg.Status,
 		arg.Did,
 		arg.FromNumber,
+		arg.Number,
 	)
 	var count int64
 	err := row.Scan(&count)
@@ -861,8 +865,10 @@ WHERE started_at >= coalesce($1::timestamptz, '-infinity'::timestamptz)
   AND ($6::text = '' OR status = $6)
   AND ($7::text = '' OR did = $7)
   AND ($8::text = '' OR from_number LIKE '%' || $8 || '%')
+  AND ($9::text = '' OR from_number LIKE '%' || $9 || '%'
+       OR to_number LIKE '%' || $9 || '%')
 ORDER BY started_at DESC
-LIMIT $10 OFFSET $9
+LIMIT $11 OFFSET $10
 `
 
 type ListCDRsParams struct {
@@ -874,6 +880,7 @@ type ListCDRsParams struct {
 	Status     string             `json:"status"`
 	Did        string             `json:"did"`
 	FromNumber string             `json:"fromNumber"`
+	Number     string             `json:"number"`
 	PageOffset int32              `json:"pageOffset"`
 	PageLimit  int32              `json:"pageLimit"`
 }
@@ -891,6 +898,7 @@ func (q *Queries) ListCDRs(ctx context.Context, arg ListCDRsParams) ([]Cdr, erro
 		arg.Status,
 		arg.Did,
 		arg.FromNumber,
+		arg.Number,
 		arg.PageOffset,
 		arg.PageLimit,
 	)

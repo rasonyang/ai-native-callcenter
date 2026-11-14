@@ -3538,9 +3538,12 @@ type ListCampaignContactsParams struct {
 
 // ListCDRsParams defines parameters for ListCDRs.
 type ListCDRsParams struct {
-	Status     *CDRStatus `form:"status,omitempty" json:"status,omitempty"`
-	DID        *string    `form:"did,omitempty" json:"did,omitempty"`
-	FromNumber *string    `form:"fromNumber,omitempty" json:"fromNumber,omitempty"`
+	Status *CDRStatus `form:"status,omitempty" json:"status,omitempty"`
+	DID    *string    `form:"did,omitempty" json:"did,omitempty"`
+
+	// Number Substring of either end's number: a call matches when `fromNumber` or `toNumber` contains it, whichever way it went.
+	Number     *string `form:"number,omitempty" json:"number,omitempty"`
+	FromNumber *string `form:"fromNumber,omitempty" json:"fromNumber,omitempty"`
 
 	// From RFC 3339 window start.
 	From *time.Time `form:"from,omitempty" json:"from,omitempty"`
@@ -3559,6 +3562,9 @@ type ListCDRsParams struct {
 // ListMyCDRsParams defines parameters for ListMyCDRs.
 type ListMyCDRsParams struct {
 	Status *CDRStatus `form:"status,omitempty" json:"status,omitempty"`
+
+	// Number Substring of either end's number: a call matches when `fromNumber` or `toNumber` contains it, whichever way it went.
+	Number *string `form:"number,omitempty" json:"number,omitempty"`
 
 	// FromNumber Substring of the caller's number.
 	FromNumber *string `form:"fromNumber,omitempty" json:"fromNumber,omitempty"`
@@ -6448,6 +6454,19 @@ func (siw *ServerInterfaceWrapper) ListCDRs(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	// ------------- Optional query parameter "number" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "number", r.URL.Query(), &params.Number, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "number"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "number", Err: err})
+		}
+		return
+	}
+
 	// ------------- Optional query parameter "fromNumber" -------------
 
 	err = runtime.BindQueryParameterWithOptions("form", true, false, "fromNumber", r.URL.Query(), &params.FromNumber, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
@@ -6581,6 +6600,19 @@ func (siw *ServerInterfaceWrapper) ListMyCDRs(w http.ResponseWriter, r *http.Req
 			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "status"})
 		} else {
 			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "status", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "number" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "number", r.URL.Query(), &params.Number, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "number"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "number", Err: err})
 		}
 		return
 	}

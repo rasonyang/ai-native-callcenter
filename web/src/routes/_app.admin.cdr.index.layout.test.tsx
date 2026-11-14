@@ -1,4 +1,5 @@
-import { describe } from 'vitest'
+import { fireEvent, screen, waitFor, within } from '@testing-library/react'
+import { describe, expect, it } from 'vitest'
 
 import type { CDR } from '@/lib/ledger'
 import { renderApp, waitForRows } from '@/test/app'
@@ -40,6 +41,18 @@ function cdr(n: number, overrides: Partial<CDR> = {}): CDR {
   }
 }
 
+/** A call the platform placed: it went out from the DID, to the customer. */
+function aiOutbound(n: number, overrides: Partial<CDR> = {}): CDR {
+  return cdr(n, {
+    callType: 'OUTBOUND',
+    fromNumber: '100200',
+    toNumber: '13800000000',
+    did: '100200',
+    legs: [{ kind: 'BOT', label: 'collections', durationSec: 40 }],
+    ...overrides,
+  })
+}
+
 /** Every leg kind in one journey, the longest sentence the column can hold. */
 const FULL_JOURNEY: CDR['legs'] = [
   { kind: 'TRUNK', label: 'carrier', durationSec: 2 },
@@ -56,6 +69,7 @@ function enumRows(): CDR[] {
     cdr(2, { status: 'NO_ANSWER', missedReason: 'AGENTS_DID_NOT_ANSWER', legs: FULL_JOURNEY, hasRecording: true }),
     cdr(3, { status: 'BUSY', callType: 'OUTBOUND', legs: FULL_JOURNEY }),
     cdr(4, { status: 'FAILED', legs: FULL_JOURNEY, isContained: true, hasRecording: true }),
+    aiOutbound(5, { legs: FULL_JOURNEY }),
   ]
 }
 
@@ -84,8 +98,9 @@ describe('CDR explorer with ordinary calls', () => {
         hasRecording: true,
       }),
       cdr(3, { status: 'NO_ANSWER', callType: 'OUTBOUND', fromNumber: '1001', did: '95001', legs: [{ kind: 'DIALING', label: '13800000000', durationSec: 30 }] }),
+      aiOutbound(4),
     ])
-    await waitForRows(3)
+    await waitForRows(4)
     await expectLayout(ctx)
   })
 })
@@ -95,7 +110,7 @@ describe('CDR explorer with every enum cell at its widest', () => {
   // contract allows each, and the journey and status columns are text.
   layoutTest('cdr (widest enum cells)', async (ctx) => {
     render(enumRows())
-    await waitForRows(4)
+    await waitForRows(5)
     await expectLayout(ctx)
   })
 })
@@ -103,14 +118,14 @@ describe('CDR explorer with every enum cell at its widest', () => {
 // One column at a time: the other keeps ordinary numbers.
 const numberColumns: Array<[name: string, put: (value: string, i: number) => Partial<CDR>]> = [
   ['caller id', (v) => ({ fromNumber: v })],
-  ['dialed number', (v) => ({ toNumber: v, did: v })],
+  ['called number', (v) => ({ toNumber: v, did: v })],
 ]
 
 describe('CDR explorer with 40-digit numbers', () => {
   for (const [name, put] of numberColumns) {
     layoutTest(`cdr (40-digit ${name})`, async (ctx) => {
       render(enumRows().map((row, i) => Object.assign(row, put(digits(40, 10 + i), i))), 500)
-      await waitForRows(4)
+      await waitForRows(5)
       await expectLayout(ctx)
     })
   }
@@ -118,7 +133,7 @@ describe('CDR explorer with 40-digit numbers', () => {
 
 describe('CDR explorer with numbers that cannot break', () => {
   // A trunk can hand over any string as the caller id; the contract does not
-  // bound fromNumber or did.
+  // bound fromNumber or toNumber.
   for (const [name, put] of numberColumns) {
     layoutTest(`cdr (unbreakable ${name})`, async (ctx) => {
       render([
@@ -131,4 +146,24 @@ describe('CDR explorer with numbers that cannot break', () => {
       await expectLayout(ctx)
     })
   }
+})
+
+describe('CDR explorer on a call the platform placed', () => {
+  // Stored as from = did = the line it went out from, to = the customer: the
+  // customer's number is the To column, and the filter finds it by number.
+  it('shows the customer under To and filters by number', async () => {
+    const { backend } = render([aiOutbound(1)])
+    await waitForRows(1)
+
+    const row = screen.getAllByRole('row')[1]
+    const cells = within(row).getAllByRole('cell')
+    expect(cells[1]).toHaveTextContent('100200')
+    expect(cells[2]).toHaveTextContent('13800000000')
+
+    fireEvent.change(screen.getByPlaceholderText(/number/i), { target: { value: '13800' } })
+    await waitFor(() =>
+      expect(backend.requests.some((r) => r.path.startsWith('/cdrs?') && r.path.includes('number=13800'))).toBe(true),
+    )
+    expect(backend.requests.some((r) => r.path.includes('fromNumber='))).toBe(false)
+  })
 })

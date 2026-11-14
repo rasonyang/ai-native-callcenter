@@ -1,5 +1,5 @@
 import { screen } from '@testing-library/react'
-import { describe } from 'vitest'
+import { describe, expect, it } from 'vitest'
 
 import i18n from '@/lib/i18n'
 import type { CDR, RecordingRow, TranscriptLine } from '@/lib/ledger'
@@ -141,6 +141,32 @@ describe('call detail with an ordinary call', () => {
   })
 })
 
+describe('call detail with a call the platform placed', () => {
+  // from = did = the line it went out from; to = the customer.
+  const outbound = () =>
+    cdr({
+      callType: 'OUTBOUND',
+      fromNumber: '100200',
+      toNumber: '13800000000',
+      did: '100200',
+      legs: [{ kind: 'BOT', label: 'collections', durationSec: 40 }],
+    })
+
+  layoutTest('cdr/$callId (AI outbound)', async (ctx) => {
+    render({ cdr: outbound() })
+    await drawn()
+    await check(ctx)
+  })
+
+  it('titles the call from the DID to the customer and lists the DID as a fact', async () => {
+    render({ cdr: outbound() })
+    await drawn()
+    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('100200 → 13800000000')
+    const label = screen.getByText(i18n.t('cdr.did'), { selector: 'dt' })
+    expect(label.nextElementSibling).toHaveTextContent('100200')
+  })
+})
+
 describe('call detail with hostile userData, facts and hangup cause', () => {
   // userData is arbitrary JSON from flows and integrations: a key and a value
   // with no break opportunity, a URL, a value nested 30 deep (shown as one
@@ -190,7 +216,7 @@ describe('call detail with 40-digit numbers in the title', () => {
   })
 
   layoutTest('cdr/$callId title (unbreakable numbers)', async (ctx) => {
-    render({ cdr: cdr({ fromNumber: asciiRun(6000, 23), did: longUrl() }) })
+    render({ cdr: cdr({ fromNumber: asciiRun(6000, 23), toNumber: longUrl(), did: longUrl() }) })
     await drawn()
     await check(ctx)
   })

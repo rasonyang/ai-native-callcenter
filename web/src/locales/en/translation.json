@@ -453,7 +453,7 @@
   },
   "cdr": {
     "hint": "Every finished call, newest first.",
-    "filterNumber": "Caller number…",
+    "filterNumber": "Number…",
     "allStatuses": "All statuses",
     "statuses": {
       "ANSWERED": "Answered",
@@ -463,7 +463,8 @@
     },
     "startedAt": "Started",
     "from": "From",
-    "did": "Number dialed",
+    "to": "To",
+    "did": "DID",
     "journey": "Journey",
     "status": "Status",
     "duration": "Duration",

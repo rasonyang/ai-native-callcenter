@@ -50,7 +50,7 @@ function CallDetail() {
   return (
     <>
       <PageHeader
-        title={`${cdr.fromNumber || t('cdr.unknownNumber')} → ${cdr.did || cdr.toNumber || '—'}`}
+        title={`${cdr.fromNumber || t('cdr.unknownNumber')} → ${cdr.toNumber || '—'}`}
         description={`${startFormat.format(new Date(cdr.startedAt))} · ${cdr.callId}`}
       />
 
@@ -61,6 +61,9 @@ function CallDetail() {
           </h2>
           <Journey cdr={cdr} />
           <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 xl:grid-cols-3">
+            <Fact label={t('cdr.did')}>
+              <span className="tabular">{cdr.did || '—'}</span>
+            </Fact>
             <Fact label={t('cdr.status')}>
               {cdr.missedReason
                 ? t(`cdr.missedReasons.${cdr.missedReason}`)
