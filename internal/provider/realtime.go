@@ -215,6 +215,15 @@ type Realtime struct {
 	// it is taken out of the conversation when the response ends; see
 	// onLineCall.
 	isLineResponse bool
+	// isCancelSentForResponse says this client has asked the provider to stop
+	// the response now open (a line preempting it, a barge-in, a keypress).
+	// Until the cancel lands that response is an ordinary one and can finish a
+	// function call; the call is never handed out, and is taken out of the
+	// conversation when the response ends, however it ends (the cancel may
+	// lose the race); see onCancelledCall. The watchdog's cancel of a stalled
+	// response does not set it. It belongs to one response, as isLineResponse
+	// does.
+	isCancelSentForResponse bool
 	// lineTurn is the request that response was created for, and lineCalls
 	// the tools it called instead of only saying the line, each named once:
 	// what asking for the line again needs (askForLineAgain). They belong to
@@ -628,6 +637,7 @@ func (r *Realtime) SpeakText(text string, isClosing bool) error {
 	if isCancelNeeded {
 		r.isCancelSentForSpeak = true
 		r.isPreemptedForSpeak = true
+		r.isCancelSentForResponse = true
 	}
 	r.pendingSpeak, r.isPendingSpeakClosing = "", false
 	var request responseRequest
@@ -1016,6 +1026,7 @@ func (r *Realtime) onResponseCreated() (isLine, isAskedAgain bool) {
 	r.mu.Lock()
 	isLine = r.isResponseRequested && r.request.kind == responseKindLine
 	r.isLineResponse = isLine
+	r.isCancelSentForResponse = false
 	r.lineTurn, r.lineCalls = responseRequest{}, nil
 	r.isOpeningResponse = r.isResponseRequested &&
 		(r.request.kind == responseKindOpening || r.isOpeningDropped)
@@ -1042,6 +1053,7 @@ func (r *Realtime) onResponseCreated() (isLine, isAskedAgain bool) {
 	if isCancelNeeded {
 		r.isCancelSentForSpeak = true
 		r.isPreemptedForSpeak = true
+		r.isCancelSentForResponse = true
 	}
 	r.mu.Unlock()
 
@@ -1311,6 +1323,11 @@ func (r *Realtime) Interrupt(reason InterruptReason, playedMs int) error {
 
 	isHeardByProvider := reason == InterruptReasonSpeech && r.profile.CancelsResponseItself
 	if !isHeardByProvider && r.isResponseOpen.Load() {
+		// Decided under the lock a call's arguments are judged under, so no
+		// call finishes between the decision and the flag.
+		r.mu.Lock()
+		r.isCancelSentForResponse = true
+		r.mu.Unlock()
 		if err := r.sendCancel(reason); err != nil {
 			return err
 		}
@@ -1841,7 +1858,7 @@ func (r *Realtime) handle(event *wireEvent) {
 		return
 
 	case "response.function_call_arguments.done":
-		if r.onLineCall(event) {
+		if r.onLineCall(event) || r.onCancelledCall(event) {
 			return
 		}
 		r.finishCall(event.ItemID, event.CallID)
@@ -2035,6 +2052,32 @@ func (r *Realtime) onLineCall(event *wireEvent) bool {
 		return false
 	}
 	r.log.Info("the turn asked for a line called a tool; the call is not handed out and is taken back when the turn ends",
+		"tool", event.Name, "toolCallId", event.CallID, "itemId", event.ItemID)
+	return true
+}
+
+// onCancelledCall reports whether a finished function call belongs to a
+// response this client has already decided to cancel (isCancelSentForResponse),
+// and if so keeps it from the consumer.
+//
+// Between the decision and the provider's answer the response is an ordinary
+// one. The turn a tool result owed, cancelled because a phase's line is about
+// to replace it, can call a tool in that window (usually hangup, which the
+// phase invites on the caller's next reply); handed out, the call would end or
+// move the call before the line was said (#357). The same window is open
+// after a barge-in or a keypress. Nothing is lost: the turn is being replaced,
+// and the call that matters is made again once the caller has replied. Like a
+// line turn's call it is left open, and removeUnfinishedCalls takes it out of
+// the conversation when the response ends, completed or not. A call finished
+// before the cancel was decided was handed out, is answered as usual and stays.
+func (r *Realtime) onCancelledCall(event *wireEvent) bool {
+	r.mu.Lock()
+	isCancelled := r.isCancelSentForResponse
+	r.mu.Unlock()
+	if !isCancelled {
+		return false
+	}
+	r.log.Info("a response this client cancelled called a tool; the call is not handed out and is taken back when the response ends",
 		"tool", event.Name, "toolCallId", event.CallID, "itemId", event.ItemID)
 	return true
 }
@@ -2244,7 +2287,9 @@ func (r *Realtime) removeOpeningDirection() {
 
 // removeUnfinishedCalls takes out of the conversation every function call a
 // response that did not complete left half made, and every function call a
-// line's turn made (onLineCall), however that turn ended.
+// line's turn made (onLineCall) or a response this client cancelled
+// (onCancelledCall), however that turn ended: a cancel can lose the race, the
+// response completes, and the call it held is still an unanswered item.
 //
 // A response cut off while it is writing a call's arguments (a keypress, a
 // barge-in, a preempting line) leaves the call item in the conversation, with
@@ -2259,7 +2304,9 @@ func (r *Realtime) removeOpeningDirection() {
 // to the consumer as a tool call and will get its output, so it stays. Which
 // responses: any that did not complete, because cancelled, incomplete and
 // failed all stop mid-item and all leave the same remnant. A completed response
-// is left alone. The stall path does not come here: the provider has not said
+// is left alone, unless this client had decided to cancel it: the cancel can
+// lose the race, and the calls onCancelledCall held are still unanswered items.
+// The stall path does not come here: the provider has not said
 // that response is over and may still finish the call, and deleting an item
 // that then gets its arguments and its output would break a call the consumer
 // is answering.
@@ -2269,11 +2316,13 @@ func (r *Realtime) removeOpeningDirection() {
 func (r *Realtime) removeUnfinishedCalls(response *wireResponse) {
 	r.mu.Lock()
 	open, finished, isLine := r.callItems, r.finishedCalls, r.isLineResponse
+	isCancelled := r.isCancelSentForResponse
 	r.callItems, r.finishedCalls, r.isLineResponse = nil, nil, false
+	r.isCancelSentForResponse = false
 	r.mu.Unlock()
 
 	isCutShort := response != nil && response.Status != "" && response.Status != statusCompleted
-	if !isCutShort && !isLine {
+	if !isCutShort && !isLine && !isCancelled {
 		return
 	}
 	status := ""

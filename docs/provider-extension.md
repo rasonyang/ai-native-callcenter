@@ -138,6 +138,25 @@ updates, a slot value recalled verbatim, an update late in a long call. Run
 with `-count=1`. Every engine this repository ships (openai, grok, qwen, gateway, doubao) applies a
 mid-call instruction change at once; the provider layer assumes it.
 
+**A call finished after this client decided to cancel the response (#357).**
+The turn a slot tool's result owed (B) is cancelled when a phase's line is
+asked for over it (`SpeakText`, or `onResponseCreated` when the provider's own
+turn detection created it), and a barge-in or keypress cancel (`Interrupt`)
+stops the open turn the same way. The cancel needs a round trip, and until it
+lands the response is an ordinary one: B can call `hangup`, which the new
+phase's instruction invites on the caller's next reply, and the call would end
+before the line was said. So a function call a response finishes after this
+client decided to cancel it (`isCancelSentForResponse`, set under the lock that
+decides the cancel, cleared by the next `response.created`) is not handed out,
+as a line's own turn's is not (`onCancelledCall`). Its item is deleted when the
+response ends, completed or not, because the cancel can lose the race and a
+held call is still an unanswered item the next turn would read (W-Q5). A call
+finished before the decision was handed out and stays. The watchdog's cancel
+of a stalled response is not covered: that response may still finish its call
+and is answered as usual (`removeUnfinishedCalls`). Nothing is lost, because
+the turn is being replaced and the call that matters is made again after the
+caller replies. No profile branch.
+
 **A line's turn that calls a tool (#351).** A line asked for mid-call
 (`SpeakText`: a phase's `announce`, the wait line) can come back as a turn that
 calls a tool instead of saying it. The client never hands that call out and

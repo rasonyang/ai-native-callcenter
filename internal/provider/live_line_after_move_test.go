@@ -50,6 +50,12 @@ import (
 // it is counted apart and not measured: the orchestrator would run that call
 // and leave the phase.
 //
+// That turn is the one #357 is about: the client has decided to cancel it for
+// the line, and a call it finishes before the cancel lands is held back and
+// taken out of the conversation (onCancelledCall), never handed out. A run
+// where it is handed out counts as a failure (early), and the calls held back
+// are counted from the client's log (heldBack).
+//
 //	AICC_LIVE_PROVIDER_TEST=1 AICC_LIVE_RUNS=10 go test -count=1 -run 'LiveQwenLineAfterMove/zh' -v ./internal/provider/
 //
 // AICC_LIVE_RUNS (default 3) is how many sessions each language opens.
@@ -86,6 +92,7 @@ type lineAfterMoveRun struct {
 	isReplied   bool          // the caller answered the line
 	isHungUp    bool          // the model called hangup on that answer
 	keptBack    int           // calls a line's turn made that the client kept back
+	heldBack    int           // calls of a turn the client had cancelled, kept back
 	askedAgain  int           // lines the client asked for again
 	givenUp     int           // lines asked again whose turn called a tool too
 	takenOut    int           // directions of a line asked again taken back out
@@ -138,6 +145,7 @@ func runLineAfterMove(t *testing.T, profile Profile, language string) {
 		})
 		r := c.lineAfterMoveRound(t, fx, agree)
 		r.keptBack = tap.count("the turn asked for a line called a tool;")
+		r.heldBack = tap.count("a response this client cancelled called a tool;")
 		r.askedAgain = tap.count("asking for the line once more")
 		r.givenUp = tap.count("giving it up")
 		r.takenOut = tap.count("took the direction of the line asked again out")
@@ -146,9 +154,9 @@ func runLineAfterMove(t *testing.T, profile Profile, language string) {
 		r.isLineSaid = r.lineAudio > 0 &&
 			strings.Contains(midNormalize(r.lineText), midNormalize(fx.PhaseLine))
 		t.Logf("[%s #%d] moved=%v beforeLine=%v lineTurns=%d firstSilent=%v said=%v after=%v text=%q "+
-			"keptBack=%d askedAgain=%d givenUp=%d takenOut=%d handedOut=%v other=%v replied=%v hungUp=%v reply=%q",
+			"keptBack=%d heldBack=%d askedAgain=%d givenUp=%d takenOut=%d handedOut=%v other=%v replied=%v hungUp=%v reply=%q",
 			language, run, r.isMoved, r.beforeLine, r.lineTurns, r.firstSilent, r.isLineSaid,
-			r.lineAfter.Round(time.Millisecond), r.lineText, r.keptBack, r.askedAgain, r.givenUp, r.takenOut,
+			r.lineAfter.Round(time.Millisecond), r.lineText, r.keptBack, r.heldBack, r.askedAgain, r.givenUp, r.takenOut,
 			r.handedOut, r.otherTools, r.isReplied, r.isHungUp, r.replyText)
 		handedOut += len(r.handedOut)
 		if !r.isMoved {
@@ -182,6 +190,11 @@ func runLineAfterMove(t *testing.T, profile Profile, language string) {
 		"first line turn silent %d; a line turn's call kept back %d; asked again %d; given up %d; "+
 		"calls handed out in a line's turn %d; hangup on the caller's answer %d/%d",
 		profile.Name, language, moved, runs, early, said, moved, silent, kept, again, given, handedOut, hungUp, moved)
+	// A call the result's turn made before the line's cancel reached it is not
+	// handed out (#357): the phase is unchanged and the line is still said.
+	if early != 0 {
+		t.Errorf("%d runs handed out a call of the turn the line cancelled, before the line", early)
+	}
 	if handedOut != 0 {
 		t.Errorf("%d calls were handed out in a line's turn", handedOut)
 	}
