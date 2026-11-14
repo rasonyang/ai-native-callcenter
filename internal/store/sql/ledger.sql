@@ -98,6 +98,8 @@ WHERE started_at >= coalesce(sqlc.narg('from_at')::timestamptz, '-infinity'::tim
   AND (sqlc.arg('status')::text = '' OR status = sqlc.arg('status'))
   AND (sqlc.arg('did')::text = '' OR did = sqlc.arg('did'))
   AND (sqlc.arg('from_number')::text = '' OR from_number LIKE '%' || sqlc.arg('from_number') || '%')
+  AND (sqlc.arg('number')::text = '' OR from_number LIKE '%' || sqlc.arg('number') || '%'
+       OR to_number LIKE '%' || sqlc.arg('number') || '%')
 ORDER BY started_at DESC
 LIMIT sqlc.arg('page_limit') OFFSET sqlc.arg('page_offset');
 
@@ -111,7 +113,9 @@ WHERE started_at >= coalesce(sqlc.narg('from_at')::timestamptz, '-infinity'::tim
        OR sqlc.narg('agent_id') = ANY (agent_ids))
   AND (sqlc.arg('status')::text = '' OR status = sqlc.arg('status'))
   AND (sqlc.arg('did')::text = '' OR did = sqlc.arg('did'))
-  AND (sqlc.arg('from_number')::text = '' OR from_number LIKE '%' || sqlc.arg('from_number') || '%');
+  AND (sqlc.arg('from_number')::text = '' OR from_number LIKE '%' || sqlc.arg('from_number') || '%')
+  AND (sqlc.arg('number')::text = '' OR from_number LIKE '%' || sqlc.arg('number') || '%'
+       OR to_number LIKE '%' || sqlc.arg('number') || '%');
 
 -- InsertTranscriptLine writes one line as it is spoken. The conflict target is
 -- the partial idempotency index, so a redelivered final is dropped rather than

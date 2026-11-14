@@ -32,7 +32,7 @@ function CDRExplorer() {
 
   const { data, isPending, isError, error } = useCDRs({
     status: status || undefined,
-    fromNumber: numberQuery || undefined,
+    number: numberQuery || undefined,
     limit: PAGE_SIZE,
     offset: page * PAGE_SIZE,
   })
@@ -80,7 +80,7 @@ function CDRExplorer() {
         <THead>
           <Th>{t('cdr.startedAt')}</Th>
           <Th>{t('cdr.from')}</Th>
-          <Th>{t('cdr.did')}</Th>
+          <Th>{t('cdr.to')}</Th>
           <Th>{t('cdr.journey')}</Th>
           <Th>{t('cdr.status')}</Th>
           <Th align="right">{t('cdr.duration')}</Th>
@@ -110,7 +110,7 @@ function CDRExplorer() {
               </Td>
               <Td className="tabular">
                 <CellText maxWidth="max-w-40" minWidth="min-w-upto-28">
-                  {row.did || '—'}
+                  {row.toNumber || '—'}
                 </CellText>
               </Td>
               <Td className="text-xs text-muted-foreground">

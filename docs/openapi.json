@@ -3685,6 +3685,14 @@
             }
           },
           {
+            "name": "number",
+            "in": "query",
+            "description": "Substring of either end's number: a call matches when `fromNumber` or `toNumber` contains it, whichever way it went.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "name": "fromNumber",
             "in": "query",
             "schema": {
@@ -3804,6 +3812,14 @@
             "in": "query",
             "schema": {
               "$ref": "#/components/schemas/CDRStatus"
+            }
+          },
+          {
+            "name": "number",
+            "in": "query",
+            "description": "Substring of either end's number: a call matches when `fromNumber` or `toNumber` contains it, whichever way it went.",
+            "schema": {
+              "type": "string"
             }
           },
           {

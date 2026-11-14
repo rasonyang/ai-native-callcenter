@@ -43,7 +43,7 @@ function MyCallsPage() {
 
   const { data, isPending, isError, error } = useMyCDRs({
     status: status || undefined,
-    fromNumber: numberQuery || undefined,
+    number: numberQuery || undefined,
     limit: PAGE_SIZE,
     offset: page * PAGE_SIZE,
   })

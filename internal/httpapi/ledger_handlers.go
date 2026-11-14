@@ -22,6 +22,7 @@ func (s *Server) ListCDRs(w http.ResponseWriter, r *http.Request, params api.Lis
 		Status:     stringOr(params.Status),
 		DID:        stringOr(params.DID),
 		FromNumber: stringOr(params.FromNumber),
+		Number:     stringOr(params.Number),
 		QueueID:    params.QueueID,
 		CampaignID: params.CampaignID,
 		AgentID:    params.AgentID,
@@ -58,6 +59,7 @@ func (s *Server) ListMyCDRs(w http.ResponseWriter, r *http.Request, params api.L
 		AgentID:    &agentID,
 		Status:     stringOr(params.Status),
 		FromNumber: stringOr(params.FromNumber),
+		Number:     stringOr(params.Number),
 		Limit:      intOr(params.Limit, 50),
 		Offset:     intOr(params.Offset, 0),
 	}

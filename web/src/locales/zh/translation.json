@@ -451,7 +451,7 @@
   },
   "cdr": {
     "hint": "所有已结束的通话，最新在前。",
-    "filterNumber": "主叫号码…",
+    "filterNumber": "号码…",
     "allStatuses": "全部状态",
     "statuses": {
       "ANSWERED": "已接听",
@@ -461,7 +461,8 @@
     },
     "startedAt": "开始时间",
     "from": "主叫",
-    "did": "被叫号码",
+    "to": "被叫",
+    "did": "线路号码",
     "journey": "通话轨迹",
     "status": "状态",
     "duration": "时长",

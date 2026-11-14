@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
-import type { components } from '@/generated/api'
+import type { components, operations } from '@/generated/api'
 
 import { ApiError, request } from './api'
 
@@ -59,14 +59,9 @@ export interface AuditFilter {
   offset?: number
 }
 
-export interface CDRFilter {
+/** The query of GET /cdrs, as the contract declares it (status comes from a free-form select). */
+export type CDRFilter = Omit<NonNullable<operations['listCDRs']['parameters']['query']>, 'status'> & {
   status?: string
-  did?: string
-  fromNumber?: string
-  from?: string
-  to?: string
-  limit?: number
-  offset?: number
 }
 
 /** One page of a list: how many rows, and how many to skip. */

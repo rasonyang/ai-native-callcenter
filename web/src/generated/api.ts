@@ -5671,6 +5671,8 @@ export interface operations {
             query?: {
                 status?: components["schemas"]["CDRStatus"];
                 did?: string;
+                /** @description Substring of either end's number: a call matches when `fromNumber` or `toNumber` contains it, whichever way it went. */
+                number?: string;
                 fromNumber?: string;
                 /** @description RFC 3339 window start. */
                 from?: string;
@@ -5707,6 +5709,8 @@ export interface operations {
         parameters: {
             query?: {
                 status?: components["schemas"]["CDRStatus"];
+                /** @description Substring of either end's number: a call matches when `fromNumber` or `toNumber` contains it, whichever way it went. */
+                number?: string;
                 /** @description Substring of the caller's number. */
                 fromNumber?: string;
                 /** @description RFC 3339 window start. */
