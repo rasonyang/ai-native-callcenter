@@ -7,6 +7,8 @@ carries the one-line installer's files.
 
 ## Unreleased
 
+## v0.8.5 - 2026-11-14
+
 ### Upgrade notes
 
 - The built-in `hangup` now takes a required argument, `reason`:
@@ -34,6 +36,10 @@ carries the one-line installer's files.
 - No migration. API contract: additive only, an operation and query
   parameters (see Added and Fixed); `make api-breaking BASE=v0.8.3` reports
   no breaking change (#476, #567).
+- Upgrade both images together, as always: they are published under one tag
+  and the deploy stack names both. The switch image has no change in this
+  release; its tag moves so that the pair still matches. No application
+  setting is added, removed or changed in default.
 
 ### Changed
 
@@ -123,6 +129,12 @@ carries the one-line installer's files.
   deleted when the turn ends, even if the provider finished the turn first and
   refused the cancel. Calls made before the cancel are answered as usual, and a
   stalled response's late call is handled as before. (#357)
+- The end-to-end suite for outbound calls (`deploy/e2e/`) no longer reads a
+  duration or an order from two wall-clock stamps of a VM whose clock is
+  stepped: the campaign and capacity checks take them from the callee
+  simulator's and the driver's monotonic clocks, with no bound changed, and
+  the listing check now waits on what it has read instead of on a timestamp.
+  `deploy/e2e/README.md` says which clock each check reads (#515).
 
 ## v0.8.3 - 2026-11-12
 
