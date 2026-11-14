@@ -112,6 +112,17 @@ carries the one-line installer's files.
   `number` parameter that matches a substring of either end; `fromNumber`
   keeps its meaning. The stored records, the CDR API and the CDR webhook were
   already right (#567).
+- A tool call made in a turn the bot has already decided to cancel no longer
+  reaches the flow, on the Realtime engines (openai, grok, qwen, gateway). When a
+  slot tool moved the call into a phase with a mid-call line and the phase's
+  instruction invited `hangup`, the turn the tool's result owed could call
+  `hangup` in the moment before the line's cancel reached it, and the call
+  ended or moved before the line was said. The same moment is open after a
+  barge-in or a keypress cancel. Now a call finished after the cancel was
+  decided is neither handed out nor left in the conversation: its item is
+  deleted when the turn ends, even if the provider finished the turn first and
+  refused the cancel. Calls made before the cancel are answered as usual, and a
+  stalled response's late call is handled as before. (#357)
 
 ## v0.8.3 - 2026-11-12
 

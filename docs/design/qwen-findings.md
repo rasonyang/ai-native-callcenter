@@ -1004,6 +1004,20 @@ Covered by `TestACallMadeInALinesTurnIsNeverHandedOut`,
 `TestALineRequestBarsToolsWhereTheProfileObeysIt` and
 `TestOnlyALineRequestBarsTools` (`internal/provider/line_tools_test.go`).
 
+The same rule covers the turn a line cancels (#357): the answer turn B that a slot
+tool's result owed, cancelled by the phase's line, could call `hangup` before the
+cancel landed, and `onLineCall` did not see it because B is not the line's turn.
+`onCancelledCall` keeps back any call finished after this client decided to cancel
+the open response (`isCancelSentForResponse`), and `removeUnfinishedCalls` deletes
+its item when the response ends, completed or not. Covered by
+`TestACallFinishedInATurnTheLineCancelsIsNotHandedOut` and its siblings in
+`internal/provider/cancelled_call_test.go`, and
+`TestAHangupInTheTurnThePhasesLineCancelsDoesNotEndTheCall` in `internal/aicall`.
+Live on `qwen-audio-3.1-realtime-flash`, zh, 10 sessions of
+`TestLiveQwenLineAfterMove`: the line was said in every session and no call was
+handed out before it; none of the 10 hit the window (no call held back), so the
+held path is covered by the fake-server tests only.
+
 **The line said nothing (live call on 320b827, the guard alone).** Call
 01a1622a-950a-766a-af17-47812eae7178 (13:52:19): the wait line was asked for at
 +1 s, the guard kept back the line's turn's call at 13:52:20.054, and the bot
