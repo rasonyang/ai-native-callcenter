@@ -246,6 +246,86 @@ func TestC10ListingIsHeldToWhatTheDriverRead(t *testing.T) {
 	}
 }
 
+// C10's skipped attempt: the dialer's DNC_SKIPPED/NUMBER_ON_DNC outcome is the
+// proof it saw the listing. The attempt's start (the dialer's wall clock) and
+// the listing's post (the driver's) are two processes' clocks: their
+// difference is printed, not compared, so a step that puts the start before
+// the post does not fail it, and a start after the post does not rescue a
+// skip with another outcome or cause.
+func TestC10SkippedAttemptIsJudgedByItsOutcome(t *testing.T) {
+	const key = "the dialer saw the listing"
+	other, otherCause := api.CampaignOutcome("BUSY"), "NORMAL_CLEARING"
+	for _, tc := range []struct {
+		name    string
+		startMs float64 // StartedAt minus PostedAt on the wall clocks
+		spoil   func(a *api.CampaignAttempt)
+		pass    bool
+		wantMsg string
+	}{
+		{"started 2 s before the post (a step), DNC_SKIPPED/NUMBER_ON_DNC", -2000, nil, true, ""},
+		{"started 217 ms after the post, DNC_SKIPPED/NUMBER_ON_DNC", 217, nil, true, ""},
+		{"started 2 s before the post, another outcome", -2000, func(a *api.CampaignAttempt) { a.Outcome = &other }, false, "read BUSY/NUMBER_ON_DNC"},
+		{"started after the post, another outcome", 217, func(a *api.CampaignAttempt) { a.Outcome = &other }, false, "read BUSY/NUMBER_ON_DNC"},
+		{"started 2 s before the post, another cause", -2000, func(a *api.CampaignAttempt) { a.HangupCause = &otherCause }, false, "read DNC_SKIPPED/NORMAL_CLEARING"},
+		{"started after the post, another cause", 217, func(a *api.CampaignAttempt) { a.HangupCause = &otherCause }, false, "read DNC_SKIPPED/NORMAL_CLEARING"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := c10Run2Fixture(0, false)
+			a := f.cv.Attempts[1]
+			a.StartedAt = f.cv.Listing.PostedAt.Add(time.Duration(tc.startMs * float64(time.Millisecond)))
+			if tc.spoil != nil {
+				tc.spoil(&a)
+			}
+			f.cv.Attempts = []api.CampaignAttempt{f.cv.Attempts[0], a}
+			skipped := f.assess().Attempts[1]
+			failures := verdictOf(t, skipped.Checks, skipped.Failures, key)
+			if got := len(failures) == 0; got != tc.pass {
+				t.Fatalf("passed = %v, want %v: %v", got, tc.pass, failures)
+			}
+			if !tc.pass {
+				want := time.Duration(tc.startMs * float64(time.Millisecond)).String()
+				if !strings.Contains(failures[0], tc.wantMsg) || !strings.Contains(failures[0], "wall clock, not compared") || !strings.Contains(failures[0], want) {
+					t.Errorf("the failure does not say what was read (%q) and the wall clock's difference (%s, not compared): %s", tc.wantMsg, want, failures[0])
+				}
+			}
+		})
+	}
+}
+
+// A campaign attempt row reads answerToEndMs on the simulator's monotonic
+// clock and carries the wall stamps' reading beside it, as the capacity rows
+// do: a step between the 200 and the BYE moves only the wall reading.
+func TestCampaignAnswerToEndIsMonotonicWithTheWallReadingBeside(t *testing.T) {
+	cs := caseByID(AllCases, "C01")
+	base := time.Date(2026, 11, 7, 1, 28, 0, 0, time.UTC)
+	for _, tc := range []struct {
+		name       string
+		wall, mono float64
+	}{
+		{"no step", 8000, 8000},
+		{"a -2050 ms step between the 200 and the BYE", 8000 + step506, 8000},
+		{"a +1500 ms step", 9500, 8000},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			d := calleesim.DialogRecord{
+				InviteAt: base,
+				Final:    &calleesim.FinalRecord{Status: 200, SentAt: base.Add(2 * time.Second), AfterInviteMs: 2000},
+				End: &calleesim.EndRecord{Method: calleesim.EndedWithBye, By: calleesim.EndedByCallee,
+					At: base.Add(2*time.Second + time.Duration(tc.wall*float64(time.Millisecond))), AfterInviteMs: 2000 + tc.mono},
+			}
+			var col Checks
+			var ar AttemptResult
+			assessStepDialog(&col, "attempt 1: ", RegionView{}, cs.Steps[0], api.CampaignAttempt{StartedAt: base}, &d, nil, &ar)
+			if ar.AnswerToEndMs == nil || *ar.AnswerToEndMs != tc.mono {
+				t.Errorf("answerToEndMs = %v, want %v (monotonic)", ar.AnswerToEndMs, tc.mono)
+			}
+			if ar.AnswerToEndWallMs == nil || *ar.AnswerToEndWallMs != tc.wall {
+				t.Errorf("answerToEndWallMs = %v, want %v (wall stamps)", ar.AnswerToEndWallMs, tc.wall)
+			}
+		})
+	}
+}
+
 // The driver posts a listing only after it has read the contact's first
 // attempt FINISHED, and keeps that attempt in the listing: the evidence
 // TestC10ListingIsHeldToWhatTheDriverRead judges.

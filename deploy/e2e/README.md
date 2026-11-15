@@ -207,7 +207,7 @@ report's `listedMidRun`), and the case requires that to be attempt 1,
 simulator recorded (see "Clocks"). It also fails when the API answered the
 listing only after the retry fell due (it would test nothing), and otherwise
 asserts that the attempts are exactly `BUSY`/`USER_BUSY` then `DNC_SKIPPED`/`NUMBER_ON_DNC`
-(the second started after the listing), that the contact is `DNC` having spent
+(that outcome is the proof the dialer saw the listing), that the contact is `DNC` having spent
 one attempt, that the simulator saw one INVITE for the number, that attempt 1
 has one CDR with the dialled string and the skipped attempt none. The platform
 skips a listed contact on the dialer's next loop, not when its retry falls due
@@ -237,15 +237,17 @@ read it as follows.
 
 - **Between two events the simulator recorded: its monotonic clock.** Beside
   each wall-clock stamp, the simulator's record carries the same moment on its
-  monotonic clock: `afterInviteMs` on the dialog's `final` and `end` (time
-  since the INVITE), and `inviteAfterStartMs` on the dialog and `afterStartMs`
-  on `final` and `end` (time since the simulator started, one timeline for
-  every dialog it saw). The record's `startedAt` and `afterStartMs` say when
-  the simulator started and when the record was taken. C07's ring, C04's
+  monotonic clock: `afterInviteMs` on each of the dialog's `provisionals`, its
+  `final` and its `end` (time since the INVITE), and `inviteAfterStartMs` on
+  the dialog and `afterStartMs` on each response and the `end` (time since the
+  simulator started, one timeline for every dialog it saw). The record's
+  `startedAt` and `afterStartMs` say when the simulator started and when the
+  record was taken. C07's ring, C04's
   INVITE gap, C10's control INVITE and the time C10's record was taken
   (against C10's retry falling due), K1's and K3's preconditions, K2's peak of
   dialogs up at once and K3's times from the answer to the BYE
-  (`answerToEndMs`) read these.
+  (`answerToEndMs`, on campaign attempt rows too) read these. The simulator
+  schedules its own responses from the same clock.
 - **Between two of the driver's own moments: its monotonic clock.** K3's
   holder seen on the bot before the refused calls were placed reads
   `holderOnBotAfterRunStartMs` and `placedAfterRunStartMs` (time since the
@@ -263,8 +265,11 @@ read it as follows.
   dialer**, each with a slack or margin of its own (#515 lists them): when an
   INVITE is the attempt's (between the attempt's start and the next attempt's
   start), how long a contact was watched (from the end of the attempt's
-  dialog), whether C10's listing was answered before its retry fell due, and
-  whether C10's skipped attempt started after the listing.
+  dialog) and whether C10's listing was answered before its retry fell due.
+  C10's skipped attempt is read causally: its `DNC_SKIPPED`/`NUMBER_ON_DNC`
+  outcome is the proof the dialer saw the listing, and the wall clock's
+  difference between the attempt's start and the listing's post is printed in
+  the check, not compared.
 
 The reports keep the wall-clock readings beside the monotonic ones
 (`cancelAfterInviteWallMs`, `inviteGapWallMs`, `answerToEndWallMs`, and the
