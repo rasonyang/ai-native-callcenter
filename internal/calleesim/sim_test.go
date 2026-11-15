@@ -195,11 +195,54 @@ func TestTheFinalWaitsForItsDelay(t *testing.T) {
 		t.Fatal("no final recorded")
 	}
 	// A floor, not a latency figure: the scripted delay cannot be shortened.
-	if held := rec.Final.SentAt.Sub(rec.InviteAt); held < delay*time.Millisecond {
-		t.Errorf("200 sent after %v, scripted delay is %dms", held, delay)
+	if rec.Final.AfterInviteMs < delay {
+		t.Errorf("200 sent %.3f ms after the INVITE on the monotonic clock, scripted delay is %dms", rec.Final.AfterInviteMs, delay)
 	}
 	if len(rec.Provisionals) != 0 {
 		t.Errorf("no provisionals were scripted, got %+v", rec.Provisionals)
+	}
+}
+
+// A step of the wall clock between the INVITE and a scheduled response must
+// not move the response: the recorded InviteAt is shifted by the net step #506
+// saw, and the 180 and the 200 still wait their scripted time from the INVITE
+// on the monotonic clock.
+func TestResponsesAreScheduledFromTheMonotonicInvite(t *testing.T) {
+	const (
+		ring  = 300
+		delay = 600
+	)
+	sim := startSim(t, loopback, scenarioOf(t, map[string][]Behaviour{
+		"1": {{Provisionals: []Provisional{{Status: 180, AtMs: ring}}, FinalAfterMs: delay}},
+	}), nil)
+	sim.mu.Lock() // the handler reads it under mu
+	sim.recordedInviteShift = -2050 * time.Millisecond
+	sim.mu.Unlock()
+	uac := newUAC(t, loopback, sim.Addr(), "1")
+	sent := time.Now()
+	uac.invite()
+	final := uac.waitFinal()
+	if final.status != 200 {
+		t.Fatalf("final = %d", final.status)
+	}
+	rec := only(t, sim.Report())
+	if shifted := rec.InviteAt.Sub(sent); shifted > -time.Second {
+		t.Fatalf("the seam did not shift the recorded InviteAt: %v from the send", shifted)
+	}
+	if rec.Final == nil || rec.Final.AfterInviteMs < delay {
+		t.Errorf("200 final = %+v, want afterInviteMs >= %d on the monotonic clock", rec.Final, delay)
+	}
+	if len(rec.Provisionals) != 1 || rec.Provisionals[0].AfterInviteMs < ring {
+		t.Errorf("provisionals = %+v, want one 180 with afterInviteMs >= %d on the monotonic clock", rec.Provisionals, ring)
+	} else {
+		onTheTimeline(t, "the 180", rec, rec.Provisionals[0].AfterInviteMs, rec.Provisionals[0].AfterStartMs)
+	}
+	ringing := uac.waitResponse(180, "INVITE")
+	if got := ringing.at.Sub(sent); got < ring*time.Millisecond {
+		t.Errorf("180 arrived %v after the INVITE was sent, scripted %dms", got, ring)
+	}
+	if got := final.at.Sub(sent); got < delay*time.Millisecond {
+		t.Errorf("200 arrived %v after the INVITE was sent, scripted %dms", got, delay)
 	}
 }
 

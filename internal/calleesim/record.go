@@ -86,6 +86,11 @@ type ProvisionalRecord struct {
 	Status        int       `json:"status"`
 	SentAt        time.Time `json:"sentAt"`
 	HasEarlyMedia bool      `json:"hasEarlyMedia"`
+	// AfterInviteMs and AfterStartMs are as on FinalRecord: the monotonic
+	// clock's reading, which SentAt minus the dialog's InviteAt can differ
+	// from when the wall clock stepped in between.
+	AfterInviteMs float64 `json:"afterInviteMs"`
+	AfterStartMs  float64 `json:"afterStartMs"`
 }
 
 // FinalRecord is the final response to the INVITE.

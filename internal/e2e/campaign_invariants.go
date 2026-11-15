@@ -9,7 +9,6 @@ import (
 	"net/url"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/rasonyang/ai-native-callcenter/internal/api"
 	"github.com/rasonyang/ai-native-callcenter/internal/calleesim"
@@ -248,20 +247,20 @@ func CheckNoInviteAfterAnswer(_ context.Context, v *RunView, c *Checks) {
 		"%d number(s) were answered during the run, as the cases say (%d; %d dialogs)", wantNumbers, len(numbers), len(v.Dialogs))
 	for _, n := range numbers {
 		list := byNumber[n]
+		// The record lists a number's dialogs in the order their INVITEs
+		// arrived, so "after the answer" is a position and reads no clock.
 		answered, after := 0, 0
-		var answeredAt time.Time
-		for _, d := range list {
+		first := -1
+		for i, d := range list {
 			if d.Final != nil && d.Final.Status == 200 {
 				answered++
-				if answeredAt.IsZero() {
-					answeredAt = d.InviteAt
+				if first < 0 {
+					first = i
 				}
 			}
 		}
-		for _, d := range list {
-			if d.InviteAt.After(answeredAt) {
-				after++
-			}
+		if first >= 0 {
+			after = len(list) - 1 - first
 		}
 		c.That(answered == 1, "%s: exactly one INVITE was answered (%d of its %d)", n, answered, len(list))
 		c.That(after == 0, "%s: no INVITE reached it after the answer (%d did)", n, after)

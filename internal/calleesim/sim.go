@@ -56,6 +56,10 @@ type Server struct {
 	// startedAt is the zero of the monotonic timeline every afterStartMs is
 	// read on. It keeps its monotonic reading; see dialog.inviteAt.
 	startedAt time.Time
+	// recordedInviteShift moves the wall stamp recorded into rec.InviteAt, as a
+	// step of the VM's wall clock would. Zero outside tests; scheduling never
+	// reads it, which is what the test that sets it proves.
+	recordedInviteShift time.Duration
 
 	mu       sync.Mutex
 	dialogs  map[string]*dialog
@@ -220,7 +224,7 @@ func (s *Server) onInvite(msg *voice.SIPMessage, from *net.UDPAddr) {
 		ackCh: make(chan struct{}),
 		rec: DialogRecord{
 			CallID: msg.CallID(), Number: number, Attempt: attempt, IsExpected: known,
-			RemoteAddr: from.String(), InviteAt: inviteAt.UTC(), InviteAfterStartMs: s.sinceStartMs(inviteAt),
+			RemoteAddr: from.String(), InviteAt: inviteAt.Add(s.recordedInviteShift).UTC(), InviteAfterStartMs: s.sinceStartMs(inviteAt),
 			RequestURI: msg.RequestURI(), InviteHeaders: msg.Headers(), Provisionals: []ProvisionalRecord{},
 			Downlink: Downlink{Energy: []EnergyBucket{}},
 		},
@@ -341,7 +345,10 @@ func (d *dialog) run(known bool) {
 	d.rec.Codec = law.String()
 	d.mu.Unlock()
 
-	start := d.rec.InviteAt
+	// Every response is scheduled from d.inviteAt, which keeps its monotonic
+	// reading, so sleepUntil runs on the clock a wall-clock step cannot move.
+	// rec.InviteAt is a reported wall stamp only.
+	start := d.inviteAt
 	for _, p := range d.behaviour.sortedProvisionals() {
 		if !d.sleepUntil(start.Add(ms(p.AtMs))) {
 			return
@@ -360,7 +367,9 @@ func (d *dialog) run(known bool) {
 	d.answer(offer, payloadType)
 }
 
-// sleepUntil waits for t; false when the dialog ended first.
+// sleepUntil waits for t; false when the dialog ended first. t must derive
+// from a stamp that keeps its monotonic reading (d.inviteAt, d.answeredAt), so
+// time.Until measures on the monotonic clock.
 func (d *dialog) sleepUntil(t time.Time) bool {
 	timer := time.NewTimer(time.Until(t))
 	defer timer.Stop()
@@ -390,8 +399,10 @@ func (d *dialog) provisional(p Provisional, offer *voice.SDPOffer, payloadType i
 	}
 	packet := d.invite.Response(fmt.Sprintf("%d %s", p.Status, reasonFor(p.Status)), d.toTag, "", extra, body)
 	d.lastResponse = packet
+	now := time.Now() // keeps its monotonic reading
 	d.rec.Provisionals = append(d.rec.Provisionals, ProvisionalRecord{
-		Status: p.Status, SentAt: time.Now().UTC(), HasEarlyMedia: len(body) > 0,
+		Status: p.Status, SentAt: now.UTC(), HasEarlyMedia: len(body) > 0,
+		AfterInviteMs: monotonicMs(now, d.inviteAt), AfterStartMs: d.s.sinceStartMs(now),
 	})
 	d.s.send(d.from, packet)
 }

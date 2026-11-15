@@ -268,8 +268,8 @@ func assessStepDialog(col *Checks, pre string, rv RegionView, st Step, a api.Cam
 	}
 	col.That(ended, pre+"the dialog ended with a BYE from the %s (%s)", strings.ToLower(wantBy), got)
 	if d.End != nil && d.Final != nil {
-		ms := float64(d.End.At.Sub(d.Final.SentAt).Milliseconds())
-		ar.AnswerToEndMs = &ms
+		ms, wallMs, _ := holdMsOf(*d)
+		ar.AnswerToEndMs, ar.AnswerToEndWallMs = &ms, &wallMs
 	}
 	var peak float64
 	for _, b := range d.Downlink.Energy {
@@ -514,8 +514,11 @@ func listedAfterFinal(cs Case, cv ContactView, dialogs []calleesim.DialogRecord)
 }
 
 // assessSkippedAttempt checks the attempt the do-not-call sweep skipped: it
-// is finished by the dialer with the listing's outcome and cause, started
-// after the listing, and neither reached the simulator nor made a CDR.
+// is finished by the dialer with the listing's outcome and cause, and neither
+// reached the simulator nor made a CDR. That outcome and cause are themselves
+// the proof that the dialer saw the listing before it dialled, so the order is
+// not read from the dialer's and the driver's wall clocks: their difference
+// is printed in the check, not compared.
 func assessSkippedAttempt(a api.CampaignAttempt, cdrs []api.CDR, l *Listing, hasDialog bool) AttemptResult {
 	pre := "attempt 2: "
 	outcome, cause := deref(a.Outcome), deref(a.HangupCause)
@@ -534,8 +537,9 @@ func assessSkippedAttempt(a api.CampaignAttempt, cdrs []api.CDR, l *Listing, has
 	col.That(len(cdrs) == 0, pre+"no CDR carries the call id (%d)", len(cdrs))
 	col.That(!hasDialog, "%sno INVITE was sent", pre)
 	if l != nil {
-		col.That(!a.StartedAt.Before(l.PostedAt.Add(-inviteSlack)), pre+"the attempt started (%s) after the number was listed (%s)",
-			a.StartedAt.Format(time.RFC3339Nano), l.PostedAt.Format(time.RFC3339Nano))
+		col.That(outcome == listedSkipOutcome && cause == listedSkipCause,
+			pre+"the dialer saw the listing before it dialled: it finished the attempt %s/%s (read %s/%s; wall clock, not compared: started %s after the number was posted to the list)",
+			listedSkipOutcome, listedSkipCause, outcome, cause, a.StartedAt.Sub(l.PostedAt).Round(time.Millisecond))
 	}
 	ar.Checks, ar.Failures = nonNil(col.checks), nonNil(col.failures)
 	ar.Passed = len(ar.Failures) == 0

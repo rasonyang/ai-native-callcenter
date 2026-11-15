@@ -229,10 +229,13 @@ type AttemptResult struct {
 	InviteGapWallMs *float64 `json:"inviteGapWallMs,omitempty"`
 	// IsAnswered marks an attempt the callee answered. FirstAudioAfterAnswerMs
 	// runs from its 200 OK to the first downlink frame above silence, and
-	// AnswerToEndMs to the BYE. Reported, never asserted.
+	// AnswerToEndMs to the BYE, both on the simulator's monotonic clock
+	// (AnswerToEndWallMs is the same interval as two wall-clock stamps, as on
+	// the capacity rows). Reported, never asserted.
 	IsAnswered              bool     `json:"isAnswered,omitempty"`
 	FirstAudioAfterAnswerMs *float64 `json:"firstAudioAfterAnswerMs,omitempty"`
 	AnswerToEndMs           *float64 `json:"answerToEndMs,omitempty"`
+	AnswerToEndWallMs       *float64 `json:"answerToEndWallMs,omitempty"`
 }
 
 // ProbeRow is one line of the measured table.
