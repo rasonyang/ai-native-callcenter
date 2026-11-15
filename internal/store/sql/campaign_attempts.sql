@@ -22,11 +22,22 @@ RETURNING *;
 UPDATE campaign_attempts SET originate_job_id = $2
 WHERE call_id = $1 AND state = 'DIALING';
 
--- The lead a call recorded so far; the last call wins. Only an attempt still
--- in flight can be written to.
+-- The lead a call recorded so far; the last call wins. SetLead decides whether
+-- the attempt may take it (in flight, or finished early with no real CDR yet)
+-- under LockAttemptByCall, so this writes by id and checks nothing itself.
 -- name: SetAttemptLead :execrows
 UPDATE campaign_attempts SET lead_intent = $2, lead_notes = $3
-WHERE call_id = $1 AND state = 'DIALING';
+WHERE id = $1;
+
+-- True when the ledger holds a CDR for the call that is more than a placement
+-- failure: the call's final word, which a lead can no longer join. Run after
+-- LockAttemptByCall, in its own statement, so it sees every CDR committed
+-- before the lock was granted (InsertCDR writes the CDR before it locks).
+-- name: CallHasRealCDR :one
+SELECT EXISTS (
+    SELECT 1 FROM cdrs
+    WHERE call_id = $1 AND tech ->> 'isPlacementFailure' IS DISTINCT FROM 'true'
+)::bool AS has_real_cdr;
 
 -- name: GetAttemptByCall :one
 SELECT * FROM campaign_attempts WHERE call_id = $1;

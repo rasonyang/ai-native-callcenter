@@ -965,6 +965,15 @@ The model judges; code records.
   A model changing its mind mid-call therefore leaves no duplicate or stale callback, and nothing
   needs undoing. A DNC that takes effect at the end of the call rather than during it changes
   nothing: the call is not hung up for it, and an answered contact is not redialled anyway.
+- **A lead is accepted until the call has its real CDR,** not only while the attempt is
+  `DIALING`. An attempt finished early (restart reconciliation as `UNKNOWN`, a placement recorded
+  as failed) can still have a live call: after a restart the switch's late leg is re-armed and the
+  customer answers, with the same call id. `SetLead` therefore writes to a `FINISHED` attempt as
+  long as the ledger holds no CDR for the call other than a placement failure, and the real CDR
+  that follows revises the attempt through the same finish routine, which files the DNC row or
+  callback once. The attempt lock orders `SetLead` against the CDR insert; once the real CDR is
+  in, `SetLead` reports false (#559). Whether such a late leg should reach the bot at all is
+  #573.
 - **A phase may declare the lead** (`"lead": {"intent": …, "notes": …}`, #352), which the
   engine records when a campaign call enters that phase, through the same write: one more write,
   ordered with the model's `record_lead` calls, and the last one wins, except that while the call

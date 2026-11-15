@@ -50,6 +50,24 @@ func (q *Queries) AttemptIsLatest(ctx context.Context, id uuid.UUID) (*bool, err
 	return is_latest, err
 }
 
+const callHasRealCDR = `-- name: CallHasRealCDR :one
+SELECT EXISTS (
+    SELECT 1 FROM cdrs
+    WHERE call_id = $1 AND tech ->> 'isPlacementFailure' IS DISTINCT FROM 'true'
+)::bool AS has_real_cdr
+`
+
+// True when the ledger holds a CDR for the call that is more than a placement
+// failure: the call's final word, which a lead can no longer join. Run after
+// LockAttemptByCall, in its own statement, so it sees every CDR committed
+// before the lock was granted (InsertCDR writes the CDR before it locks).
+func (q *Queries) CallHasRealCDR(ctx context.Context, callID uuid.UUID) (bool, error) {
+	row := q.db.QueryRow(ctx, callHasRealCDR, callID)
+	var has_real_cdr bool
+	err := row.Scan(&has_real_cdr)
+	return has_real_cdr, err
+}
+
 const campaignOfCall = `-- name: CampaignOfCall :one
 SELECT campaign_id FROM campaign_attempts WHERE call_id = $1
 `
@@ -370,19 +388,20 @@ func (q *Queries) SetAttemptJob(ctx context.Context, arg SetAttemptJobParams) (i
 
 const setAttemptLead = `-- name: SetAttemptLead :execrows
 UPDATE campaign_attempts SET lead_intent = $2, lead_notes = $3
-WHERE call_id = $1 AND state = 'DIALING'
+WHERE id = $1
 `
 
 type SetAttemptLeadParams struct {
-	CallID     uuid.UUID `json:"callId"`
+	ID         uuid.UUID `json:"id"`
 	LeadIntent *string   `json:"leadIntent"`
 	LeadNotes  *string   `json:"leadNotes"`
 }
 
-// The lead a call recorded so far; the last call wins. Only an attempt still
-// in flight can be written to.
+// The lead a call recorded so far; the last call wins. SetLead decides whether
+// the attempt may take it (in flight, or finished early with no real CDR yet)
+// under LockAttemptByCall, so this writes by id and checks nothing itself.
 func (q *Queries) SetAttemptLead(ctx context.Context, arg SetAttemptLeadParams) (int64, error) {
-	result, err := q.db.Exec(ctx, setAttemptLead, arg.CallID, arg.LeadIntent, arg.LeadNotes)
+	result, err := q.db.Exec(ctx, setAttemptLead, arg.ID, arg.LeadIntent, arg.LeadNotes)
 	if err != nil {
 		return 0, err
 	}
