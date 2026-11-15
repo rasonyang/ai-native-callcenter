@@ -98,16 +98,49 @@ func (a *AttemptStore) SetJob(ctx context.Context, callID uuid.UUID, jobID strin
 }
 
 // SetLead records the lead a call concluded so far. The last write wins; its
-// side effects run once, when the attempt finishes. It reports false when the
-// attempt is not in flight (gone, or already finished).
+// side effects run once, when the finish routine next runs on the attempt.
+//
+// A lead is accepted while the attempt is in flight, and after it was finished
+// early (a restart's reconciliation, a recorded placement failure) as long as
+// the ledger holds no CDR for the call other than a placement failure: the
+// call may in fact be live (a late leg re-armed after a restart), and the real
+// CDR that comes later revises the attempt and runs the lead's side effects.
+// It reports false when the attempt is gone or the call already has its real
+// CDR (the lead would never be applied).
+//
+// The attempt lock orders this against InsertCDR, which inserts the CDR and
+// then locks the attempt: whichever takes the lock first, the CDR check (a
+// statement of its own, after the lock) sees every CDR committed before it, so
+// an accepted lead is always read by the finish routine that follows.
 func (a *AttemptStore) SetLead(ctx context.Context, callID uuid.UUID, intent campaign.LeadIntent, notes string) (bool, error) {
 	if !intent.IsValid() {
 		return false, fmt.Errorf("campaign: %q is not a lead intent", intent)
 	}
-	n, err := a.q.SetAttemptLead(ctx, queries.SetAttemptLeadParams{
-		CallID: callID, LeadIntent: textPtr(string(intent)), LeadNotes: &notes,
+	var ok bool
+	err := txFor(ctx, a.pool, func(q *queries.Queries) error {
+		att, err := q.LockAttemptByCall(ctx, callID)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if att.State != string(campaign.AttemptDialing) {
+			isFinal, err := q.CallHasRealCDR(ctx, callID)
+			if err != nil {
+				return err
+			}
+			if isFinal {
+				return nil
+			}
+		}
+		n, err := q.SetAttemptLead(ctx, queries.SetAttemptLeadParams{
+			ID: att.ID, LeadIntent: textPtr(string(intent)), LeadNotes: &notes,
+		})
+		ok = n > 0
+		return err
 	})
-	return n > 0, err
+	return ok && err == nil, err
 }
 
 // Get returns the attempt that carries this call id.

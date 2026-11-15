@@ -385,7 +385,7 @@ func (a *callActions) RecordLead(ctx context.Context, request flow.LeadRequest) 
 		return flow.Failed("SAVE_FAILED", a.leadHint()), nil
 	}
 	if !ok {
-		a.log.Warn("lead not saved: the attempt is no longer in flight", "intent", request.Intent)
+		a.log.Warn("lead not saved: the attempt is gone or the call already has its final record", "intent", request.Intent)
 		return flow.Failed("NOT_RECORDED", a.leadHint()), nil
 	}
 	a.log.Info("lead recorded", "intent", request.Intent,

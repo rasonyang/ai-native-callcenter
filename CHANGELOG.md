@@ -7,6 +7,17 @@ carries the one-line installer's files.
 
 ## Unreleased
 
+### Fixed
+
+- A lead the bot records is no longer lost when its call's campaign attempt was
+  finished early. After a restart that closed an attempt as unknown, or after a
+  placement was recorded as failed, a slow channel could still ring and be
+  answered. The bot then talked to the customer, but `record_lead` was refused:
+  a do-not-call request said aloud never reached the do-not-call list, a HIGH
+  lead filed no callback, and the contact kept no lead intent. A lead is now
+  accepted until the call has its real record, and that record applies it once
+  (#559).
+
 ## v0.8.5 - 2026-11-14
 
 ### Upgrade notes
