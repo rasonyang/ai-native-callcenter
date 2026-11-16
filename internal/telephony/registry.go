@@ -196,21 +196,25 @@ func (r *Registry) Snapshot(callID uuid.UUID) (Snapshot, error) {
 	return snap, nil
 }
 
-// CallTimeline is when a call began and when its carrier-facing leg was
-// answered, read through the call's mailbox. The carrier-facing leg is the one
-// the ledger bills from (billedLeg): the originator, on every call a bot can
-// write a row for. A zero answeredAt means that leg is not answered. It
-// reports false for a call this registry does not hold.
-func (r *Registry) CallTimeline(callID uuid.UUID) (createdAt, answeredAt time.Time, ok bool) {
+// CallTimeline is when a call began, when its carrier-facing leg was answered
+// and when that leg first rang, read through the call's mailbox. The
+// carrier-facing leg is the one the ledger bills from (billedLeg): the
+// originator, on every call a bot can write a row for. A zero answeredAt means
+// that leg is not answered; a zero ringStartedAt that it has not sent a 180 or
+// 183 (yet). It reports false for a call this registry does not hold.
+func (r *Registry) CallTimeline(callID uuid.UUID) (createdAt, answeredAt, ringStartedAt time.Time, ok bool) {
 	snap, err := r.Snapshot(callID)
 	if err != nil {
-		return time.Time{}, time.Time{}, false
+		return time.Time{}, time.Time{}, time.Time{}, false
 	}
 	originator, _ := split(snap)
 	if originator != nil && originator.AnsweredAt != nil {
 		answeredAt = *originator.AnsweredAt
 	}
-	return snap.CreatedAt, answeredAt, true
+	if originator != nil && originator.RingStartedAt != nil {
+		ringStartedAt = *originator.RingStartedAt
+	}
+	return snap.CreatedAt, answeredAt, ringStartedAt, true
 }
 
 // SnapshotAll returns every live call.
@@ -449,6 +453,9 @@ func (a *actor) applySwitchEvent(ev SwitchEvent) {
 		if party.AnsweredAt.IsZero() {
 			party.AnsweredAt = ev.OccurredAt
 		}
+		if party.RingStartedAt.IsZero() {
+			party.RingStartedAt = ev.RingStartedAt
+		}
 	case KindChannelHold:
 		a.transition(party, TriggerHold, ev, events.TypePartyHeld)
 	case KindChannelUnhold:
@@ -458,6 +465,10 @@ func (a *actor) applySwitchEvent(ev SwitchEvent) {
 		// Whatever the leg was still bridged to, it is not any more.
 		party.CloseBridge(ev.OccurredAt)
 		party.BilledSec = ev.BilledSec
+		party.SIPStatus = ev.SIPStatus
+		if party.RingStartedAt.IsZero() {
+			party.RingStartedAt = ev.RingStartedAt
+		}
 		// The AI leg's share arrives as channel variables on hangup, and the
 		// legs carry different parts of it: each fills in what is still
 		// missing rather than claiming the whole share for whichever hung up

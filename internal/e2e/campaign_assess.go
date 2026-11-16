@@ -614,11 +614,11 @@ func assessAttempt(rv RegionView, cs Case, i int, a api.CampaignAttempt, key, ex
 	case i == 0:
 		*firstCause = cause
 		col.That(cause != "", pre+"the attempt carries a hangup cause (%q)", cause)
-		if want, listed := designCauseOutcomes[cause]; listed {
+		if want, rule, listed := expectedOutcome(cause, dlg); listed {
 			if ar.Source == SourceJob && designOutcomes[want].Budget == BudgetSystem {
 				want = "ORIGINATE_FAILED" // a failure before any channel, section 5.5
 			}
-			col.That(outcome == want, pre+"design 10 section 7.2 maps %s to %s (%s)", cause, want, outcome)
+			col.That(outcome == want, pre+"%s maps %s to %s (%s)", rule, cause, want, outcome)
 		} else {
 			*findings = append(*findings, fmt.Sprintf("%s %s: hangup cause %q is not in design 10 section 7.2; it came out %s", rv.Region.Code, cs.ID, cause, outcome))
 		}

@@ -307,6 +307,9 @@ var designOutcomes = map[string]designOutcome{
 // unanswered call, plus our own ring timeout, which the switch reports as
 // NO_ANSWER. A probe whose cause is listed must come out with the listed
 // outcome; a cause the design does not list is reported as a finding.
+//
+// RECOVERY_ON_TIMER_EXPIRE is not in the map: what it comes to depends on
+// more than the cause (issue #576). expectedOutcome holds that rule.
 var designCauseOutcomes = map[string]string{
 	"NO_ANSWER":                 "NO_ANSWER",
 	"NO_USER_RESPONSE":          "NO_ANSWER",
@@ -314,7 +317,6 @@ var designCauseOutcomes = map[string]string{
 	"CALL_REJECTED":             "REJECTED",
 	"NORMAL_TEMPORARY_FAILURE":  "TRANSIENT",
 	"NETWORK_OUT_OF_ORDER":      "TRANSIENT",
-	"RECOVERY_ON_TIMER_EXPIRE":  "TRANSIENT",
 	"SWITCH_CONGESTION":         "TRANSIENT",
 	"NORMAL_CIRCUIT_CONGESTION": "TRANSIENT",
 	"UNALLOCATED_NUMBER":        "INVALID_NUMBER",
@@ -323,13 +325,42 @@ var designCauseOutcomes = map[string]string{
 	"NUMBER_ON_DNC":             "DNC_SKIPPED",
 }
 
+// causeRingTimer is the hangup cause the switch reports when the far end's
+// own timer ended the dial with a SIP 408 (variable_sip_term_status=408).
+const causeRingTimer = "RECOVERY_ON_TIMER_EXPIRE"
+
+// expectedOutcome is the outcome design 10 section 7.2 (and issue #576) gives
+// an unanswered attempt that ended with cause. It reads the dialog for the one
+// cause that needs it: the far end's 408 ends a call that rang (180 or 183
+// first) as NO_ANSWER, which spends maxAttempts, and one that never rang as
+// TRANSIENT. The second result names the rule, for the check's text; ok is
+// false when the design does not say.
+func expectedOutcome(cause string, d *calleesim.DialogRecord) (want, rule string, ok bool) {
+	if cause == causeRingTimer {
+		if d == nil || d.Final == nil {
+			return "", "", false
+		}
+		if d.Final.Status != 408 {
+			return "TRANSIENT", "a timer expiry that is not a far-end 408", true
+		}
+		for _, p := range d.Provisionals {
+			if p.Status == 180 || p.Status == 183 {
+				return "NO_ANSWER", "a 408 after 180/183 (it rang)", true
+			}
+		}
+		return "TRANSIENT", "a 408 with no 180/183 (it never rang)", true
+	}
+	want, ok = designCauseOutcomes[cause]
+	return want, "design 10 section 7.2", ok
+}
+
 // sipIntent is how this harness reads section 7.2 for each SIP final
 // response a probe sends: which outcome the design intends for that kind of
 // failure. It is reported next to the measurement and never asserted; a
 // mismatch is for a person to judge.
 var sipIntent = map[int]string{
 	404: "INVALID_NUMBER (the number does not exist)",
-	408: "TRANSIENT (no final answer from downstream: a network-side timeout)",
+	408: "NO_ANSWER when the leg rang (180/183) before the 408, TRANSIENT when it did not (#576)",
 	410: "INVALID_NUMBER (the number is gone)",
 	480: "NO_ANSWER (the callee's side reports the user not reachable now)",
 	484: "INVALID_NUMBER (the number is malformed)",

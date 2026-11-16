@@ -360,7 +360,8 @@ func withPhones(agents []AgentRef) []AgentRef {
 // a journey of the placer, the customer's line, then whoever took over. The
 // one liberty is the seed's own convention that the phases add up to the
 // call: the ringing of whoever the customer was transferred to is counted in
-// ringSec, where the assembler counts only the customer's.
+// ringSec, where the assembler counts only the customer leg's own ringing (from
+// its first 180 or 183 to its answer).
 func handedOnDialOut(cdr store.CDR, agents []AgentRef, queue QueueRef, hasQueue bool, rng *rand.Rand) (store.CDR, []QueueEventRow) {
 	at := rng.Intn(len(agents))
 	placer := agents[at]

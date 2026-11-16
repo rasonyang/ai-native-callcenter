@@ -41,6 +41,34 @@ func TestEveryRowOfTheCauseTable(t *testing.T) {
 	}
 }
 
+// RECOVERY_ON_TIMER_EXPIRE is the switch's word for a far end that sent 408,
+// and our own recovery's word for a leg it reaped. Only the 408 after ringing
+// is the customer not answering (#576); the reap leaves no SIP status and can
+// hit a ringing leg, so ring progress alone is not enough.
+func TestARecoveryCauseIsNoAnswerOnlyForA408AfterRinging(t *testing.T) {
+	tests := []struct {
+		name string
+		end  CallEnd
+		want Outcome
+	}{
+		{"408 after ring progress", CallEnd{HangupCause: CauseRecovery, SIPStatus: 408, HasRingProgress: true}, OutcomeNoAnswer},
+		{"408 without ring progress", CallEnd{HangupCause: CauseRecovery, SIPStatus: 408}, OutcomeTransient},
+		{"ring progress and no SIP status (our own reap)", CallEnd{HangupCause: CauseRecovery, HasRingProgress: true}, OutcomeTransient},
+		{"neither", CallEnd{HangupCause: CauseRecovery}, OutcomeTransient},
+		{"another status after ring progress", CallEnd{HangupCause: CauseRecovery, SIPStatus: 503, HasRingProgress: true}, OutcomeTransient},
+		{"answered, whatever the status", CallEnd{HangupCause: CauseRecovery, IsAnswered: true, SIPStatus: 408, HasRingProgress: true}, OutcomeBotFailed},
+		{"answered without a status", CallEnd{HangupCause: CauseRecovery, IsAnswered: true}, OutcomeBotFailed},
+		{"a placement failure keeps its handling", CallEnd{HangupCause: CauseRecovery, SIPStatus: 408, HasRingProgress: true, IsPlacementFailure: true}, OutcomeOriginateFailed},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := Classify(tt.end); got != tt.want {
+				t.Errorf("Classify = %s, want %s", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestAnUnmappedCauseIsTransient(t *testing.T) {
 	for _, cause := range []string{"SOME_NEW_CAUSE", "", "NORMAL_CLEARING"} {
 		if got := Classify(CallEnd{HangupCause: cause}); got != OutcomeTransient {

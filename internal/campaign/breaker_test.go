@@ -75,3 +75,33 @@ func TestTheProviderBreakerTripsOnTheMthConsecutiveBotFailure(t *testing.T) {
 		t.Error("a breaker of 0 must not trip on everything")
 	}
 }
+
+// A carrier that ends every unanswered call with a 408 after ringing is not a
+// trunk outage: each of those calls is NO_ANSWER, a customer outcome, and so
+// breaks the run. A 408 that never rang, or our own recovery's reap, is still
+// the system failure it was (#576). The outcomes come out of Classify.
+func TestACarriers408AfterRingingDoesNotTripTheTrunkBreaker(t *testing.T) {
+	const n = 20
+	classified := func(e CallEnd) []Outcome {
+		out := make([]Outcome, n)
+		for i := range out {
+			out[i] = Classify(e)
+		}
+		return out
+	}
+	rang := CallEnd{HangupCause: CauseRecovery, SIPStatus: 408, HasRingProgress: true}
+	if got := Classify(rang); got != OutcomeNoAnswer {
+		t.Fatalf("Classify(408 after ringing) = %s, want NO_ANSWER", got)
+	}
+	if TrunkBreakerTrips(classified(rang), n) {
+		t.Errorf("%d unanswered calls the carrier ended with a 408 after ringing tripped the trunk breaker", n)
+	}
+	for name, e := range map[string]CallEnd{
+		"a 408 with no ring progress":   {HangupCause: CauseRecovery, SIPStatus: 408},
+		"our own reap of a ringing leg": {HangupCause: CauseRecovery, HasRingProgress: true},
+	} {
+		if !TrunkBreakerTrips(classified(e), n) {
+			t.Errorf("%d consecutive endings of %s did not trip the trunk breaker", n, name)
+		}
+	}
+}

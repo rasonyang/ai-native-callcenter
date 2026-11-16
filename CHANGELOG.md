@@ -16,6 +16,23 @@ carries the one-line installer's files.
   the moment it appears, as a call that arrives after its placement was recorded
   as failed already was. A call the restarted application found ringing is
   still picked up and bridged as before (#573).
+- A campaign call that the carrier itself ends with a SIP 408 after the
+  customer's phone rang is now `NO_ANSWER`, retried by `maxAttempts` like any
+  unanswered call, instead of `TRANSIENT`. It used to be treated as a system
+  failure: retried within minutes without using up an attempt, and enough of
+  them in a row paused the campaign as a trunk outage. A 408 with no ringing
+  before it, and a leg our own recovery ended, stay `TRANSIENT` (#576).
+
+### Changed
+
+- `ringSec` on a call placed to an outside number now counts from the first
+  180 or 183 on the dialled leg, not from the leg's creation: to its answer
+  when it answered, to its release when it did not, and 0 when the leg never
+  rang. An unanswered outbound call used to report 0. This changes `ringSec` on
+  placed calls in the API and in the CDR webhook; inbound and internal calls
+  keep their definition. The CDR `tech` of such a call gains `sipStatus` (the
+  SIP status the far end ended the leg with, when the switch reported one) and
+  `ringStartedAt` (when the leg first rang, when it did).
 
 ## v0.8.6 - 2026-11-16
 

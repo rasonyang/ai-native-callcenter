@@ -765,8 +765,9 @@ after how long; and did this call use up one of the customer's chances?**
   - `maxAttempts` (default 3): **how many times the customer's phone may be rung.** Only calls
     that reached the customer count: rang, busy, rejected, answered, or impossible to tell.
   - `maxSystemRetries` (default 5): **how many times our or the network's failures are retried.**
-    These calls never reached the customer's phone and must not use up the customer's chances, but
-    they are bounded so a number that always fails is not retried forever.
+    These calls never reached the customer's phone (or cannot be shown to have: a carrier's 408
+    with no ringing before it, §7.2) and must not use up the customer's chances, but they are
+    bounded so a number that always fails is not retried forever.
 - **Retry time = this call's end + the interval for its outcome.** If that falls outside the
   contact's window, it moves to the start of the next window; it is never dropped.
 - **When the retry time comes, the contact is back in the pool**, queued with new contacts by
@@ -783,15 +784,28 @@ any channel (§5.5) — not from `releaseReason` alone, because `FAILED` folds a
 | `ANSWERED` | answered, any talk time | no — contact `DONE` | — | `maxAttempts` |
 | `BOT_FAILED` | answered; the bot side failed before the flow ended, the bridge to it never ran (`BOT_BRIDGE_UNCONFIRMED`, §5.7), the bot leg was refused or failed before media (`userData.botReason=BOT_LEG_FAILED`, whatever the cause, §5.7), or it answered and its session never started (`hangupCause=BOT_START_FAILED`, §5.7) | no — contact `DONE` | — | `maxAttempts` |
 | `OVERFLOW` | answered; no bot slot after `overflowHold` (§6.4) | no — contact `DONE` | — | `maxAttempts` |
-| `NO_ANSWER` | `NO_ANSWER`, `NO_USER_RESPONSE`, our ring timeout | yes | 2 h | `maxAttempts` |
+| `NO_ANSWER` | `NO_ANSWER`, `NO_USER_RESPONSE`, our ring timeout; `RECOVERY_ON_TIMER_EXPIRE` when the far end sent a SIP 408 after the leg rang (below) | yes | 2 h | `maxAttempts` |
 | `BUSY` | `USER_BUSY` | yes | 30 min | `maxAttempts` |
 | `REJECTED` | `CALL_REJECTED` | yes | 24 h | `maxAttempts` |
 | `UNKNOWN` | reconciliation could not tell (§8.2) | yes | 24 h | `maxAttempts` |
-| `TRANSIENT` | `NORMAL_TEMPORARY_FAILURE`, `NETWORK_OUT_OF_ORDER`, `RECOVERY_ON_TIMER_EXPIRE`, `SWITCH_CONGESTION`, `NORMAL_CIRCUIT_CONGESTION` | yes | 5, 15, 45 min … (×3 each time, capped at 4 h) | `maxSystemRetries` |
+| `TRANSIENT` | `NORMAL_TEMPORARY_FAILURE`, `NETWORK_OUT_OF_ORDER`, `RECOVERY_ON_TIMER_EXPIRE` (a 408 with no ring progress, or no 408 at all: our own recovery's reap), `SWITCH_CONGESTION`, `NORMAL_CIRCUIT_CONGESTION` | yes | 5, 15, 45 min … (×3 each time, capped at 4 h) | `maxSystemRetries` |
 | `ORIGINATE_FAILED` | failure before any channel (§5.5), e.g. `GATEWAY_DOWN` | yes | as `TRANSIENT` | `maxSystemRetries` |
 | `INVALID_NUMBER` | `UNALLOCATED_NUMBER`, `INVALID_NUMBER_FORMAT`, `NUMBER_CHANGED` | no — contact `INVALID_NUMBER` | — | — |
 | `DNC_SKIPPED` | on DNC at admission or inside `DialAI` | no — contact `DNC` | — | — |
 
+- **A carrier that ends an unanswered call itself is `NO_ANSWER`, not a system failure** (#576).
+  A carrier whose own ring timer is shorter than ours answers the INVITE with a final 408 while the
+  customer's phone is still ringing, and the switch reports the leg's cause as
+  `RECOVERY_ON_TIMER_EXPIRE`, the word recovery's reap uses too. The two are told apart by the
+  CDR's `tech`: the dialled leg's `sipStatus` (the switch's `sip_term_status`) and `ringStartedAt`
+  (its first 180 or 183, the earlier of `Caller-Channel-Progress-Time` and
+  `Caller-Channel-Progress-Media-Time`, because a 183 with SDP sets only the second). The rule is
+  `RECOVERY_ON_TIMER_EXPIRE`, a call nobody answered, `sipStatus` 408 **and** ring progress:
+  `NO_ANSWER`. Ring progress alone is not enough, since our own reap (`outbound.ReconcileCause`)
+  leaves no 408 and can hit a leg that is ringing. A 408 with no 180 or 183 before it stays
+  `TRANSIENT`, and an answered call with this cause stays `BOT_FAILED`. `NO_ANSWER` is a customer
+  outcome, so these calls also break a run of system failures for the trunk breaker (§7.4): a line
+  that ends every unanswered call with 408 no longer pauses a campaign as a trunk outage.
 - Which outcomes retry, their intervals and both budgets are the campaign's `retry_policy`; the
   table holds the defaults. The answered outcomes are not configurable.
 - **An answered number is never dialled again (owner's decision).** A customer who has picked up

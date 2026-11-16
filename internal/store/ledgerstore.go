@@ -45,6 +45,24 @@ func (s *Store) Ledger() *LedgerStore {
 		attempts: s.finisher(), onAttemptFinished: s.OnAttemptFinished}
 }
 
+// The CDR tech keys of the carrier-facing leg of a call placed to an outside
+// number (docs/openapi.json, CDR.tech). Both writers of a CDR use them, and the
+// campaign outcome reads them back (endingFromCDR).
+const (
+	// CDRTechSIPStatus is the SIP status the far end ended the leg with, a
+	// JSON number, present only when the switch reported one.
+	CDRTechSIPStatus = "sipStatus"
+	// CDRTechRingStartedAt is when the leg first sent a 180 or 183, present
+	// only when it did.
+	CDRTechRingStartedAt = "ringStartedAt"
+)
+
+// FormatRingStartedAt is the wire form of tech.ringStartedAt: UTC RFC 3339
+// with fractional seconds.
+func FormatRingStartedAt(t time.Time) string {
+	return t.UTC().Format(time.RFC3339Nano)
+}
+
 // CDR is one finished call. Field vocabulary follows the naming spec; the
 // enum values are byte-identical to what the API serves.
 type CDR struct {

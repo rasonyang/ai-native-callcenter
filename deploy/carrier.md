@@ -110,3 +110,28 @@ prefix on the gateway, not in the dial string:
   - Inbound is untouched. A trunk that also prefixes the numbers it sends
     needs a dialplan rule before `public/05_aicc.xml` that removes the prefix;
     that is not covered here.
+
+## A carrier that ends an unanswered call itself
+
+Some carriers give up on an unanswered call before the application's own ring
+timeout (`AICC_OUTBOUND_RING_TIMEOUT`, 45 s by default, or a campaign's
+`ringTimeoutSec`) and answer the call with a final `408 Request Timeout` while
+the customer's phone is still ringing. The switch reports such a call with the
+hangup cause `RECOVERY_ON_TIMER_EXPIRE`.
+
+- From the release after v0.8.6, a call that rang and then ended with a 408 from
+  the carrier counts as `NO_ANSWER`: a campaign retries it by the campaign's
+  usual rules and counts it against `maxAttempts`, exactly like a call the
+  application itself cancelled at its ring timeout. Nothing needs to be
+  configured.
+- In v0.8.6 and earlier such calls were treated as a system failure. A campaign
+  retried them within minutes without spending `maxAttempts`, and a long run of
+  them could pause the campaign as a trunk outage. The workaround was to set
+  `AICC_OUTBOUND_RING_TIMEOUT` (and the campaign's ring timeout) below the
+  carrier's own timer, so that the application's cancel came first. That
+  workaround is no longer needed and can be removed.
+- The call detail shows what the carrier did: `ringSec` counts from the first
+  180 or 183 the carrier sent, and the call's `tech` carries `sipStatus` (the
+  status the carrier ended the call with) and `ringStartedAt` (when it first
+  rang). A 408 without any ringing before it is still treated as a failure of
+  the line, since nothing shows the customer's phone was reached.

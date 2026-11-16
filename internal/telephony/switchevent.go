@@ -318,6 +318,18 @@ type SwitchEvent struct {
 	// carrying: a billing figure with nothing to check it against is a figure
 	// nobody can dispute or defend.
 	BilledSec int
+	// SIPStatus is the final SIP status the far end ended this leg with, read
+	// from the switch's sip_term_status at hangup (408 for a carrier that gave
+	// up on an unanswered call). Zero when the switch reported none: a leg
+	// this platform cancelled itself carries no status.
+	SIPStatus int
+	// RingStartedAt is when the far end first signalled ringing on this leg:
+	// the earlier of its first 180 or 183 without media (Progress-Time) and its
+	// first 183 with early media (Progress-Media-Time). Zero when it never did.
+	// Read on CHANNEL_ANSWER and CHANNEL_HANGUP_COMPLETE, so no
+	// CHANNEL_PROGRESS subscription is needed. The switch's clock, like
+	// OccurredAt.
+	RingStartedAt time.Time
 	// Bot carries the AI leg's share of the story, read from channel
 	// variables when the caller's leg hangs up. Zero when the call never
 	// met a bot.
@@ -519,6 +531,7 @@ func normalizeChannel(ev *esl.Event, out SwitchEvent) (SwitchEvent, bool) {
 		out.UserData = inboundUserData(ev)
 	case "CHANNEL_ANSWER":
 		out.Kind = KindChannelAnswer
+		out.RingStartedAt = ringStartedAt(ev)
 	case "CHANNEL_PARK":
 		out.Kind = KindChannelPark
 	case "CHANNEL_BRIDGE":
@@ -552,6 +565,10 @@ func normalizeChannel(ev *esl.Event, out SwitchEvent) (SwitchEvent, bool) {
 		if sec, ok := ev.GetInt("variable_billsec"); ok {
 			out.BilledSec = int(sec)
 		}
+		out.RingStartedAt = ringStartedAt(ev)
+		if status, ok := ev.GetInt("variable_sip_term_status"); ok && status > 0 {
+			out.SIPStatus = int(status)
+		}
 	case "DTMF":
 		out.Kind = KindDTMF
 		out.Digit = ev.Get("DTMF-Digit")
@@ -569,6 +586,24 @@ func normalizeChannel(ev *esl.Event, out SwitchEvent) (SwitchEvent, bool) {
 		return SwitchEvent{}, false
 	}
 	return out, true
+}
+
+// ringStartedAt is the first ring progress the switch recorded on a leg: the
+// earlier non-zero of Caller-Channel-Progress-Time (a 180, or a 183 without
+// SDP) and Caller-Channel-Progress-Media-Time (a 183 with SDP, which sets only
+// this one). Unset times are written as 0, never left out. The zero time when
+// the leg never rang.
+func ringStartedAt(ev *esl.Event) time.Time {
+	var first int64
+	for _, name := range []string{"Caller-Channel-Progress-Time", "Caller-Channel-Progress-Media-Time"} {
+		if usec, ok := ev.GetInt(name); ok && usec > 0 && (first == 0 || usec < first) {
+			first = usec
+		}
+	}
+	if first == 0 {
+		return time.Time{}
+	}
+	return time.UnixMicro(first).UTC()
 }
 
 // transferredAway reports whether a leg ended because the call was transferred

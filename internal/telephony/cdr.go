@@ -510,6 +510,17 @@ func (a *CDRAssembler) assemble(ctx context.Context, snap Snapshot) store.CDR {
 		cdr.RingSec = ringSpan(agentLegs)
 	}
 
+	// A call placed to an outside number measures ringing on the leg that
+	// faces the carrier, whichever way it ended and whoever took it over: an AI
+	// outbound call a person later took still reports the customer's ringing,
+	// not the agent leg's. Inbound and internal calls keep the definitions
+	// above.
+	var carrier *PartySnapshot
+	if snap.CallType == events.CallTypeOutbound {
+		carrier = carrierFacingLeg(billed, originator, dialled, placed)
+		cdr.RingSec = carrierRingSec(carrier, cdr.EndedAt)
+	}
+
 	if botStartFailed {
 		// The same rule as SESSION_LIMIT: where the bot ended the call, the
 		// failure is the hangupCause; where the caller went on to a person it
@@ -558,6 +569,17 @@ func (a *CDRAssembler) assemble(ctx context.Context, snap Snapshot) store.CDR {
 	a.checkDurations(snap, &cdr)
 
 	cdr.Tech = map[string]any{}
+	if carrier != nil {
+		// What the far end said and when it first rang: the facts the campaign
+		// outcome needs to tell a carrier that ended an unanswered call itself
+		// (a 408 after ringing) from a system failure.
+		if carrier.SIPStatus > 0 {
+			cdr.Tech[store.CDRTechSIPStatus] = carrier.SIPStatus
+		}
+		if carrier.RingStartedAt != nil {
+			cdr.Tech[store.CDRTechRingStartedAt] = store.FormatRingStartedAt(*carrier.RingStartedAt)
+		}
+	}
 	if originator != nil {
 		cdr.Tech["callerChannelId"] = originator.ChannelID
 		// The switch counted the same seconds independently. Carrying its
@@ -735,11 +757,54 @@ func firstBridgedLeg(parties []*PartySnapshot) *PartySnapshot {
 	return best
 }
 
+// carrierFacingLeg is the leg dialled to the customer on a call placed to an
+// outside number. On a call this platform placed it is the originator. On an
+// agent-placed call it is the dialled leg that answered (as billedLeg picks),
+// else the one that began ringing first, else the first dialled. Nil when the
+// call has none: an agent who dialled a bot number reached nobody outside.
+func carrierFacingLeg(billed, originator *PartySnapshot, dialled []*PartySnapshot, isAgentPlaced bool) *PartySnapshot {
+	if !isAgentPlaced {
+		return originator
+	}
+	if billed != nil {
+		return billed
+	}
+	var best *PartySnapshot
+	for _, leg := range dialled {
+		switch {
+		case best == nil:
+			best = leg
+		case leg.RingStartedAt != nil && (best.RingStartedAt == nil || leg.RingStartedAt.Before(*best.RingStartedAt)):
+			best = leg
+		}
+	}
+	return best
+}
+
+// carrierRingSec is how long the carrier-facing leg rang: from its first 180
+// or 183 to its answer, or to its release when it did not answer, whole
+// seconds. 0 when it never rang, whatever else it did.
+func carrierRingSec(leg *PartySnapshot, endedAt time.Time) int {
+	if leg == nil || leg.RingStartedAt == nil {
+		return 0
+	}
+	end := endedAt
+	switch {
+	case leg.AnsweredAt != nil:
+		end = *leg.AnsweredAt
+	case leg.ReleasedAt != nil:
+		end = *leg.ReleasedAt
+	}
+	return max(0, int(end.Sub(*leg.RingStartedAt).Seconds()))
+}
+
 // ringSpan is how long a call nobody answered spent ringing people: from the
 // first leg dialled towards an agent to the last one released. A queue that
 // re-offers dials a fresh leg every time, so no single leg holds the answer —
 // the span is what the caller sat through. Only for calls that went
-// unanswered; once somebody picks up, the ring that counts is theirs.
+// unanswered; once somebody picks up, the ring that counts is theirs. Not for
+// a call placed to an outside number, whose ringing is the carrier-facing
+// leg's (carrierRingSec).
 func ringSpan(agentLegs []*PartySnapshot) int {
 	var first, last time.Time
 	for _, leg := range agentLegs {
