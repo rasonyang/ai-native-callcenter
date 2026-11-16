@@ -63,6 +63,14 @@ type Store struct {
 	// OnDNCAdded, when set, is told that a number was newly put on the
 	// do-not-call list, so the dialer can skip the contacts waiting on it.
 	OnDNCAdded func()
+	// OnTestNumberAdded, when set, is told that a number was newly put on the
+	// list of test numbers, so the dialer can make the contacts that were
+	// waiting out the frequency window for it due again.
+	OnTestNumberAdded func()
+	// CampaignFrequencyWindow is the deployment's cross-campaign frequency
+	// window (AICC_CAMPAIGN_FREQUENCY_WINDOW). A contact listing says, from it,
+	// until when another campaign's call holds a contact back. Zero is off.
+	CampaignFrequencyWindow time.Duration
 	// OutboundHours are the deployment's outer calling hours
 	// (AICC_OUTBOUND_HOURS). A campaign contact's retry is never scheduled
 	// outside them. The zero value means no outer limit.

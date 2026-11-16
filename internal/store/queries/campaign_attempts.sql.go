@@ -85,7 +85,7 @@ const claimContactForDial = `-- name: ClaimContactForDial :one
 
 
 UPDATE campaign_contacts
-SET next_attempt_at = NULL, updated_at = now()
+SET next_attempt_at = NULL, is_frequency_held = false, updated_at = now()
 WHERE id = $1 AND status = 'ACTIVE'
 RETURNING campaign_id, number_e164
 `
@@ -151,7 +151,7 @@ func (q *Queries) FinishCampaignAttempt(ctx context.Context, arg FinishCampaignA
 }
 
 const getAttemptByCall = `-- name: GetAttemptByCall :one
-SELECT id, campaign_id, campaign_contact_id, number_e164, call_id, leg_id, originate_job_id, state, outcome, hangup_cause, talk_sec, is_touched, lead_intent, lead_notes, started_at, finished_at FROM campaign_attempts WHERE call_id = $1
+SELECT id, campaign_id, campaign_contact_id, number_e164, call_id, leg_id, originate_job_id, state, outcome, hangup_cause, talk_sec, is_touched, lead_intent, lead_notes, started_at, finished_at, is_test_number FROM campaign_attempts WHERE call_id = $1
 `
 
 func (q *Queries) GetAttemptByCall(ctx context.Context, callID uuid.UUID) (CampaignAttempt, error) {
@@ -174,6 +174,7 @@ func (q *Queries) GetAttemptByCall(ctx context.Context, callID uuid.UUID) (Campa
 		&i.LeadNotes,
 		&i.StartedAt,
 		&i.FinishedAt,
+		&i.IsTestNumber,
 	)
 	return i, err
 }
@@ -210,9 +211,10 @@ func (q *Queries) InsertCallbackForCall(ctx context.Context, arg InsertCallbackF
 
 const insertCampaignAttempt = `-- name: InsertCampaignAttempt :one
 INSERT INTO campaign_attempts (id, campaign_id, campaign_contact_id, number_e164,
-                               call_id, leg_id, started_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
-RETURNING id, campaign_id, campaign_contact_id, number_e164, call_id, leg_id, originate_job_id, state, outcome, hangup_cause, talk_sec, is_touched, lead_intent, lead_notes, started_at, finished_at
+                               call_id, leg_id, started_at, is_test_number)
+VALUES ($1, $2, $3, $4, $5, $6, $7,
+        EXISTS (SELECT 1 FROM test_numbers t WHERE t.number_e164 = $4))
+RETURNING id, campaign_id, campaign_contact_id, number_e164, call_id, leg_id, originate_job_id, state, outcome, hangup_cause, talk_sec, is_touched, lead_intent, lead_notes, started_at, finished_at, is_test_number
 `
 
 type InsertCampaignAttemptParams struct {
@@ -225,6 +227,8 @@ type InsertCampaignAttemptParams struct {
 	StartedAt         pgtype.Timestamptz `json:"startedAt"`
 }
 
+// is_test_number is read from the list of test numbers now, and stays as it is
+// if the number leaves the list later.
 func (q *Queries) InsertCampaignAttempt(ctx context.Context, arg InsertCampaignAttemptParams) (CampaignAttempt, error) {
 	row := q.db.QueryRow(ctx, insertCampaignAttempt,
 		arg.ID,
@@ -253,12 +257,13 @@ func (q *Queries) InsertCampaignAttempt(ctx context.Context, arg InsertCampaignA
 		&i.LeadNotes,
 		&i.StartedAt,
 		&i.FinishedAt,
+		&i.IsTestNumber,
 	)
 	return i, err
 }
 
 const lockAttemptByCall = `-- name: LockAttemptByCall :one
-SELECT id, campaign_id, campaign_contact_id, number_e164, call_id, leg_id, originate_job_id, state, outcome, hangup_cause, talk_sec, is_touched, lead_intent, lead_notes, started_at, finished_at FROM campaign_attempts WHERE call_id = $1 FOR UPDATE
+SELECT id, campaign_id, campaign_contact_id, number_e164, call_id, leg_id, originate_job_id, state, outcome, hangup_cause, talk_sec, is_touched, lead_intent, lead_notes, started_at, finished_at, is_test_number FROM campaign_attempts WHERE call_id = $1 FOR UPDATE
 `
 
 // The finish routine's lock. A CDR and a standalone finish for one call
@@ -283,12 +288,13 @@ func (q *Queries) LockAttemptByCall(ctx context.Context, callID uuid.UUID) (Camp
 		&i.LeadNotes,
 		&i.StartedAt,
 		&i.FinishedAt,
+		&i.IsTestNumber,
 	)
 	return i, err
 }
 
 const lockCampaignContact = `-- name: LockCampaignContact :one
-SELECT id, campaign_id, number_e164, number_raw, time_zone, slots, status, attempts, system_failures, next_attempt_at, last_outcome, lead_intent, lead_notes, created_at, updated_at, last_attempt_id, last_call_id FROM campaign_contacts WHERE id = $1 FOR UPDATE
+SELECT id, campaign_id, number_e164, number_raw, time_zone, slots, status, attempts, system_failures, next_attempt_at, last_outcome, lead_intent, lead_notes, created_at, updated_at, last_attempt_id, last_call_id, is_frequency_held FROM campaign_contacts WHERE id = $1 FOR UPDATE
 `
 
 func (q *Queries) LockCampaignContact(ctx context.Context, id uuid.UUID) (CampaignContact, error) {
@@ -312,13 +318,14 @@ func (q *Queries) LockCampaignContact(ctx context.Context, id uuid.UUID) (Campai
 		&i.UpdatedAt,
 		&i.LastAttemptID,
 		&i.LastCallID,
+		&i.IsFrequencyHeld,
 	)
 	return i, err
 }
 
 const makeContactDue = `-- name: MakeContactDue :execrows
 UPDATE campaign_contacts
-SET next_attempt_at = $2, updated_at = now()
+SET next_attempt_at = $2, is_frequency_held = false, updated_at = now()
 WHERE id = $1 AND status = 'ACTIVE' AND next_attempt_at IS NULL
 `
 
@@ -410,7 +417,7 @@ func (q *Queries) SetAttemptLead(ctx context.Context, arg SetAttemptLeadParams) 
 
 const settleCampaignContact = `-- name: SettleCampaignContact :exec
 UPDATE campaign_contacts
-SET attempts = $2, system_failures = $3, status = $4, next_attempt_at = $5,
+SET attempts = $2, system_failures = $3, status = $4, next_attempt_at = $5, is_frequency_held = false,
     last_outcome = $6, last_attempt_id = $7::uuid,
     last_call_id = $8::uuid,
     lead_intent = coalesce($9::text, lead_intent),

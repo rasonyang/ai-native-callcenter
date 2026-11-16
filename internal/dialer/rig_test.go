@@ -310,6 +310,11 @@ func newRig(t *testing.T, o opts) *rig {
 			d.DNCAdded()
 		}
 	}
+	st.OnTestNumberAdded = func() {
+		if d := r.d.Load(); d != nil {
+			d.TestNumberAdded()
+		}
+	}
 	r.cfg = Config{
 		MaxRinging: o.maxRinging, Frequency: o.frequency, OutboundHours: outer,
 		TrunkBreakerCount: o.trunkN, ProviderBreakerCount: o.providerM,
@@ -326,6 +331,7 @@ func newRig(t *testing.T, o opts) *rig {
 	if o.frequency == 0 {
 		r.cfg.Frequency = 24 * time.Hour
 	}
+	st.CampaignFrequencyWindow = r.cfg.Frequency
 	r.dep = Deps{Store: st.Dialer(), Placer: r.placer, IsLive: r.placer.isLive, Clock: clock, Log: slog.New(slog.DiscardHandler), OnChange: o.onChange}
 	if o.slots != nil {
 		r.dep.Slots = o.slots

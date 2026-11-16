@@ -173,9 +173,14 @@ type Contact struct {
 	Attempts       int
 	SystemFailures int
 	NextAttemptAt  *time.Time
-	LastOutcome    Outcome
-	LeadIntent     LeadIntent
-	LeadNotes      string
+	// FrequencyHoldEndsAt is when another campaign's call stops holding this
+	// ACTIVE contact back (that campaign's latest touch of the number plus the
+	// frequency window); nil when nothing holds it, and for a number on the
+	// list of test numbers. Filled when contacts are listed, never stored.
+	FrequencyHoldEndsAt *time.Time
+	LastOutcome         Outcome
+	LeadIntent          LeadIntent
+	LeadNotes           string
 	// LastAttemptID and LastCallID name the latest finished attempt and its
 	// call; nil before the first attempt has finished. They follow every
 	// attempt, while the lead is kept from the latest call that recorded one,
@@ -200,6 +205,10 @@ type ContactFilter struct {
 	// LastOutcome keeps the contacts whose latest finished attempt ended so;
 	// a contact no attempt has finished for has none and is never kept.
 	LastOutcome Outcome
-	Limit       int
-	Offset      int
+	// IsTestNumber: nil every contact, else only those whose latest finished
+	// attempt's IsTestNumber is equal (a contact no attempt has finished for is
+	// not a test-number contact).
+	IsTestNumber *bool
+	Limit        int
+	Offset       int
 }

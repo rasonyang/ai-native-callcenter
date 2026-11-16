@@ -91,6 +91,7 @@ type Server struct {
 	catalog     CatalogService
 	contacts    ContactService
 	dnc         DNCService
+	testNumbers TestNumberService
 	campaigns   CampaignService
 	ledger      *store.LedgerStore
 	postCall    PostCallTranscriber
@@ -126,6 +127,9 @@ type Deps struct {
 	Contacts ContactService
 	// DNC is the do-not-call list; nil hides its endpoints.
 	DNC DNCService
+	// TestNumbers is the list of numbers the campaign frequency window does not
+	// hold back; nil hides its endpoints.
+	TestNumbers TestNumberService
 	// Campaigns is the AI outbound campaign model; nil hides its endpoints.
 	Campaigns CampaignService
 	// Ledger serves finished calls: CDRs, transcripts, recordings, reviews.
@@ -173,6 +177,7 @@ func New(cfg config.Config, deps Deps) *Server {
 		catalog:     deps.Catalog,
 		contacts:    deps.Contacts,
 		dnc:         deps.DNC,
+		testNumbers: deps.TestNumbers,
 		campaigns:   deps.Campaigns,
 		ledger:      deps.Ledger,
 		postCall:    deps.PostCall,
@@ -382,6 +387,12 @@ func (s *Server) router() chi.Router {
 					private.Get("/dnc-numbers", op.ListDNCNumbers)
 					private.Post("/dnc-numbers", op.CreateDNCNumber)
 					private.Delete("/dnc-numbers/{number}", op.DeleteDNCNumber)
+				}
+
+				if s.testNumbers != nil {
+					private.Get("/test-numbers", op.ListTestNumbers)
+					private.Post("/test-numbers", op.CreateTestNumber)
+					private.Delete("/test-numbers/{number}", op.DeleteTestNumber)
 				}
 
 				if s.campaigns != nil {

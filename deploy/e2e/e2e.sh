@@ -7,6 +7,7 @@
 #   deploy/e2e/e2e.sh smoke   place one AI outbound call and check the result
 #   deploy/e2e/e2e.sh campaign  run the campaign scenarios, probes and invariants (#245, #246)
 #   deploy/e2e/e2e.sh capacity  run the capacity scenarios K1, K2 and K3, each in an application start of its own (#247, #459)
+#   deploy/e2e/e2e.sh frequency  the test-number case: two campaigns in a row on a listed number, in an application start with a 24 h frequency window (#578)
 #   deploy/e2e/e2e.sh down    collect logs, remove containers, volumes, network
 #   deploy/e2e/e2e.sh config  print the resolved compose configuration
 #
@@ -49,6 +50,9 @@ SCENARIO_FILE=scenario.json
 # and nothing from the caller's shell reaches them.
 APP_BOT_MAX_CALLS=""; APP_BOT_INBOUND_RESERVE=""; APP_OVERFLOW_HOLD=""
 APP_BOT_RTP_PORT_LOW=""; APP_BOT_RTP_PORT_HIGH=""
+# The cross-campaign frequency window for the application's next start; empty
+# is the environment's 0 (off). Only cmd_frequency sets it.
+APP_FREQUENCY_WINDOW=""
 
 # Compose runs with a scrubbed environment: nothing from the caller's shell
 # (provider keys, AICC_* settings, a stray .env) can reach an interpolation.
@@ -65,6 +69,7 @@ compose() {
     E2E_BOT_MAX_CALLS="$APP_BOT_MAX_CALLS" E2E_BOT_INBOUND_RESERVE="$APP_BOT_INBOUND_RESERVE" \
     E2E_OVERFLOW_HOLD="$APP_OVERFLOW_HOLD" \
     E2E_BOT_RTP_PORT_LOW="$APP_BOT_RTP_PORT_LOW" E2E_BOT_RTP_PORT_HIGH="$APP_BOT_RTP_PORT_HIGH" \
+    E2E_CAMPAIGN_FREQUENCY_WINDOW="$APP_FREQUENCY_WINDOW" \
     docker compose -p "$PROJECT" --project-directory "$ROOT/deploy" \
     --env-file "$E2E/e2e.env" -f "$ROOT/deploy/docker-compose.yml" -f "$E2E/docker-compose.yml" "$@"
 }
@@ -316,6 +321,40 @@ cmd_capacity() {
   say "capacity tests passed in $((SECONDS - t0)) s. Results: $RUN/$id"
 }
 
+cmd_frequency() {
+  [ -n "$(compose ps -q aicc 2>/dev/null)" ] || { say "the environment is not up; run: make e2e-up"; exit 1; }
+  local id rc=0 t0=$SECONDS
+  id="frequency-$(date -u +%Y%m%dT%H%M%SZ)"
+  # A fresh record: the simulator answers a number's n-th INVITE with the
+  # n-th behaviour, counted from its start.
+  compose restart calleesim >&2
+  APP_FREQUENCY_WINDOW=24h
+  if restart_app frequency; then
+    if compose run --rm -T --no-deps --entrypoint /usr/local/bin/aicc-e2e-campaign.test driver \
+        -test.v -test.run '^TestFrequency$' -test.timeout 15m \
+        -e2e.api "http://$APP_IP:8080" -e2e.ready "http://$APP_IP:9090/readyz" \
+        -e2e.calleesim "http://$CALLEE_IP:8771" -e2e.mockprovider "http://$MOCK_IP:9099" \
+        -e2e.esl "$FS_IP:18021" -e2e.compose-config /run/e2e/compose.json \
+        -e2e.scenario /etc/e2e/scenario.json -e2e.provider-scenario /etc/e2e/provider-scenario.json \
+        -e2e.flow /etc/e2e/flow.json -e2e.username admin -e2e.out "/run/e2e/$id" >&2; then
+      say "frequency case passed in $((SECONDS - t0)) s. Results: $RUN/$id"
+    else
+      rc=1
+    fi
+  else
+    rc=1
+  fi
+  # The application goes back to the window of the environment (off), so the
+  # other cases are never held by the numbers this one touched.
+  APP_FREQUENCY_WINDOW=""
+  restart_app defaults || rc=1
+  if [ "$rc" -ne 0 ]; then
+    collect_logs
+    say "frequency case FAILED after $((SECONDS - t0)) s. Report and logs: $RUN"
+    exit 1
+  fi
+}
+
 cmd_down() {
   if [ -n "$(compose ps -aq 2>/dev/null)" ]; then collect_logs; fi
   compose down -v --remove-orphans >&2
@@ -335,7 +374,8 @@ case "${1:-}" in
   smoke) cmd_smoke ;;
   campaign) cmd_campaign ;;
   capacity) cmd_capacity ;;
+  frequency) cmd_frequency ;;
   down) cmd_down ;;
   config) build_tools; render; cat "$RUN/compose.json" ;;
-  *) echo "usage: $0 up|smoke|campaign|capacity|down|config" >&2; exit 2 ;;
+  *) echo "usage: $0 up|smoke|campaign|capacity|frequency|down|config" >&2; exit 2 ;;
 esac

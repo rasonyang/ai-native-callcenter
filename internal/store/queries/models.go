@@ -142,26 +142,28 @@ type CampaignAttempt struct {
 	LeadNotes         *string            `json:"leadNotes"`
 	StartedAt         pgtype.Timestamptz `json:"startedAt"`
 	FinishedAt        pgtype.Timestamptz `json:"finishedAt"`
+	IsTestNumber      bool               `json:"isTestNumber"`
 }
 
 type CampaignContact struct {
-	ID             uuid.UUID          `json:"id"`
-	CampaignID     uuid.UUID          `json:"campaignId"`
-	NumberE164     string             `json:"numberE164"`
-	NumberRaw      string             `json:"numberRaw"`
-	TimeZone       *string            `json:"timeZone"`
-	Slots          []byte             `json:"slots"`
-	Status         string             `json:"status"`
-	Attempts       int32              `json:"attempts"`
-	SystemFailures int32              `json:"systemFailures"`
-	NextAttemptAt  pgtype.Timestamptz `json:"nextAttemptAt"`
-	LastOutcome    *string            `json:"lastOutcome"`
-	LeadIntent     *string            `json:"leadIntent"`
-	LeadNotes      *string            `json:"leadNotes"`
-	CreatedAt      pgtype.Timestamptz `json:"createdAt"`
-	UpdatedAt      pgtype.Timestamptz `json:"updatedAt"`
-	LastAttemptID  *uuid.UUID         `json:"lastAttemptId"`
-	LastCallID     *uuid.UUID         `json:"lastCallId"`
+	ID              uuid.UUID          `json:"id"`
+	CampaignID      uuid.UUID          `json:"campaignId"`
+	NumberE164      string             `json:"numberE164"`
+	NumberRaw       string             `json:"numberRaw"`
+	TimeZone        *string            `json:"timeZone"`
+	Slots           []byte             `json:"slots"`
+	Status          string             `json:"status"`
+	Attempts        int32              `json:"attempts"`
+	SystemFailures  int32              `json:"systemFailures"`
+	NextAttemptAt   pgtype.Timestamptz `json:"nextAttemptAt"`
+	LastOutcome     *string            `json:"lastOutcome"`
+	LeadIntent      *string            `json:"leadIntent"`
+	LeadNotes       *string            `json:"leadNotes"`
+	CreatedAt       pgtype.Timestamptz `json:"createdAt"`
+	UpdatedAt       pgtype.Timestamptz `json:"updatedAt"`
+	LastAttemptID   *uuid.UUID         `json:"lastAttemptId"`
+	LastCallID      *uuid.UUID         `json:"lastCallId"`
+	IsFrequencyHeld bool               `json:"isFrequencyHeld"`
 }
 
 type Cdr struct {
@@ -393,6 +395,13 @@ type SipSession struct {
 	A1Hash    string             `json:"a1Hash"`
 	CreatedAt pgtype.Timestamptz `json:"createdAt"`
 	ExpiresAt pgtype.Timestamptz `json:"expiresAt"`
+}
+
+type TestNumber struct {
+	NumberE164 string             `json:"numberE164"`
+	Note       *string            `json:"note"`
+	CreatedAt  pgtype.Timestamptz `json:"createdAt"`
+	CreatedBy  *uuid.UUID         `json:"createdBy"`
 }
 
 type Transcript struct {

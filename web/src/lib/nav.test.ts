@@ -32,6 +32,7 @@ describe('the sidebar each role gets', () => {
       '/admin/campaigns',
       '/admin/callbacks',
       '/admin/dnc',
+      '/admin/test-numbers',
       '/admin/cdr',
       '/admin/reports',
       '/admin/audit',
@@ -48,6 +49,7 @@ describe('the sidebar each role gets', () => {
       '/admin/campaigns',
       '/admin/callbacks',
       '/admin/dnc',
+      '/admin/test-numbers',
       '/admin/cdr',
       '/admin/reports',
     ])

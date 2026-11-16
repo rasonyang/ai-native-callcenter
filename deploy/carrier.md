@@ -52,6 +52,17 @@ AICC_OUTBOUND_ENDPOINT=sofia/gateway/pstn_gateway/%s
   gateway file: `docker compose up -d aicc` and
   `docker compose exec freeswitch fs_cli -P 18021 -p <ESL_PASSWORD> -x "sofia profile external rescan"`.
 
+## Test numbers and the carrier's own limits
+
+A team that tests campaigns on its own phones can put those numbers on the list of test numbers
+(`/test-numbers`), and the cross-campaign frequency window (`AICC_CAMPAIGN_FREQUENCY_WINDOW`) then
+no longer holds them back between campaigns. That exemption is the application's alone. A carrier
+line often limits calls to one callee by itself (a number of calls to one callee per hour or per
+day), and that limit still applies to a test number unless the carrier exempts the number too: a
+test campaign that dials the same few phones many times can be refused by the trunk even though the
+application lets it through. Ask the carrier to exempt the numbers, or keep the test volume under
+its limit.
+
 ## A called-number prefix
 
 Some trunks route a call only when the called number carries a prefix the

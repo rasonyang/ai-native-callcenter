@@ -80,6 +80,12 @@ const (
 	// ScopeReportsRead — Read the floor's aggregates: overview, per-queue and daily.
 	ScopeReportsRead = "reports:read"
 
+	// ScopeTestnumbersRead — Read the list of test numbers.
+	ScopeTestnumbersRead = "testnumbers:read"
+
+	// ScopeTestnumbersWrite — Add numbers to the list of test numbers and take them off it. Separate from campaigns:write because every entry gives up the cross-campaign frequency protection for that number, which exists for customers: a compliance decision rather than a campaign setting.
+	ScopeTestnumbersWrite = "testnumbers:write"
+
 	// ScopeUsersWrite — Create and edit accounts, set roles and reset passwords. Separate from config:write because it is the one path to privilege.
 	ScopeUsersWrite = "users:write"
 )
@@ -109,35 +115,39 @@ var AllScopes = []string{
 	ScopeKeysManage,
 	ScopeQualityReview,
 	ScopeReportsRead,
+	ScopeTestnumbersRead,
+	ScopeTestnumbersWrite,
 	ScopeUsersWrite,
 }
 
 // ScopeDescriptions is what each scope means, as the contract states it.
 var ScopeDescriptions = map[string]string{
-	ScopeAgentAct:       "Drive this subject's own agent presence: sign in and out, ready, not ready, wrap up.",
-	ScopeAgentManage:    "Supervise other agents: read the roster and force one out. Separate from agent:act, which only ever reaches the subject's own agent identity.",
-	ScopeAgentRead:      "Read this subject's own agent presence and the wrap-up vocabulary.",
-	ScopeAuditRead:      "Read the audit trail.",
-	ScopeCallsControl:   "Drive a call: answer, hold, retrieve, mute, transfer, DTMF, business data, hang up, and the callbacks that promise a call.",
-	ScopeCallsCreate:    "Place a call.",
-	ScopeCallsCreateAI:  "Start the bot on a number: originate the customer leg and hand whoever answers to the flow published behind the DID. Required in addition to calls:create for kind=AI_OUTBOUND, because one operation carries one scope and this route serves two kinds of call with two different answers — click-to-dial is an agent's own work, starting a bot on a number is an operations decision.",
-	ScopeCallsMonitor:   "Listen in on, whisper to or barge into a call in progress. Separate from calls:control because it reaches a conversation the subject is not a party to.",
-	ScopeCallsReadAll:   "Read every live call on the floor, and receive every call's events on the stream. Widens calls:read:own rather than replacing it.",
-	ScopeCallsReadOwn:   "Read the live calls this subject is a party to. For a key, that is the calls of the agent named in X-AICC-Agent-ID.",
-	ScopeCampaignsRead:  "Read AI outbound campaigns and their contact lists.",
-	ScopeCampaignsWrite: "Create and change campaigns, start, pause, resume and cancel them, and import contacts. Separate from config:write because starting a campaign places calls to customers.",
-	ScopeConfigRead:     "Read the platform's configuration: extensions, queues, numbers, flows, webhook subscriptions, accounts and system health.",
-	ScopeConfigWrite:    "Change the platform's configuration, and reveal an extension's SIP password.",
-	ScopeContactsRead:   "Read the customer record book.",
-	ScopeContactsWrite:  "Add, edit and remove customer records.",
-	ScopeDncRead:        "Read the do-not-call list.",
-	ScopeDncWrite:       "Add numbers to the do-not-call list and take them off it. Separate from config:write because removing a number is what makes it dialable again, a compliance decision rather than a setting.",
-	ScopeHistoryReadAll: "Read what happened on every call, whoever took it. Widens history:read:own rather than replacing it.",
-	ScopeHistoryReadOwn: "Read what happened on this subject's own calls: CDRs, recordings, transcripts and their own day's numbers.",
-	ScopeKeysManage:     "Create, disable and revoke API keys.",
-	ScopeQualityReview:  "Read and write quality reviews of recorded calls.",
-	ScopeReportsRead:    "Read the floor's aggregates: overview, per-queue and daily.",
-	ScopeUsersWrite:     "Create and edit accounts, set roles and reset passwords. Separate from config:write because it is the one path to privilege.",
+	ScopeAgentAct:         "Drive this subject's own agent presence: sign in and out, ready, not ready, wrap up.",
+	ScopeAgentManage:      "Supervise other agents: read the roster and force one out. Separate from agent:act, which only ever reaches the subject's own agent identity.",
+	ScopeAgentRead:        "Read this subject's own agent presence and the wrap-up vocabulary.",
+	ScopeAuditRead:        "Read the audit trail.",
+	ScopeCallsControl:     "Drive a call: answer, hold, retrieve, mute, transfer, DTMF, business data, hang up, and the callbacks that promise a call.",
+	ScopeCallsCreate:      "Place a call.",
+	ScopeCallsCreateAI:    "Start the bot on a number: originate the customer leg and hand whoever answers to the flow published behind the DID. Required in addition to calls:create for kind=AI_OUTBOUND, because one operation carries one scope and this route serves two kinds of call with two different answers — click-to-dial is an agent's own work, starting a bot on a number is an operations decision.",
+	ScopeCallsMonitor:     "Listen in on, whisper to or barge into a call in progress. Separate from calls:control because it reaches a conversation the subject is not a party to.",
+	ScopeCallsReadAll:     "Read every live call on the floor, and receive every call's events on the stream. Widens calls:read:own rather than replacing it.",
+	ScopeCallsReadOwn:     "Read the live calls this subject is a party to. For a key, that is the calls of the agent named in X-AICC-Agent-ID.",
+	ScopeCampaignsRead:    "Read AI outbound campaigns and their contact lists.",
+	ScopeCampaignsWrite:   "Create and change campaigns, start, pause, resume and cancel them, and import contacts. Separate from config:write because starting a campaign places calls to customers.",
+	ScopeConfigRead:       "Read the platform's configuration: extensions, queues, numbers, flows, webhook subscriptions, accounts and system health.",
+	ScopeConfigWrite:      "Change the platform's configuration, and reveal an extension's SIP password.",
+	ScopeContactsRead:     "Read the customer record book.",
+	ScopeContactsWrite:    "Add, edit and remove customer records.",
+	ScopeDncRead:          "Read the do-not-call list.",
+	ScopeDncWrite:         "Add numbers to the do-not-call list and take them off it. Separate from config:write because removing a number is what makes it dialable again, a compliance decision rather than a setting.",
+	ScopeHistoryReadAll:   "Read what happened on every call, whoever took it. Widens history:read:own rather than replacing it.",
+	ScopeHistoryReadOwn:   "Read what happened on this subject's own calls: CDRs, recordings, transcripts and their own day's numbers.",
+	ScopeKeysManage:       "Create, disable and revoke API keys.",
+	ScopeQualityReview:    "Read and write quality reviews of recorded calls.",
+	ScopeReportsRead:      "Read the floor's aggregates: overview, per-queue and daily.",
+	ScopeTestnumbersRead:  "Read the list of test numbers.",
+	ScopeTestnumbersWrite: "Add numbers to the list of test numbers and take them off it. Separate from campaigns:write because every entry gives up the cross-campaign frequency protection for that number, which exists for customers: a compliance decision rather than a campaign setting.",
+	ScopeUsersWrite:       "Create and edit accounts, set roles and reset passwords. Separate from config:write because it is the one path to privilege.",
 }
 
 // IsScope reports whether name is in the vocabulary. An unknown name is

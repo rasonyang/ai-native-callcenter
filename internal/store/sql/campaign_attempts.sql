@@ -8,14 +8,17 @@
 -- in the same transaction, says whether its number was free.
 -- name: ClaimContactForDial :one
 UPDATE campaign_contacts
-SET next_attempt_at = NULL, updated_at = now()
+SET next_attempt_at = NULL, is_frequency_held = false, updated_at = now()
 WHERE id = $1 AND status = 'ACTIVE'
 RETURNING campaign_id, number_e164;
 
+-- is_test_number is read from the list of test numbers now, and stays as it is
+-- if the number leaves the list later.
 -- name: InsertCampaignAttempt :one
 INSERT INTO campaign_attempts (id, campaign_id, campaign_contact_id, number_e164,
-                               call_id, leg_id, started_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
+                               call_id, leg_id, started_at, is_test_number)
+VALUES ($1, $2, $3, $4, $5, $6, $7,
+        EXISTS (SELECT 1 FROM test_numbers t WHERE t.number_e164 = $4))
 RETURNING *;
 
 -- name: SetAttemptJob :execrows
@@ -72,7 +75,7 @@ WHERE id = $1;
 -- recorded no lead they name a later call than the lead's.
 -- name: SettleCampaignContact :exec
 UPDATE campaign_contacts
-SET attempts = $2, system_failures = $3, status = $4, next_attempt_at = $5,
+SET attempts = $2, system_failures = $3, status = $4, next_attempt_at = $5, is_frequency_held = false,
     last_outcome = $6, last_attempt_id = sqlc.arg('last_attempt_id')::uuid,
     last_call_id = sqlc.arg('last_call_id')::uuid,
     lead_intent = coalesce(sqlc.narg('lead_intent')::text, lead_intent),
@@ -104,7 +107,7 @@ RETURNING campaign_contact_id;
 
 -- name: MakeContactDue :execrows
 UPDATE campaign_contacts
-SET next_attempt_at = $2, updated_at = now()
+SET next_attempt_at = $2, is_frequency_held = false, updated_at = now()
 WHERE id = $1 AND status = 'ACTIVE' AND next_attempt_at IS NULL;
 
 -- A campaign's finished attempts, newest first: what the breakers read.

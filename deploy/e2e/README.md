@@ -12,6 +12,7 @@ make e2e-up        # fresh database, application built from the working tree
 make e2e-smoke     # one AI outbound call; checks the callee's record, the CDR, the webhook and the event stream
 make e2e-campaign  # two campaigns (US, CN): answered and unanswered outcomes, SIP probes, run-wide invariants
 make e2e-capacity  # bot-slot overflow (K1), the DID outbound line limit (K2) and a refused bot leg (K3), each in its own application start
+make e2e-frequency # the list of test numbers: two campaigns in a row on a listed number, with a 24 h frequency window
 make e2e-down      # collect logs, remove containers, volumes and the network
 ```
 
@@ -323,7 +324,7 @@ contact keep the canonical `+` number; only the dial string follows the form.
   three, before anything is built or started.
 - `up` fixes the form for the environment and records it in
   `bin/e2e/<project>/dial-form` (removed by `down`). Every other command
-  (`smoke`, `campaign`, `capacity`, `config`) runs in the recorded form, so
+  (`smoke`, `campaign`, `capacity`, `frequency`, `config`) runs in the recorded form, so
   `e2e-capacity`'s application restarts keep it. An explicit
   `E2E_OUTBOUND_DIAL_FORM` that differs from the recorded one is refused ("the
   environment is up with X; run: make e2e-down"); `down` ignores it, since it
@@ -511,6 +512,39 @@ A run writes `capacity-<time>/K1/`, `K2/` and `K3/`: `report.json` (every
 assertion and every call) and `capacity.md` (the tables, also printed by
 `e2e.sh`).
 
+## Test numbers and the frequency window
+
+`make e2e-frequency` (issue #578, `internal/e2e/frequency*.go`) checks that the
+list of test numbers (`POST /test-numbers`) exempts a number from the
+cross-campaign frequency window. The environment runs with
+`AICC_CAMPAIGN_FREQUENCY_WINDOW=0` so repeat runs are not held, so
+`e2e.sh frequency` recreates the application with `E2E_CAMPAIGN_FREQUENCY_WINDOW=24h`
+(the compose overlay's variable, empty by default), runs the case, and recreates
+the application on the defaults again, whatever the result. The case needs an
+environment that is up and, since it touches its numbers for 24 h, a fresh one
+for each run (`make e2e-down`, `make e2e-up`); the driver deletes its entries
+from the list before and after, and a repeat run fails at campaign A with a
+timeout.
+
+Two numbers of the US range, dedicated to this case (`+1 202 555 0181` as N1,
+`0182` as N2), each answered with 200 and hung up by the callee after 3 s. They
+are in `scenario.json` and, generated from it, in the other two forms, with two
+behaviours each (A's call and B's), so the case runs in every dial form.
+
+1. N2 goes on the list. Campaign A (N1, N2) runs to `COMPLETED`: both attempts
+   are touched, N1's has `isTestNumber=false`, N2's `true`.
+2. Campaign B (the same numbers) starts. N2 is dialled within 60 s
+   (`isTestNumber=true`). B's activity becomes `WAITING_FREQUENCY` and its
+   `nextDialAt`, like N1's contact `frequencyHoldEndsAt`, equals the start of
+   A's N1 attempt plus the window (2 s of slack); N2's contact has no hold. The
+   simulator has seen one INVITE for N1 and two for N2.
+3. N1 goes on the list. B dials it within 60 s (`isTestNumber=true`) and
+   completes.
+
+The report is `frequency-<time>/report.json` (the assertions, a timeline and
+both campaigns' attempts). Without the entry of step 3 the second dial would
+come a window later; step 2 is that control.
+
 ## Reading a run
 
 `bin/e2e/<project>/run/` (git-ignored) holds, after a run:
@@ -524,6 +558,7 @@ assertion and every call) and `capacity.md` (the tables, also printed by
 | `campaign-<time>/probes.md` | the measured table, one block per country, and the first-audio times |
 | `campaign-<time>/bundles/` | per failed attempt: attempt, dialog, CDRs and the sliced logs |
 | `capacity-<time>/K1/`, `K2/`, `K3/` | each capacity scenario's `report.json` and `capacity.md` (K3's with the switch log's lines) |
+| `frequency-<time>/report.json` | the test-number case: the timeline, every assertion and both campaigns' attempts |
 | `logs/<service>.log` | each container's output, written on a failed up, smoke, campaign or capacity run and by `e2e-down` |
 | `logs/freeswitch-file.log` | the switch's log file, each call's lines prefixed with its leg id |
 | `logs/sofia-status.txt` | the switch's gateways |

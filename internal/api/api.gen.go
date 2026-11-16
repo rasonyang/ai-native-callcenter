@@ -198,10 +198,11 @@ func (e CallbackStatus) Valid() bool {
 
 // Defines values for CampaignActivity.
 const (
-	CampaignActivityATCAPACITY    CampaignActivity = "AT_CAPACITY"
-	CampaignActivityDIALING       CampaignActivity = "DIALING"
-	CampaignActivityWAITINGRETRY  CampaignActivity = "WAITING_RETRY"
-	CampaignActivityWAITINGWINDOW CampaignActivity = "WAITING_WINDOW"
+	CampaignActivityATCAPACITY       CampaignActivity = "AT_CAPACITY"
+	CampaignActivityDIALING          CampaignActivity = "DIALING"
+	CampaignActivityWAITINGFREQUENCY CampaignActivity = "WAITING_FREQUENCY"
+	CampaignActivityWAITINGRETRY     CampaignActivity = "WAITING_RETRY"
+	CampaignActivityWAITINGWINDOW    CampaignActivity = "WAITING_WINDOW"
 )
 
 // Valid indicates whether the value is a known member of the CampaignActivity enum.
@@ -210,6 +211,8 @@ func (e CampaignActivity) Valid() bool {
 	case CampaignActivityATCAPACITY:
 		return true
 	case CampaignActivityDIALING:
+		return true
+	case CampaignActivityWAITINGFREQUENCY:
 		return true
 	case CampaignActivityWAITINGRETRY:
 		return true
@@ -581,6 +584,7 @@ const (
 	ErrorCodeSTORAGEDOWN                    ErrorCode = "STORAGE_DOWN"
 	ErrorCodeSWITCHDOWN                     ErrorCode = "SWITCH_DOWN"
 	ErrorCodeTERMINALANNOUNCEREQUIRED       ErrorCode = "TERMINAL_ANNOUNCE_REQUIRED"
+	ErrorCodeTESTNUMBERLIMITREACHED         ErrorCode = "TEST_NUMBER_LIMIT_REACHED"
 	ErrorCodeTRANSCRIPTIONDISABLED          ErrorCode = "TRANSCRIPTION_DISABLED"
 	ErrorCodeTRANSFERINPROGRESS             ErrorCode = "TRANSFER_IN_PROGRESS"
 	ErrorCodeUSERDATATOOLARGE               ErrorCode = "USER_DATA_TOO_LARGE"
@@ -660,6 +664,8 @@ func (e ErrorCode) Valid() bool {
 	case ErrorCodeSWITCHDOWN:
 		return true
 	case ErrorCodeTERMINALANNOUNCEREQUIRED:
+		return true
+	case ErrorCodeTESTNUMBERLIMITREACHED:
 		return true
 	case ErrorCodeTRANSCRIPTIONDISABLED:
 		return true
@@ -1655,7 +1661,7 @@ type CallbackStatus string
 
 // Campaign defines model for Campaign.
 type Campaign struct {
-	// Activity What a RUNNING campaign is doing right now, computed by the dialer and never stored. DIALING: calls are in flight. WAITING_WINDOW: every pending contact is outside its calling window (the campaign stays RUNNING; the window reopens by itself). WAITING_RETRY: no pending contact is due yet. AT_CAPACITY: due contacts are held back by a limit (the campaign's maxConcurrent, the deployment's ringing cap, or bot capacity).
+	// Activity What a RUNNING campaign is doing right now, computed by the dialer and never stored. DIALING: calls are in flight. WAITING_WINDOW: every pending contact is outside its calling window (the campaign stays RUNNING; the window reopens by itself). WAITING_RETRY: no pending contact is due yet. WAITING_FREQUENCY: nothing is in flight and the earliest pending contact is held by the cross-campaign frequency window: another campaign reached its number lately, so this one waits until that touch plus AICC_CAMPAIGN_FREQUENCY_WINDOW (nextDialAt). The campaign has made no attempt for those contacts. Adding the number to the list of test numbers lifts the hold. When a closed calling window opens later than the hold ends, the activity is WAITING_WINDOW; when both end at the same time, WAITING_FREQUENCY. AT_CAPACITY: due contacts are held back by a limit (the campaign's maxConcurrent, the deployment's ringing cap, or bot capacity).
 	Activity *CampaignActivity `json:"activity,omitempty"`
 
 	// CallingWindow When a contact may be dialled, in that contact's own time zone (its timeZone, else the campaign's). It binds in addition to the deployment's outer calling hours (AICC_OUTBOUND_HOURS, default 08:00-21:00), and every range must lie wholly inside them: otherwise CAMPAIGN_WINDOW_OUTSIDE_LIMIT, on create and on every change. Ranges of one window may not overlap. A closed window does not pause the campaign.
@@ -1713,7 +1719,7 @@ type Campaign struct {
 	TimeZone string `json:"timeZone"`
 }
 
-// CampaignActivity What a RUNNING campaign is doing right now, computed by the dialer and never stored. DIALING: calls are in flight. WAITING_WINDOW: every pending contact is outside its calling window (the campaign stays RUNNING; the window reopens by itself). WAITING_RETRY: no pending contact is due yet. AT_CAPACITY: due contacts are held back by a limit (the campaign's maxConcurrent, the deployment's ringing cap, or bot capacity).
+// CampaignActivity What a RUNNING campaign is doing right now, computed by the dialer and never stored. DIALING: calls are in flight. WAITING_WINDOW: every pending contact is outside its calling window (the campaign stays RUNNING; the window reopens by itself). WAITING_RETRY: no pending contact is due yet. WAITING_FREQUENCY: nothing is in flight and the earliest pending contact is held by the cross-campaign frequency window: another campaign reached its number lately, so this one waits until that touch plus AICC_CAMPAIGN_FREQUENCY_WINDOW (nextDialAt). The campaign has made no attempt for those contacts. Adding the number to the list of test numbers lifts the hold. When a closed calling window opens later than the hold ends, the activity is WAITING_WINDOW; when both end at the same time, WAITING_FREQUENCY. AT_CAPACITY: due contacts are held back by a limit (the campaign's maxConcurrent, the deployment's ringing cap, or bot capacity).
 type CampaignActivity string
 
 // CampaignAttempt One call placed to a contact. The row exists before the originate is sent, so every call a campaign places has one.
@@ -1727,6 +1733,9 @@ type CampaignAttempt struct {
 	FinishedAt  *time.Time         `json:"finishedAt,omitempty"`
 	HangupCause *string            `json:"hangupCause,omitempty"`
 	ID          openapi_types.UUID `json:"id"`
+
+	// IsTestNumber True when the number was on the list of test numbers at the moment the attempt was placed. History: taking the number off the list later does not change it.
+	IsTestNumber bool `json:"isTestNumber"`
 
 	// IsTouched True when the outcome reached the customer, so it counts against maxAttempts and holds the number from other campaigns for the deployment's frequency window.
 	IsTouched bool `json:"isTouched"`
@@ -1795,7 +1804,10 @@ type CampaignContact struct {
 	Attempts   int                `json:"attempts"`
 	CampaignID openapi_types.UUID `json:"campaignId"`
 	CreatedAt  time.Time          `json:"createdAt"`
-	ID         openapi_types.UUID `json:"id"`
+
+	// FrequencyHoldEndsAt Set while the contact is ACTIVE and another campaign reached its number within the deployment's cross-campaign frequency window (AICC_CAMPAIGN_FREQUENCY_WINDOW): the time that hold ends (the other campaign's latest touch plus the window), after which this campaign may dial it. Absent otherwise, and always absent for a number on the list of test numbers. Computed when the contact is read.
+	FrequencyHoldEndsAt *time.Time         `json:"frequencyHoldEndsAt,omitempty"`
+	ID                  openapi_types.UUID `json:"id"`
 
 	// LastAttemptID The id of the attempt lastCallId belongs to, or null before the first attempt has finished.
 	LastAttemptID *openapi_types.UUID `json:"lastAttemptId"`
@@ -2993,7 +3005,7 @@ type SSECallbackEventPayload struct {
 
 // SSECampaignUpdatedPayload Payload of CAMPAIGN_UPDATED: the campaign's state as the dialer sees it, published when a campaign is created (status DRAFT, zero contacts) and whenever something in it changes, at most once per second per campaign (the latest state wins, so a campaign created and started inside one second is announced once, as RUNNING; a final status is never dropped). A create that fails publishes nothing. Delivered to subjects that hold calls:read:all, never to an agent's own stream. After a SYSTEM_RESET, read GET /campaigns/{campaignId} for the same fields.
 type SSECampaignUpdatedPayload struct {
-	// Activity What a RUNNING campaign is doing right now, computed by the dialer and never stored. DIALING: calls are in flight. WAITING_WINDOW: every pending contact is outside its calling window (the campaign stays RUNNING; the window reopens by itself). WAITING_RETRY: no pending contact is due yet. AT_CAPACITY: due contacts are held back by a limit (the campaign's maxConcurrent, the deployment's ringing cap, or bot capacity).
+	// Activity What a RUNNING campaign is doing right now, computed by the dialer and never stored. DIALING: calls are in flight. WAITING_WINDOW: every pending contact is outside its calling window (the campaign stays RUNNING; the window reopens by itself). WAITING_RETRY: no pending contact is due yet. WAITING_FREQUENCY: nothing is in flight and the earliest pending contact is held by the cross-campaign frequency window: another campaign reached its number lately, so this one waits until that touch plus AICC_CAMPAIGN_FREQUENCY_WINDOW (nextDialAt). The campaign has made no attempt for those contacts. Adding the number to the list of test numbers lifts the hold. When a closed calling window opens later than the hold ends, the activity is WAITING_WINDOW; when both end at the same time, WAITING_FREQUENCY. AT_CAPACITY: due contacts are held back by a limit (the campaign's maxConcurrent, the deployment's ringing cap, or bot capacity).
 	Activity   *CampaignActivity  `json:"activity,omitempty"`
 	CampaignID openapi_types.UUID `json:"campaignId"`
 
@@ -3144,6 +3156,37 @@ type SystemHealth struct {
 
 	// Trunks The gateways the switch holds. Empty when the switch cannot be reached.
 	Trunks *[]Trunk `json:"trunks,omitempty"`
+}
+
+// TestNumber One entry on the list of test numbers.
+type TestNumber struct {
+	CreatedAt time.Time `json:"createdAt"`
+
+	// CreatedBy The account that added it. Absent when an API key did; the audit trail names the key.
+	CreatedBy *openapi_types.UUID `json:"createdBy,omitempty"`
+
+	// Note Who or what the number is, for the people who maintain the list (for example "QA desk phone"). Absent when none was given.
+	Note *string `json:"note,omitempty"`
+
+	// Number Canonical E.164, for example +8613800138000.
+	Number string `json:"number"`
+}
+
+// TestNumberList defines model for TestNumberList.
+type TestNumberList struct {
+	Items []TestNumber `json:"items"`
+
+	// Total Total rows matching the filter, for paging.
+	Total int `json:"total"`
+}
+
+// TestNumberWrite defines model for TestNumberWrite.
+type TestNumberWrite struct {
+	// Note Optional: who or what the number is. Ignored when the number was already listed.
+	Note *string `json:"note,omitempty"`
+
+	// Number The number in any common form; see createTestNumber.
+	Number string `json:"number"`
 }
 
 // TierRules How a queue widens its agent search over time.
@@ -3521,8 +3564,11 @@ type ListCampaignsParams struct {
 type ListCampaignAttemptsParams struct {
 	ContactID *openapi_types.UUID `form:"contactId,omitempty" json:"contactId,omitempty"`
 	Outcome   *CampaignOutcome    `form:"outcome,omitempty" json:"outcome,omitempty"`
-	Limit     *int                `form:"limit,omitempty" json:"limit,omitempty"`
-	Offset    *int                `form:"offset,omitempty" json:"offset,omitempty"`
+
+	// IsTestNumber Absent: every attempt. true: only attempts to a number that was on the list of test numbers when the attempt was placed. false: only the others.
+	IsTestNumber *bool `form:"isTestNumber,omitempty" json:"isTestNumber,omitempty"`
+	Limit        *int  `form:"limit,omitempty" json:"limit,omitempty"`
+	Offset       *int  `form:"offset,omitempty" json:"offset,omitempty"`
 }
 
 // ListCampaignContactsParams defines parameters for ListCampaignContacts.
@@ -3532,8 +3578,17 @@ type ListCampaignContactsParams struct {
 
 	// LastOutcome Only contacts whose latest finished attempt ended so. A contact no attempt has finished for has no lastOutcome and is never in such a list.
 	LastOutcome *CampaignOutcome `form:"lastOutcome,omitempty" json:"lastOutcome,omitempty"`
-	Limit       *int             `form:"limit,omitempty" json:"limit,omitempty"`
-	Offset      *int             `form:"offset,omitempty" json:"offset,omitempty"`
+
+	// IsTestNumber Absent: every contact. true: only contacts whose latest finished attempt was to a listed test number (see CampaignAttempt.isTestNumber). false: only the others, a contact no attempt has finished for included.
+	IsTestNumber *bool `form:"isTestNumber,omitempty" json:"isTestNumber,omitempty"`
+	Limit        *int  `form:"limit,omitempty" json:"limit,omitempty"`
+	Offset       *int  `form:"offset,omitempty" json:"offset,omitempty"`
+}
+
+// GetCampaignOutcomeSummaryParams defines parameters for GetCampaignOutcomeSummary.
+type GetCampaignOutcomeSummaryParams struct {
+	// IsTestNumber Absent: everything, as before. false: leave out everything counted from a test-number attempt (the attempt, its contact's outcome, lead and opt-out, its callback). true: count only those.
+	IsTestNumber *bool `form:"isTestNumber,omitempty" json:"isTestNumber,omitempty"`
 }
 
 // ListCDRsParams defines parameters for ListCDRs.
@@ -3636,6 +3691,14 @@ type GetReportOverviewParams struct {
 type GetReportQueuesParams struct {
 	From *time.Time `form:"from,omitempty" json:"from,omitempty"`
 	To   *time.Time `form:"to,omitempty" json:"to,omitempty"`
+}
+
+// ListTestNumbersParams defines parameters for ListTestNumbers.
+type ListTestNumbersParams struct {
+	// Prefix Canonical E.164 prefix, for example +8613. Omitted or empty returns everything.
+	Prefix *string `form:"prefix,omitempty" json:"prefix,omitempty"`
+	Limit  *int    `form:"limit,omitempty" json:"limit,omitempty"`
+	Offset *int    `form:"offset,omitempty" json:"offset,omitempty"`
 }
 
 // ListWebhookDeliveriesParams defines parameters for ListWebhookDeliveries.
@@ -3741,6 +3804,9 @@ type StaffQueueJSONRequestBody = StaffQueueRequest
 
 // CreateRecordingReviewJSONRequestBody defines body for CreateRecordingReview for application/json ContentType.
 type CreateRecordingReviewJSONRequestBody = CreateReviewRequest
+
+// CreateTestNumberJSONRequestBody defines body for CreateTestNumber for application/json ContentType.
+type CreateTestNumberJSONRequestBody = TestNumberWrite
 
 // CreateUserJSONRequestBody defines body for CreateUser for application/json ContentType.
 type CreateUserJSONRequestBody = UserCreate
@@ -3935,7 +4001,7 @@ type ServerInterface interface {
 	ImportCampaignContacts(w http.ResponseWriter, r *http.Request, campaignID openapi_types.UUID)
 	// GetCampaignOutcomeSummary Get what a campaign's calls came to
 	// (GET /campaigns/{campaignId}/outcome-summary)
-	GetCampaignOutcomeSummary(w http.ResponseWriter, r *http.Request, campaignID openapi_types.UUID)
+	GetCampaignOutcomeSummary(w http.ResponseWriter, r *http.Request, campaignID openapi_types.UUID, params GetCampaignOutcomeSummaryParams)
 	// PauseCampaign Pause a campaign
 	// (POST /campaigns/{campaignId}/pause)
 	PauseCampaign(w http.ResponseWriter, r *http.Request, campaignID openapi_types.UUID)
@@ -4071,6 +4137,15 @@ type ServerInterface interface {
 	// GetSystemHealth Stream and trunk introspection
 	// (GET /system/health)
 	GetSystemHealth(w http.ResponseWriter, r *http.Request)
+	// ListTestNumbers List the test numbers
+	// (GET /test-numbers)
+	ListTestNumbers(w http.ResponseWriter, r *http.Request, params ListTestNumbersParams)
+	// CreateTestNumber Add a number to the list of test numbers
+	// (POST /test-numbers)
+	CreateTestNumber(w http.ResponseWriter, r *http.Request)
+	// DeleteTestNumber Take a number off the list of test numbers
+	// (DELETE /test-numbers/{number})
+	DeleteTestNumber(w http.ResponseWriter, r *http.Request, number string)
 	// ListUsers Accounts
 	// (GET /users)
 	ListUsers(w http.ResponseWriter, r *http.Request)
@@ -4451,7 +4526,7 @@ func (_ Unimplemented) ImportCampaignContacts(w http.ResponseWriter, r *http.Req
 
 // GetCampaignOutcomeSummary Get what a campaign's calls came to
 // (GET /campaigns/{campaignId}/outcome-summary)
-func (_ Unimplemented) GetCampaignOutcomeSummary(w http.ResponseWriter, r *http.Request, campaignID openapi_types.UUID) {
+func (_ Unimplemented) GetCampaignOutcomeSummary(w http.ResponseWriter, r *http.Request, campaignID openapi_types.UUID, params GetCampaignOutcomeSummaryParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -4722,6 +4797,24 @@ func (_ Unimplemented) GetReportQueues(w http.ResponseWriter, r *http.Request, p
 // GetSystemHealth Stream and trunk introspection
 // (GET /system/health)
 func (_ Unimplemented) GetSystemHealth(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListTestNumbers List the test numbers
+// (GET /test-numbers)
+func (_ Unimplemented) ListTestNumbers(w http.ResponseWriter, r *http.Request, params ListTestNumbersParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// CreateTestNumber Add a number to the list of test numbers
+// (POST /test-numbers)
+func (_ Unimplemented) CreateTestNumber(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// DeleteTestNumber Take a number off the list of test numbers
+// (DELETE /test-numbers/{number})
+func (_ Unimplemented) DeleteTestNumber(w http.ResponseWriter, r *http.Request, number string) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -6132,6 +6225,19 @@ func (siw *ServerInterfaceWrapper) ListCampaignAttempts(w http.ResponseWriter, r
 		return
 	}
 
+	// ------------- Optional query parameter "isTestNumber" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "isTestNumber", r.URL.Query(), &params.IsTestNumber, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "isTestNumber"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "isTestNumber", Err: err})
+		}
+		return
+	}
+
 	// ------------- Optional query parameter "limit" -------------
 
 	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
@@ -6252,6 +6358,19 @@ func (siw *ServerInterfaceWrapper) ListCampaignContacts(w http.ResponseWriter, r
 		return
 	}
 
+	// ------------- Optional query parameter "isTestNumber" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "isTestNumber", r.URL.Query(), &params.IsTestNumber, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "isTestNumber"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "isTestNumber", Err: err})
+		}
+		return
+	}
+
 	// ------------- Optional query parameter "limit" -------------
 
 	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
@@ -6330,8 +6449,24 @@ func (siw *ServerInterfaceWrapper) GetCampaignOutcomeSummary(w http.ResponseWrit
 		return
 	}
 
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetCampaignOutcomeSummaryParams
+
+	// ------------- Optional query parameter "isTestNumber" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "isTestNumber", r.URL.Query(), &params.IsTestNumber, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "isTestNumber"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "isTestNumber", Err: err})
+		}
+		return
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.GetCampaignOutcomeSummary(w, r, campaignID)
+		siw.Handler.GetCampaignOutcomeSummary(w, r, campaignID, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -7808,6 +7943,105 @@ func (siw *ServerInterfaceWrapper) GetSystemHealth(w http.ResponseWriter, r *htt
 	handler.ServeHTTP(w, r)
 }
 
+// ListTestNumbers operation middleware
+func (siw *ServerInterfaceWrapper) ListTestNumbers(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListTestNumbersParams
+
+	// ------------- Optional query parameter "prefix" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "prefix", r.URL.Query(), &params.Prefix, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "prefix"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "prefix", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "offset" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", r.URL.Query(), &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "offset"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "offset", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListTestNumbers(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateTestNumber operation middleware
+func (siw *ServerInterfaceWrapper) CreateTestNumber(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateTestNumber(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteTestNumber operation middleware
+func (siw *ServerInterfaceWrapper) DeleteTestNumber(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "number" -------------
+	var number string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "number", chi.URLParam(r, "number"), &number, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "number", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteTestNumber(w, r, number)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListUsers operation middleware
 func (siw *ServerInterfaceWrapper) ListUsers(w http.ResponseWriter, r *http.Request) {
 
@@ -8457,6 +8691,15 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/system/health", wrapper.GetSystemHealth)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/test-numbers", wrapper.ListTestNumbers)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/test-numbers", wrapper.CreateTestNumber)
+	})
+	r.Group(func(r chi.Router) {
+		r.Delete(options.BaseURL+"/test-numbers/{number}", wrapper.DeleteTestNumber)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/users", wrapper.ListUsers)

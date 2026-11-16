@@ -46,10 +46,13 @@ type Attempt struct {
 	HangupCause    string
 	TalkSec        int
 	IsTouched      bool
-	LeadIntent     LeadIntent
-	LeadNotes      string
-	StartedAt      time.Time
-	FinishedAt     *time.Time
+	// IsTestNumber: the number was on the list of test numbers when the
+	// attempt was placed. History; a later delisting does not change it.
+	IsTestNumber bool
+	LeadIntent   LeadIntent
+	LeadNotes    string
+	StartedAt    time.Time
+	FinishedAt   *time.Time
 }
 
 // Ending is how an attempt ended, as the finish routine takes it.

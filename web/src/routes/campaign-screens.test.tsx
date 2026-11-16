@@ -11,6 +11,7 @@ import { Route as CampaignListRoute } from './_app.admin.campaigns.index'
 import { Route as NewCampaignRoute } from './_app.admin.campaigns.new'
 import { Route as DncRoute } from './_app.admin.dnc'
 import { Route as NumbersRoute } from './_app.admin.numbers'
+import { Route as TestNumbersRoute } from './_app.admin.test-numbers'
 
 const as = (role: Role): Identity => ({
   userId: '00000000-0000-4000-8000-000000000001',
@@ -36,6 +37,7 @@ describe('who may open the campaign and do-not-call pages', () => {
     create: NewCampaignRoute,
     detail: CampaignDetailRoute,
     dnc: DncRoute,
+    testNumbers: TestNumbersRoute,
   }
 
   it.each(Object.entries(routes))('turns an agent away from %s, to their own home', (_name, route) => {
@@ -46,7 +48,7 @@ describe('who may open the campaign and do-not-call pages', () => {
     expect(bounce(route, undefined)).toBe('/login')
   })
 
-  // The scope map grants campaigns:read and dnc:read from the supervisor
+  // The scope map grants campaigns:read, dnc:read and testnumbers:read from the supervisor
   // floor up, so both senior roles open the pages.
   it.each(Object.entries(routes))('lets a supervisor and an administrator into %s', (_name, route) => {
     expect(bounce(route, as('SUPERVISOR'))).toBeUndefined()

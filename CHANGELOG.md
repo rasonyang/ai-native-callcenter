@@ -7,6 +7,31 @@ carries the one-line installer's files.
 
 ## Unreleased
 
+### Added
+
+- A list of test numbers, for teams that test campaigns on their own phones.
+  The cross-campaign frequency window no longer holds a listed number back, so
+  a new campaign on the same few internal numbers dials them at once instead of
+  a day later. Nothing else changes for a listed number: the do-not-call list,
+  calling windows and `AICC_OUTBOUND_HOURS` still apply, and a number being
+  dialled is still skipped. `GET` / `POST /test-numbers` and
+  `DELETE /test-numbers/{number}` (scopes `testnumbers:read` and
+  `testnumbers:write`, granted to supervisors and administrators, audited) take
+  a number in any spelling, as the do-not-call list does. Every entry gives up
+  a protection that exists for customers, so the list holds at most 100
+  numbers (`409 TEST_NUMBER_LIMIT_REACHED`). Adding a number makes the contacts
+  that were waiting out the window for it due at once. The exemption is this
+  platform's alone: a carrier line's own per-callee limits still apply unless
+  the carrier exempts the number too.
+- A campaign says why it waits. `activity` is `WAITING_FREQUENCY` (with
+  `nextDialAt`) when the first pending contact is held by another campaign's
+  call, instead of `WAITING_RETRY`, which read as if the campaign had tried;
+  a contact carries `frequencyHoldEndsAt` while it is held.
+- An attempt records whether its number was a test number when it was placed
+  (`isTestNumber`; delisting later does not change it). `isTestNumber` is a
+  filter on the attempt and contact listings and on the outcome summary, so a
+  summary can leave test calls out and still equal the filtered listings.
+
 ### Fixed
 
 - A lead the bot records is no longer lost when its call's campaign attempt was

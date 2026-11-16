@@ -199,6 +199,7 @@ final.
 | `attempts` | attempts that reached the customer; counted against `maxAttempts` (§7) |
 | `system_failures` | attempts that never reached the customer; counted against `maxSystemRetries` (§7) |
 | `next_attempt_at` | when it may be dialled next; NULL unless `ACTIVE` |
+| `is_frequency_held` | true while `next_attempt_at` is where the cross-campaign frequency hold put it (§5.2); set only by that deferral and cleared by every other write of `next_attempt_at`. Read by the re-arm when the number is put on the list of test numbers (§3.4a) |
 | `last_outcome` | from the latest attempt |
 | `lead_intent`, `lead_notes` | the recorded lead (§11); NULL means never recorded. A contact with one is never dialled again (§7.2) |
 | `last_attempt_id`, `last_call_id` | the latest finished attempt and its call; NULL before the first attempt finishes. Written with `last_outcome` when the latest attempt settles, so they follow every attempt; once a call records a lead there is no later attempt (§7.2), so the pair names that call (§14). Not foreign keys, like `call_id` everywhere; migration 00042 backfilled them from the latest `FINISHED` attempt by `started_at` |
@@ -217,6 +218,7 @@ final.
 | `outcome` | §7; NULL while `DIALING` |
 | `hangup_cause`, `talk_sec` | from the CDR, or from the job result (§5.5) |
 | `is_touched` | true when the outcome counts against `maxAttempts` (§7.2), i.e. the customer was reached; read by the frequency check |
+| `is_test_number` | true when the number was on the list of test numbers (§3.4a) at the moment the row was written. History: delisting the number later does not change it. Lets the outcome summary leave test calls out (§14) |
 | `lead_intent`, `lead_notes` | what this call recorded |
 | `started_at`, `finished_at` | |
 
@@ -228,6 +230,22 @@ covers "one attempt in flight per contact" too.
 
 Global, not per campaign: `number_e164` (PK), `source` (`MANUAL \| IMPORT \| CONVERSATION`),
 `call_id` (nullable, set for `CONVERSATION`), `created_at`, `created_by`.
+
+### 3.4a `test_numbers`
+
+The numbers a team tests its campaigns on, exempt from the cross-campaign frequency window
+(§5.2) and from nothing else: `number_e164` (PK, canonical, the same CHECK as `dnc_numbers`),
+`note` (optional, at most 200 characters), `created_at`, `created_by` (null when an API key added
+it). Modelled on `dnc_numbers`: global, `/test-numbers`, idempotent add, canonicalised with the
+deployment's default country code. Every entry gives up a protection that exists for customers, so
+the list holds at most 100 numbers (`store.MaxTestNumbers`): a new number on a full list is
+refused `409 TEST_NUMBER_LIMIT_REACHED`, a number already listed is not an error. Adds are
+serialised by a transaction-scoped advisory lock taken before the size check, so two adds racing
+for the last place cannot both land.
+
+The exemption is this platform's alone. A carrier line's own limits on calls to one callee (a cap
+per callee per day or hour) still apply to a test number unless the carrier exempts it too
+(`deploy/carrier.md`).
 
 ### 3.5 New columns on existing tables
 
@@ -262,7 +280,13 @@ DRAFT ──start──▶ RUNNING ──pause──▶ PAUSED ──resume─�
 - So that the UI reads at a glance, a campaign also has a **read-only derived field** `activity`,
   computed by the dialer and not stored: `DIALING` (calls in flight), `WAITING_WINDOW` (every
   pending contact is outside its window), `WAITING_RETRY` (no pending contact is due yet),
-  `AT_CAPACITY` (held back by a cap in §6), plus `nextDialAt`. The UI shows
+  `WAITING_FREQUENCY` (nothing is in flight, and the earliest pending contact is held by another
+  campaign's call within the frequency window, §5.2; the campaign has made no attempt for it),
+  `AT_CAPACITY` (held back by a cap in §6), plus `nextDialAt`. When a closed calling window
+  and the frequency hold both apply, the activity names whichever ends later (the hold end, last
+  touch + window, against the window's next opening); a tie goes to `WAITING_FREQUENCY`, the
+  reason an operator can act on. A window of 0 never yields it. A contact's own retry time later
+  than both is `WAITING_RETRY`. The UI shows
   "Running · waiting for calling hours (tomorrow 09:00)".
 - `CANCELLED` and `COMPLETED` are absorbing. Contacts and leads stay readable.
 - Every transition goes through the dialer actor (§5): the API asks, the actor decides.
@@ -312,7 +336,9 @@ WHERE c.campaign_id = $1
                   WHERE a.number_e164 = c.number_e164
                     AND a.campaign_id <> c.campaign_id
                     AND a.is_touched
-                    AND a.started_at > now() - $frequency_window)
+                    AND a.started_at > now() - $frequency_window
+                    AND NOT EXISTS (SELECT 1 FROM test_numbers t   -- except a test number
+                                    WHERE t.number_e164 = c.number_e164))
 ORDER BY c.next_attempt_at, c.id
 LIMIT $2
 ```
@@ -326,6 +352,25 @@ within `frequencyWindow` (deployment configuration, default 24 h). A contact hel
 not dropped: its `next_attempt_at` moves to "last touch + `frequencyWindow`", and on to the next
 window if that falls outside one. Retries within the same campaign follow its `retry_policy`. A
 single `createCall` is not subject to this rule.
+
+**Test numbers.** A number on the list of test numbers (§3.4a) is exempt from this check, and only
+from this check: it is still never dialled when on the do-not-call list, still skipped while any
+attempt to it is in flight, still held to the calling window and `AICC_OUTBOUND_HOURS`, and its
+campaign's own `maxAttempts` and retry policy are unchanged. Putting a number on the list makes
+the contacts that were waiting out the window for it due again at once (the dialer is told, as for
+a do-not-call add; the re-arm is also run when the dialer starts and when a campaign starts or
+resumes, so a listing made while the campaign was paused, or lost to a restart, is not forgotten):
+the contacts of `RUNNING` campaigns with that number that the hold itself
+deferred. The hold marks what it defers (`campaign_contacts.is_frequency_held`, set only where
+`HeldByFrequency`'s deferral moves the due time and cleared by every other write of it: the claim,
+the settle, a calling-window deferral, a re-arm); a contact waiting on its own retry policy carries
+no mark and keeps its time, however it compares with the other campaign's touch. Taking the number off the list
+holds it again from then on, by the touches inside the window. The contact listing carries
+`frequencyHoldEndsAt`, computed at read time from the same facts (an ACTIVE contact, another
+campaign's touch inside the deployment's window, number not listed) and only while the hold binds:
+the contact is marked, or its due time is not later than the hold's end (a retry time past it is
+the campaign's own and is shown as such): "held by another campaign's
+call until …".
 
 ### 5.3 Write ahead, then dial
 
@@ -1076,7 +1121,10 @@ Contract first in `docs/openapi.json`; final shapes come with the PR.
   one, so a `HIGH` lead resolves to its callback with the contact's `lastCallId`, never by comparing
   phone numbers: one number can hold callbacks from several calls and campaigns, and `numberRaw` and
   `phoneNumber` need not share a format.
-- `GET /campaigns/{campaignId}/attempts`
+- `GET /campaigns/{campaignId}/attempts` (filter by `contactId`, `outcome`, `isTestNumber`). An
+  attempt carries `isTestNumber` (§3.3).
+- `GET/POST /test-numbers`, `DELETE /test-numbers/{number}` (`testnumbers:read` / `testnumbers:write`,
+  audited like the do-not-call list; §3.4a).
 - `GET /campaigns/{campaignId}/outcome-summary` (`campaigns:read`, #476): what the calls came to,
   its own operation so that a page of campaigns pays for no aggregate. Every count is read from the
   rows when it is asked for, in one read-only snapshot; nothing is kept as a running total, so a
@@ -1094,7 +1142,15 @@ Contract first in `docs/openapi.json`; final shapes come with the PR.
     `call_id` (a campaign files only `HIGH` leads' callbacks, one per call), by `OPEN`, `CLAIMED`,
     `DONE` and `DISMISSED`; each is `listCallbacks?callId=` of one attempt's call.
 
-  No schema change: every fact is in `campaign_attempts`, `campaign_contacts` and `callbacks`.
+  An optional `isTestNumber` query parameter (absent: everything, as before) leaves test calls out
+  (`false`) or keeps only them (`true`), and the same parameter filters `listCampaignAttempts` and
+  `listCampaignContacts`, so every count stays the total of a listing filtered the same way. An
+  attempt is flagged by its own `is_test_number`; a contact, and so its lead and opt-out, by its
+  latest finished attempt's (a contact no attempt has finished for is not flagged); a callback by
+  the attempt of the call that filed it.
+
+  Only the flag on `campaign_attempts` is new: every fact is in `campaign_attempts`,
+  `campaign_contacts` and `callbacks`.
 - `GET /campaigns/settings` (`campaigns:read`): the rules a write is held to, so a form does not
   mirror them. `outboundHours` is `AICC_OUTBOUND_HOURS` as a `CampaignTimeRange` (callee-local; a
   range whose end is before its start crosses midnight, and a window range is inside it only within
@@ -1288,6 +1344,12 @@ Added by this design:
 - **Cross-campaign frequency:** after A reaches a number, B does not dial it for 24 h and its
   `next_attempt_at` moves to the touch + 24 h; an `ORIGINATE_FAILED` in A does not hold B back; two
   campaigns admitting one number at once — exactly one succeeds (partial unique index).
+- **Test numbers:** after A reaches two numbers, one of them listed, B dials the listed one at once
+  and holds the other until the touch + 24 h (`WAITING_FREQUENCY`, `nextDialAt` = that time);
+  listing the second makes B dial it at once; a listed number on the do-not-call list is never
+  dialled; a listed number that A is dialling is skipped until A's call ends; the list refuses a
+  101st number and a racing add never overshoots; an attempt to a listed number is flagged and stays
+  so after delisting; the outcome summary with `isTestNumber` equals the filtered listings.
 - **Outer hours:** a `calling_window` outside them is refused on create and on change; narrowing
   the outer hours still binds an existing campaign at admission.
 - **PATCH while running:** a locked field is refused; a new `maxConcurrent` affects only later

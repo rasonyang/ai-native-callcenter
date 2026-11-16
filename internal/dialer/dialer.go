@@ -46,10 +46,12 @@ type Store interface {
 	Cancel(ctx context.Context, id uuid.UUID) (campaign.Campaign, error)
 	Due(ctx context.Context, campaignID uuid.UUID, now time.Time, frequency time.Duration, limit int) ([]campaign.Contact, error)
 	HeldByFrequency(ctx context.Context, campaignID uuid.UUID, now time.Time, frequency time.Duration, limit int) ([]campaign.Held, error)
-	Defer(ctx context.Context, ids []uuid.UUID, at []time.Time) error
+	Defer(ctx context.Context, ids []uuid.UUID, at []time.Time, isHeld bool) error
 	RearmUntried(ctx context.Context, campaignID uuid.UUID, now time.Time) error
 	Pending(ctx context.Context, campaignID uuid.UUID, now time.Time) (campaign.Pending, error)
 	EarliestPending(ctx context.Context, campaignID uuid.UUID) (*campaign.Contact, error)
+	FrequencyHold(ctx context.Context, contactID uuid.UUID, now time.Time, frequency time.Duration) (*time.Time, error)
+	RearmFrequencyHeld(ctx context.Context, now time.Time) error
 	Complete(ctx context.Context, campaignID uuid.UUID, at time.Time) (bool, error)
 	PauseFor(ctx context.Context, campaignID uuid.UUID, reason campaign.PauseReason) (bool, error)
 	DNCContacts(ctx context.Context, limit int) ([]uuid.UUID, error)
@@ -225,12 +227,17 @@ type Dialer struct {
 	isReady  bool
 	isDirty  bool
 	dncDirty bool
-	nextWake time.Time
-	rot      int
-	flights  map[uuid.UUID]*flight // by call id
-	inflight map[uuid.UUID]int     // per campaign
-	ringing  int
-	talking  int
+	// testDirty: a number joined the list of test numbers, so the contacts
+	// waiting out the frequency window for it are due again. Also set at start
+	// and when a campaign starts or resumes, because the nudge is in memory
+	// and the re-arm only reaches RUNNING campaigns.
+	testDirty bool
+	nextWake  time.Time
+	rot       int
+	flights   map[uuid.UUID]*flight // by call id
+	inflight  map[uuid.UUID]int     // per campaign
+	ringing   int
+	talking   int
 	// ringingBy is the ringing legs of each campaign: the weights of the
 	// expected-answer sum. stats is each campaign's answer-rate and overflow
 	// history, loaded from the store on first use and moved by each finish.
@@ -293,7 +300,7 @@ func New(cfg Config, d Deps) *Dialer {
 		warnedCC:  map[uuid.UUID]bool{},
 		progress:  map[uuid.UUID]campaign.Progress{},
 		schedule:  map[string]campaign.Schedule{},
-		isDirty:   true, dncDirty: true,
+		isDirty:   true, dncDirty: true, testDirty: true,
 	}
 	if x.isLive == nil {
 		x.isLive = func(uuid.UUID) bool { return false }
@@ -308,8 +315,9 @@ type (
 	finishedMsg campaign.Finished
 	answeredMsg uuid.UUID
 	wakeMsg     struct {
-		dnc      bool
-		rearmFor uuid.UUID
+		dnc        bool
+		testNumber bool
+		rearmFor   uuid.UUID
 	}
 	cmdMsg struct {
 		fn   func(ctx context.Context)
@@ -338,6 +346,10 @@ func (d *Dialer) Answered(callID uuid.UUID) { d.post(answeredMsg(callID)) }
 // DNCAdded is the store's OnDNCAdded: waiting contacts on the number must be
 // skipped. It never blocks.
 func (d *Dialer) DNCAdded() { d.post(wakeMsg{dnc: true}) }
+
+// TestNumberAdded is the store's OnTestNumberAdded: contacts waiting out the
+// frequency window for the number are due again. It never blocks.
+func (d *Dialer) TestNumberAdded() { d.post(wakeMsg{testNumber: true}) }
 
 // SlotFreed is BotSlots.SetOnFree: capacity may have appeared. It never blocks.
 func (d *Dialer) SlotFreed() { d.post(wakeMsg{}) }
@@ -431,6 +443,8 @@ func (d *Dialer) began(id uuid.UUID) {
 	d.since[id] = d.clock.Now()
 	delete(d.halted, id)
 	d.dncDirty = true
+	// A number may have been listed while the campaign was not running.
+	d.testDirty = true
 }
 
 func (d *Dialer) move(ctx context.Context, f func(context.Context) (campaign.Campaign, error)) (campaign.Campaign, error) {
@@ -570,6 +584,9 @@ func (d *Dialer) handle(ctx context.Context, m any) {
 		d.isDirty = true
 		if m.dnc {
 			d.dncDirty = true
+		}
+		if m.testNumber {
+			d.testDirty = true
 		}
 		if m.rearmFor != uuid.Nil {
 			d.rearm[m.rearmFor] = true

@@ -20,14 +20,19 @@ const (
 	ActivityWaitingWindow Activity = "WAITING_WINDOW"
 	// ActivityWaitingRetry: no pending contact is due yet.
 	ActivityWaitingRetry Activity = "WAITING_RETRY"
+	// ActivityWaitingFrequency: nothing is in flight and the earliest pending
+	// contact is held by the cross-campaign frequency window: another campaign
+	// reached its number lately, and this one waits until that touch plus the
+	// window (NextDialAt). A number on the list of test numbers is never held.
+	ActivityWaitingFrequency Activity = "WAITING_FREQUENCY"
 	// ActivityAtCapacity: due contacts wait on one of the dialer's limits.
 	ActivityAtCapacity Activity = "AT_CAPACITY"
 )
 
-// IsValid reports whether a is one of the four activities.
+// IsValid reports whether a is one of the five activities.
 func (a Activity) IsValid() bool {
 	switch a {
-	case ActivityDialing, ActivityWaitingWindow, ActivityWaitingRetry, ActivityAtCapacity:
+	case ActivityDialing, ActivityWaitingWindow, ActivityWaitingRetry, ActivityWaitingFrequency, ActivityAtCapacity:
 		return true
 	}
 	return false
@@ -86,6 +91,9 @@ type DialingAttempt struct {
 type AttemptFilter struct {
 	ContactID *uuid.UUID
 	Outcome   Outcome
-	Limit     int
-	Offset    int
+	// IsTestNumber: nil every attempt, else only those whose IsTestNumber is
+	// equal.
+	IsTestNumber *bool
+	Limit        int
+	Offset       int
 }

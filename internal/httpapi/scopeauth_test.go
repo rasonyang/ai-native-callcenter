@@ -110,14 +110,15 @@ func newFixtureWithConfig(t *testing.T, configure func(*config.Config),
 		configure(&cfg)
 	}
 	deps := Deps{
-		Auth:     auth.NewService(st.Queries, cfg.SessionTTL),
-		Agents:   stubAgents{},
-		AgentDir: dbDirectory{st},
-		Ledger:   st.Ledger(),
-		Auditor:  st.Ledger(),
-		Accounts: st.Accounts(),
-		Contacts: st.Contacts(),
-		DNC:      st.DNC(),
+		Auth:        auth.NewService(st.Queries, cfg.SessionTTL),
+		Agents:      stubAgents{},
+		AgentDir:    dbDirectory{st},
+		Ledger:      st.Ledger(),
+		Auditor:     st.Ledger(),
+		Accounts:    st.Accounts(),
+		Contacts:    st.Contacts(),
+		DNC:         st.DNC(),
+		TestNumbers: st.TestNumbers(),
 		Campaigns: campaign.NewService(st.Campaigns(), nil, campaign.Env{
 			DefaultCountryCode: "86",
 		}).WithPlacer(canPlace(true)),

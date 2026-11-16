@@ -29,6 +29,8 @@ export type Scope =
     | 'keys:manage'
     | 'quality:review'
     | 'reports:read'
+    | 'testnumbers:read'
+    | 'testnumbers:write'
     | 'users:write'
 
 /** The complete vocabulary, sorted by name. */
@@ -56,6 +58,8 @@ export const SCOPES: readonly Scope[] = [
     'keys:manage',
     'quality:review',
     'reports:read',
+    'testnumbers:read',
+    'testnumbers:write',
     'users:write',
 ] as const
 
@@ -84,5 +88,7 @@ export const SCOPE_DESCRIPTIONS: Record<Scope, string> = {
     'keys:manage': "Create, disable and revoke API keys.",
     'quality:review': "Read and write quality reviews of recorded calls.",
     'reports:read': "Read the floor's aggregates: overview, per-queue and daily.",
+    'testnumbers:read': "Read the list of test numbers.",
+    'testnumbers:write': "Add numbers to the list of test numbers and take them off it. Separate from campaigns:write because every entry gives up the cross-campaign frequency protection for that number, which exists for customers: a compliance decision rather than a campaign setting.",
     'users:write': "Create and edit accounts, set roles and reset passwords. Separate from config:write because it is the one path to privilege.",
 }

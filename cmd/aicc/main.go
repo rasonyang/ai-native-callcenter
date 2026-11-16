@@ -163,6 +163,7 @@ func run() error {
 	// A campaign contact's retry stays inside the outer calling hours. The
 	// dialer (a later slice) sets st.OnAttemptFinished to wake itself.
 	st.OutboundHours = cfg.OutboundHours
+	st.CampaignFrequencyWindow = cfg.CampaignFrequencyWindow
 	// The dialer is built further down, after the services it depends on; what
 	// the store tells it is forwarded once it exists. Events before then are
 	// not lost: the dialer reads the database when it starts.
@@ -187,6 +188,11 @@ func run() error {
 	st.OnDNCAdded = func() {
 		if d := campaignDialer.Load(); d != nil {
 			d.DNCAdded()
+		}
+	}
+	st.OnTestNumberAdded = func() {
+		if d := campaignDialer.Load(); d != nil {
+			d.TestNumberAdded()
 		}
 	}
 	hub.OnDropped = func(sub events.Subscriber) {
@@ -557,6 +563,7 @@ func run() error {
 			catalogSvc,
 			st.Contacts(),
 			st.DNC(),
+			st.TestNumbers(),
 			campaignSvc,
 			st.Ledger(),
 			st.Flows(),

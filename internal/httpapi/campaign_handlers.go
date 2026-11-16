@@ -34,7 +34,7 @@ type CampaignService interface {
 	ImportContacts(ctx context.Context, id uuid.UUID, rows []campaign.ImportRow) (campaign.ImportResult, error)
 	ListContacts(ctx context.Context, id uuid.UUID, f campaign.ContactFilter) ([]campaign.Contact, int64, error)
 	ListAttempts(ctx context.Context, id uuid.UUID, f campaign.AttemptFilter) ([]campaign.Attempt, int64, error)
-	OutcomeSummary(ctx context.Context, id uuid.UUID) (campaign.OutcomeSummary, error)
+	OutcomeSummary(ctx context.Context, id uuid.UUID, isTestNumber *bool) (campaign.OutcomeSummary, error)
 	Settings() campaign.Settings
 	ReadyDIDs(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]bool, error)
 }
@@ -216,11 +216,12 @@ func (s *Server) campaignMove(w http.ResponseWriter, r *http.Request,
 func (s *Server) ListCampaignContacts(w http.ResponseWriter, r *http.Request,
 	campaignID openapi_types.UUID, params api.ListCampaignContactsParams) {
 	items, total, err := s.campaigns.ListContacts(r.Context(), campaignID, campaign.ContactFilter{
-		Status:      campaign.ContactStatus(stringOr(params.Status)),
-		LeadIntent:  campaign.LeadIntent(stringOr(params.LeadIntent)),
-		LastOutcome: campaign.Outcome(stringOr(params.LastOutcome)),
-		Limit:       intOr(params.Limit, 50),
-		Offset:      intOr(params.Offset, 0),
+		Status:       campaign.ContactStatus(stringOr(params.Status)),
+		LeadIntent:   campaign.LeadIntent(stringOr(params.LeadIntent)),
+		LastOutcome:  campaign.Outcome(stringOr(params.LastOutcome)),
+		IsTestNumber: params.IsTestNumber,
+		Limit:        intOr(params.Limit, 50),
+		Offset:       intOr(params.Offset, 0),
 	})
 	if err != nil {
 		s.writeCampaignError(w, r, err)
@@ -237,10 +238,11 @@ func (s *Server) ListCampaignContacts(w http.ResponseWriter, r *http.Request,
 func (s *Server) ListCampaignAttempts(w http.ResponseWriter, r *http.Request,
 	campaignID openapi_types.UUID, params api.ListCampaignAttemptsParams) {
 	items, total, err := s.campaigns.ListAttempts(r.Context(), campaignID, campaign.AttemptFilter{
-		ContactID: params.ContactID,
-		Outcome:   campaign.Outcome(stringOr(params.Outcome)),
-		Limit:     intOr(params.Limit, 50),
-		Offset:    intOr(params.Offset, 0),
+		ContactID:    params.ContactID,
+		Outcome:      campaign.Outcome(stringOr(params.Outcome)),
+		IsTestNumber: params.IsTestNumber,
+		Limit:        intOr(params.Limit, 50),
+		Offset:       intOr(params.Offset, 0),
 	})
 	if err != nil {
 		s.writeCampaignError(w, r, err)
@@ -254,8 +256,8 @@ func (s *Server) ListCampaignAttempts(w http.ResponseWriter, r *http.Request,
 }
 
 // GetCampaignOutcomeSummary counts what a campaign's calls came to.
-func (s *Server) GetCampaignOutcomeSummary(w http.ResponseWriter, r *http.Request, campaignID openapi_types.UUID) {
-	sum, err := s.campaigns.OutcomeSummary(r.Context(), campaignID)
+func (s *Server) GetCampaignOutcomeSummary(w http.ResponseWriter, r *http.Request, campaignID openapi_types.UUID, params api.GetCampaignOutcomeSummaryParams) {
+	sum, err := s.campaigns.OutcomeSummary(r.Context(), campaignID, params.IsTestNumber)
 	if err != nil {
 		s.writeCampaignError(w, r, err)
 		return
@@ -298,7 +300,7 @@ func campaignAttemptOut(a campaign.Attempt) api.CampaignAttempt {
 	out := api.CampaignAttempt{
 		ID: a.ID, CampaignID: a.CampaignID, ContactID: a.ContactID, Number: a.Number,
 		CallID: a.CallID, LegID: a.LegID, State: api.CampaignAttemptState(a.State),
-		IsTouched: a.IsTouched, StartedAt: a.StartedAt, FinishedAt: a.FinishedAt,
+		IsTouched: a.IsTouched, IsTestNumber: a.IsTestNumber, StartedAt: a.StartedAt, FinishedAt: a.FinishedAt,
 	}
 	if a.Outcome != "" {
 		o := api.CampaignOutcome(a.Outcome)
@@ -610,7 +612,7 @@ func campaignContactOut(c campaign.Contact) api.CampaignContact {
 		ID: c.ID, CampaignID: c.CampaignID, Number: c.Number, NumberRaw: c.NumberRaw,
 		Slots: c.Slots, Status: api.CampaignContactStatus(c.Status),
 		Attempts: c.Attempts, SystemFailures: c.SystemFailures,
-		NextAttemptAt: c.NextAttemptAt, CreatedAt: c.CreatedAt,
+		NextAttemptAt: c.NextAttemptAt, FrequencyHoldEndsAt: c.FrequencyHoldEndsAt, CreatedAt: c.CreatedAt,
 		LastAttemptID: c.LastAttemptID, LastCallID: c.LastCallID,
 	}
 	if out.Slots == nil {

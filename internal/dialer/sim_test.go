@@ -88,7 +88,7 @@ func (s *simStore) Due(_ context.Context, id uuid.UUID, _ time.Time, _ time.Dura
 func (s *simStore) HeldByFrequency(context.Context, uuid.UUID, time.Time, time.Duration, int) ([]campaign.Held, error) {
 	return nil, nil
 }
-func (s *simStore) Defer(context.Context, []uuid.UUID, []time.Time) error { return nil }
+func (s *simStore) Defer(context.Context, []uuid.UUID, []time.Time, bool) error { return nil }
 func (s *simStore) RearmUntried(context.Context, uuid.UUID, time.Time) error {
 	return nil
 }
@@ -98,6 +98,10 @@ func (s *simStore) Pending(context.Context, uuid.UUID, time.Time) (campaign.Pend
 func (s *simStore) EarliestPending(context.Context, uuid.UUID) (*campaign.Contact, error) {
 	return nil, nil
 }
+func (s *simStore) FrequencyHold(context.Context, uuid.UUID, time.Time, time.Duration) (*time.Time, error) {
+	return nil, nil
+}
+func (s *simStore) RearmFrequencyHeld(context.Context, time.Time) error          { return nil }
 func (s *simStore) Complete(context.Context, uuid.UUID, time.Time) (bool, error) { return false, nil }
 func (s *simStore) PauseFor(context.Context, uuid.UUID, campaign.PauseReason) (bool, error) {
 	return false, nil

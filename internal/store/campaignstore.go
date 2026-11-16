@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -24,11 +25,14 @@ import (
 type CampaignStore struct {
 	pool *pgxpool.Pool
 	q    *queries.Queries
+	// frequency is the deployment's cross-campaign frequency window, which a
+	// contact listing turns into "held until".
+	frequency time.Duration
 }
 
 // Campaigns returns the campaign store.
 func (s *Store) Campaigns() *CampaignStore {
-	return &CampaignStore{pool: s.Pool, q: s.Queries}
+	return &CampaignStore{pool: s.Pool, q: s.Queries, frequency: s.CampaignFrequencyWindow}
 }
 
 var _ campaign.Repository = (*CampaignStore)(nil)
@@ -433,22 +437,32 @@ func (c *CampaignStore) ListContacts(ctx context.Context, campaignID uuid.UUID,
 	rows, err := c.q.ListCampaignContacts(ctx, queries.ListCampaignContactsParams{
 		CampaignID: campaignID, Status: string(f.Status), LeadIntent: string(f.LeadIntent),
 		LastOutcome: string(f.LastOutcome), PageLimit: int32(f.Limit), PageOffset: int32(f.Offset),
+		Now: ts(time.Now()), FrequencySec: c.frequency.Seconds(), IsTestNumber: f.IsTestNumber,
 	})
 	if err != nil {
 		return nil, 0, fmt.Errorf("list contacts of campaign %s: %w", campaignID, err)
 	}
 	total, err := c.q.CountCampaignContacts(ctx, queries.CountCampaignContactsParams{
 		CampaignID: campaignID, Status: string(f.Status), LeadIntent: string(f.LeadIntent),
-		LastOutcome: string(f.LastOutcome),
+		LastOutcome: string(f.LastOutcome), IsTestNumber: f.IsTestNumber,
 	})
 	if err != nil {
 		return nil, 0, fmt.Errorf("count contacts of campaign %s: %w", campaignID, err)
 	}
 	out := make([]campaign.Contact, 0, len(rows))
 	for _, r := range rows {
-		ct, err := contactOf(r)
+		ct, err := contactOf(r.CampaignContact)
 		if err != nil {
 			return nil, 0, err
+		}
+		if r.LastTouch.Valid {
+			// The hold binds when the window deferred the contact, or when its
+			// own due time is not later than the hold's end; a retry time past
+			// it is the campaign's own, and says so.
+			end := r.LastTouch.Time.Add(c.frequency)
+			if r.CampaignContact.IsFrequencyHeld || ct.NextAttemptAt == nil || !ct.NextAttemptAt.After(end) {
+				ct.FrequencyHoldEndsAt = &end
+			}
 		}
 		out = append(out, ct)
 	}
@@ -459,7 +473,7 @@ func (c *CampaignStore) ListContacts(ctx context.Context, campaignID uuid.UUID,
 // in one read-only REPEATABLE READ transaction, so the attempts, the contacts
 // and the callbacks are counted at the same moment: a call that finishes
 // meanwhile is in all of them or in none.
-func (c *CampaignStore) OutcomeSummary(ctx context.Context, campaignID uuid.UUID) (campaign.OutcomeSummary, error) {
+func (c *CampaignStore) OutcomeSummary(ctx context.Context, campaignID uuid.UUID, isTestNumber *bool) (campaign.OutcomeSummary, error) {
 	tx, err := c.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
 	if err != nil {
 		return campaign.OutcomeSummary{}, fmt.Errorf("summarise campaign %s: %w", campaignID, err)
@@ -475,7 +489,7 @@ func (c *CampaignStore) OutcomeSummary(ctx context.Context, campaignID uuid.UUID
 	}
 	out := campaign.NewOutcomeSummary(campaignID)
 
-	contacts, err := q.CampaignContactGroups(ctx, campaignID)
+	contacts, err := q.CampaignContactGroups(ctx, queries.CampaignContactGroupsParams{CampaignID: campaignID, IsTestNumber: isTestNumber})
 	if err != nil {
 		return campaign.OutcomeSummary{}, fmt.Errorf("count contacts of campaign %s: %w", campaignID, err)
 	}
@@ -484,7 +498,7 @@ func (c *CampaignStore) OutcomeSummary(ctx context.Context, campaignID uuid.UUID
 			campaign.LeadIntent(deref(r.LeadIntent)), int(r.N))
 	}
 
-	attempts, err := q.CampaignAttemptOutcomes(ctx, campaignID)
+	attempts, err := q.CampaignAttemptOutcomes(ctx, queries.CampaignAttemptOutcomesParams{CampaignID: campaignID, IsTestNumber: isTestNumber})
 	if err != nil {
 		return campaign.OutcomeSummary{}, fmt.Errorf("count attempts of campaign %s: %w", campaignID, err)
 	}
@@ -492,7 +506,7 @@ func (c *CampaignStore) OutcomeSummary(ctx context.Context, campaignID uuid.UUID
 		out.AttemptsByOutcome[campaign.Outcome(deref(r.Outcome))] += int(r.N)
 	}
 
-	callbacks, err := q.CampaignCallbackStatuses(ctx, campaignID)
+	callbacks, err := q.CampaignCallbackStatuses(ctx, queries.CampaignCallbackStatusesParams{CampaignID: campaignID, IsTestNumber: isTestNumber})
 	if err != nil {
 		return campaign.OutcomeSummary{}, fmt.Errorf("count callbacks of campaign %s: %w", campaignID, err)
 	}

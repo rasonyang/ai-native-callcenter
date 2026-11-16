@@ -70,6 +70,22 @@ describe('the sentence a campaign state reads as', () => {
     )
   })
 
+  it('says a campaign is held by another campaign’s call, not that it is retrying', () => {
+    const campaign = campaignFixture({
+      status: 'RUNNING', activity: 'WAITING_FREQUENCY', nextDialAt: '2026-10-12T14:30:00+08:00',
+    })
+    expect(describeState(campaign, tEn, { locale: 'en', ...here }).line).toBe(
+      'Running · held by another campaign\'s call until today 14:30',
+    )
+    expect(describeState(campaign, tZh, { locale: 'zh', ...here }).line).toBe(
+      '运行中 · 被其他活动的呼叫占用，至 今天 14:30',
+    )
+    const bare = { ...campaign, nextDialAt: undefined }
+    expect(describeState(bare, tEn, { locale: 'en', ...here }).line).toBe(
+      'Running · held by another campaign\'s call',
+    )
+  })
+
   it('reads the day in the campaign’s zone, not the browser’s', () => {
     // 22:30 in New York is already tomorrow in Shanghai's morning, but the
     // campaign lives in New York: it is still tonight there.

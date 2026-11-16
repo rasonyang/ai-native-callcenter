@@ -165,7 +165,7 @@ func (r *fakeRepo) ListContacts(context.Context, uuid.UUID, ContactFilter) ([]Co
 	return nil, 0, nil
 }
 
-func (r *fakeRepo) OutcomeSummary(ctx context.Context, id uuid.UUID) (OutcomeSummary, error) {
+func (r *fakeRepo) OutcomeSummary(ctx context.Context, id uuid.UUID, _ *bool) (OutcomeSummary, error) {
 	if _, err := r.Get(ctx, id); err != nil {
 		return OutcomeSummary{}, err
 	}
