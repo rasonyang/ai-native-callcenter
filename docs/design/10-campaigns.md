@@ -500,6 +500,15 @@ then runs it. The timeout is therefore not "not taken": it is `esl.ErrTimeout`, 
   a switch later than 10 minutes is left to that reconcile's ordinary rules. The channel's own CDR then replaces the placement
   failure, as any fuller row does. This is the one case the owner's decision did not settle; it was
   the smallest safe choice.
+  After a restart that memory is gone, so `noteChannel` ends one more kind of leg the same way
+  (`ALLOTTED_TIMEOUT`, at its `CHANNEL_CREATE`): a created leg stamped `aicc_placed_by=DIAL_AI` that
+  this process neither placed (`legJobs`), nor holds armed (`pending`, which is also what a leg the
+  cold-start or reconnect listing re-armed, and an unconfirmed placement the window adopted, sit
+  in), nor remembers as late. Nothing would bridge it, so a customer answering it would hear
+  silence (#573). The same rule ends, in a running process, a late leg whose `CHANNEL_CREATE` comes
+  after its 10 minutes of memory, which used to be left parked. The attempt is not consulted: a leg
+  the listing did re-arm is still answered and bridged, and its real CDR revises the attempt as
+  before (§7, lead intent).
 - **Campaigns.** `ClassifyDialError` maps the unconfirmed error to *pending*, not `ORIGINATE_FAILED`.
   The flight stays, and the backstop (`flight.nextCheck`) settles it. The dialer's `IsLive` also
   answers true for a call the outbound layer is still placing (`outbound.Service.IsPlacing`), so the
@@ -1017,8 +1026,9 @@ The model judges; code records.
   long as the ledger holds no CDR for the call other than a placement failure, and the real CDR
   that follows revises the attempt through the same finish routine, which files the DNC row or
   callback once. The attempt lock orders `SetLead` against the CDR insert; once the real CDR is
-  in, `SetLead` reports false (#559). Whether such a late leg should reach the bot at all is
-  #573.
+  in, `SetLead` reports false (#559). A late leg the restarted process sees only as a new
+  `CHANNEL_CREATE` is hung up rather than parked on the customer (#573); one its listing found
+  ringing is still re-armed, which is the case this paragraph covers.
 - **A phase may declare the lead** (`"lead": {"intent": …, "notes": …}`, #352), which the
   engine records when a campaign call enters that phase, through the same write: one more write,
   ordered with the model's `record_lead` calls, and the last one wins, except that while the call

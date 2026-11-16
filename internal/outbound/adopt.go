@@ -30,6 +30,11 @@ import (
 //     bot's leg with it;
 //   - anything else: not ours to decide, left alone.
 //
+// A leg the switch creates after the listing was read (CHANNEL_CREATE) is not
+// listed, and after a restart nothing remembers it: an AI outbound leg that
+// this process neither placed nor armed is ended by noteChannel (#573). A leg
+// the listing armed is in pending, so that rule leaves it alone.
+//
 // Where something needed to re-arm cannot be recovered from the channel and
 // the DID store, the leg is hung up rather than guessed at.
 

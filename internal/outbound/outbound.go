@@ -1388,7 +1388,7 @@ func (s *Service) HandleSwitchEvent(ev telephony.SwitchEvent) {
 	s.settleBridge(ev)
 	switch ev.Kind {
 	case telephony.KindChannelCreate:
-		s.noteChannel(ev.ChannelID)
+		s.noteChannel(ev)
 		s.observeLine(ev)
 	case telephony.KindChannelAnswer:
 		s.mu.Lock()

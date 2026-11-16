@@ -81,6 +81,16 @@ func TestALeadRecordedAfterAnEarlyFinishIsAppliedByTheRealCDR(t *testing.T) {
 					}
 					r.settle()
 
+					// The real CDR revises the early finish: the attempt is the
+					// answered call's, and the lead recorded on it is kept (the
+					// ledger half of #573; the placement-failure row's
+					// replacement is internal/store's).
+					a, err := r.st.Attempts().Get(ctx, call.Req.CallID)
+					if err != nil || a.State != campaign.AttemptFinished || a.Outcome != campaign.OutcomeAnswered ||
+						a.LeadIntent != intent || a.LeadNotes != "said so on the call" {
+						t.Fatalf("round %d: attempt = %+v, %v; want FINISHED/%s with the lead kept", round, a, err, campaign.OutcomeAnswered)
+					}
+
 					ct := r.contactOf(c, call.Req.To)
 					if ct.LeadIntent != intent || ct.LeadNotes != "said so on the call" || ct.NextAttemptAt != nil {
 						t.Errorf("round %d: contact = %+v", round, ct)

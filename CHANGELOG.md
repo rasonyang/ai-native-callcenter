@@ -5,6 +5,18 @@ under one tag, `rasonyang/ai-native-callcenter` and `rasonyang/freeswitch-aicc`;
 run them together. From v0.2.0 on, the GitHub release of the same tag also
 carries the one-line installer's files.
 
+## Unreleased
+
+### Fixed
+
+- After a restart, a customer no longer answers an AI outbound call into
+  silence. A call whose channel the switch created only after the application
+  came back, with nothing remembering it, was left parked with nothing to bridge
+  it, so the customer heard nothing until they hung up. Such a call is now ended
+  the moment it appears, as a call that arrives after its placement was recorded
+  as failed already was. A call the restarted application found ringing is
+  still picked up and bridged as before (#573).
+
 ## v0.8.6 - 2026-11-16
 
 ### Upgrade notes
