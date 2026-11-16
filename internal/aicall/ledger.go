@@ -49,6 +49,10 @@ type callRecorder struct {
 	// own timeline is known (setTimeline).
 	startedAt  time.Time
 	answeredAt time.Time
+	// ringStartedAt is when the carrier-facing leg first sent a 180 or 183;
+	// zero when it never did or the timeline is unknown. Only a call placed to
+	// a customer reads it (ringSec, tech.ringStartedAt).
+	ringStartedAt time.Time
 	// botAnsweredAt is when the bot's leg came up. The bot's share of the call
 	// (botSec) and the flow's time budget run from here, whatever the carrier
 	// answer was: neither includes the time before the bot was reached.
@@ -106,13 +110,14 @@ func newCallRecorder(callID uuid.UUID, startedAt time.Time, actor *transcript.Ac
 // facts: createdAt is when the call began (the first leg created, for an
 // outbound call the originate) and carrierAnsweredAt when the leg facing the
 // carrier was answered. A zero value is unknown and leaves the bot session's
-// start in place.
+// start in place. ringStartedAt is when that leg first rang.
 //
 // Neither may be later than the bot session's start: the bot cannot be
 // reached before the call began or before it was answered, so a later value is
 // a clock that disagrees and the session's own start stands. The answer never
 // precedes the start.
-func (r *callRecorder) setTimeline(createdAt, carrierAnsweredAt time.Time) {
+func (r *callRecorder) setTimeline(createdAt, carrierAnsweredAt, ringStartedAt time.Time) {
+	r.ringStartedAt = ringStartedAt
 	session := r.botAnsweredAt
 	if !createdAt.IsZero() && createdAt.Before(r.startedAt) {
 		r.startedAt = createdAt
@@ -399,6 +404,24 @@ func (r *callRecorder) finish(ledger Ledger, call *callFacts, log *slog.Logger) 
 		}
 	}
 
+	// Ringing before the first answer. On a call placed to a customer it is the
+	// carrier-facing leg's: from its first 180 or 183 to its answer, 0 when it
+	// never rang (the same rule as telephony's CDR assembly). Otherwise from the
+	// call's start to the answer, zero when the timeline is unknown.
+	ringSec := max(0, int(r.answeredAt.Sub(r.startedAt).Seconds()))
+	tech := call.tech
+	if call.callType == callTypeOutbound && call.isPlacedToCustomer {
+		ringSec = 0
+		if !r.ringStartedAt.IsZero() {
+			ringSec = max(0, int(r.answeredAt.Sub(r.ringStartedAt).Seconds()))
+			tech = maps.Clone(call.tech)
+			if tech == nil {
+				tech = map[string]any{}
+			}
+			tech[store.CDRTechRingStartedAt] = store.FormatRingStartedAt(r.ringStartedAt)
+		}
+	}
+
 	cdr := store.CDR{
 		CallID:     r.callID,
 		StartedAt:  r.startedAt,
@@ -416,11 +439,9 @@ func (r *callRecorder) finish(ledger Ledger, call *callFacts, log *slog.Logger) 
 		// person answered — from the answer to the end. This path writes the
 		// row for calls that never reached a person, and those are billed too;
 		// leaving it at zero told the ledger they were free.
-		BillSec:  max(0, int(endedAt.Sub(r.answeredAt).Seconds())),
-		TotalSec: int(endedAt.Sub(r.startedAt).Seconds()),
-		// Ringing before the first answer: from the call's start to the answer
-		// on the leg facing the carrier. Zero when the timeline is unknown.
-		RingSec:     max(0, int(r.answeredAt.Sub(r.startedAt).Seconds())),
+		BillSec:     max(0, int(endedAt.Sub(r.answeredAt).Seconds())),
+		TotalSec:    int(endedAt.Sub(r.startedAt).Seconds()),
+		RingSec:     ringSec,
 		Status:      status,
 		HangupCause: hangupCause,
 		// Contained: the bot answered and finished the call itself, properly —
@@ -431,7 +452,7 @@ func (r *callRecorder) finish(ledger Ledger, call *callFacts, log *slog.Logger) 
 		HasRecording:   false,
 		UnbackedClaims: unbackedClaims,
 		UserData:       userData,
-		Tech:           call.tech,
+		Tech:           tech,
 		Legs: []store.Leg{{
 			Kind:        "BOT",
 			Label:       call.flowSlug,

@@ -8,6 +8,7 @@
 #   deploy/e2e/e2e.sh campaign  run the campaign scenarios, probes and invariants (#245, #246)
 #   deploy/e2e/e2e.sh capacity  run the capacity scenarios K1, K2 and K3, each in an application start of its own (#247, #459)
 #   deploy/e2e/e2e.sh frequency  the test-number case: two campaigns in a row on a listed number, in an application start with a 24 h frequency window (#578)
+#   deploy/e2e/e2e.sh carrier-timeout  the carrier's 408 case: a campaign of its own (ring 45 s, the default 2 h NO_ANSWER interval) whose callee rings, then answers 408 after 25 s (#576)
 #   deploy/e2e/e2e.sh down    collect logs, remove containers, volumes, network
 #   deploy/e2e/e2e.sh config  print the resolved compose configuration
 #
@@ -355,6 +356,31 @@ cmd_frequency() {
   fi
 }
 
+cmd_carrier_timeout() {
+  [ -n "$(compose ps -q aicc 2>/dev/null)" ] || { say "the environment is not up; run: make e2e-up"; exit 1; }
+  render
+  local id t0=$SECONDS
+  id="carrier-timeout-$(date -u +%Y%m%dT%H%M%SZ)"
+  # A fresh record: the simulator answers a number's n-th INVITE with the n-th
+  # behaviour, counted from its start, and the driver refuses one that has
+  # seen the number.
+  compose restart calleesim >&2
+  if compose run --rm -T --no-deps --entrypoint /usr/local/bin/aicc-e2e-campaign.test driver \
+      -test.v -test.run '^TestCarrierTimeout$' -test.timeout 10m \
+      -e2e.api "http://$APP_IP:8080" -e2e.ready "http://$APP_IP:9090/readyz" \
+      -e2e.calleesim "http://$CALLEE_IP:8771" -e2e.mockprovider "http://$MOCK_IP:9099" \
+      -e2e.esl "$FS_IP:18021" -e2e.compose-config /run/e2e/compose.json \
+      -e2e.scenario /etc/e2e/scenario.json -e2e.provider-scenario /etc/e2e/provider-scenario.json \
+      -e2e.flow /etc/e2e/flow.json -e2e.username admin -e2e.out "/run/e2e/$id" >&2; then
+    say "carrier-timeout case passed in $((SECONDS - t0)) s. Results: $RUN/$id"
+  else
+    local rc=$?
+    collect_logs
+    say "carrier-timeout case FAILED after $((SECONDS - t0)) s. Report and logs: $RUN"
+    exit "$rc"
+  fi
+}
+
 cmd_down() {
   if [ -n "$(compose ps -aq 2>/dev/null)" ]; then collect_logs; fi
   compose down -v --remove-orphans >&2
@@ -375,7 +401,8 @@ case "${1:-}" in
   campaign) cmd_campaign ;;
   capacity) cmd_capacity ;;
   frequency) cmd_frequency ;;
+  carrier-timeout) cmd_carrier_timeout ;;
   down) cmd_down ;;
   config) build_tools; render; cat "$RUN/compose.json" ;;
-  *) echo "usage: $0 up|smoke|campaign|capacity|frequency|down|config" >&2; exit 2 ;;
+  *) echo "usage: $0 up|smoke|campaign|capacity|frequency|carrier-timeout|down|config" >&2; exit 2 ;;
 esac

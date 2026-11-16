@@ -101,15 +101,16 @@ type CallDataSource interface {
 	CallData(callID uuid.UUID) map[string]any
 }
 
-// TimelineSource answers when a call began and when its carrier-facing leg was
-// answered, from the call the human path tracks. The bot session starts after
+// TimelineSource answers when a call began, when its carrier-facing leg was
+// answered and when it first rang, from the call the human path tracks. The bot session starts after
 // both, so its own clock cannot say; without this a bot-written row lost the
 // ringing before the answer.
 type TimelineSource interface {
 	// CallTimeline reports false when the call is not tracked (an unknown or
 	// minted id, a call already gone). A zero answeredAt means the
-	// carrier-facing leg has not been answered, or is not known.
-	CallTimeline(callID uuid.UUID) (createdAt, answeredAt time.Time, ok bool)
+	// carrier-facing leg has not been answered, or is not known; a zero
+	// ringStartedAt that it has not sent a 180 or 183, or that is not known.
+	CallTimeline(callID uuid.UUID) (createdAt, answeredAt, ringStartedAt time.Time, ok bool)
 }
 
 // LeadSink stores the lead a campaign call has concluded so far on its attempt.
@@ -406,8 +407,8 @@ func (o *Orchestrator) runCall(ctx context.Context, dialog *voice.Dialog) error 
 	// The row this session may write begins when the call did, not when the
 	// bot was reached (#181).
 	if o.cfg.Timeline != nil {
-		if createdAt, answeredAt, ok := o.cfg.Timeline.CallTimeline(ledgerCallID); ok {
-			recorder.setTimeline(createdAt, answeredAt)
+		if createdAt, answeredAt, ringStartedAt, ok := o.cfg.Timeline.CallTimeline(ledgerCallID); ok {
+			recorder.setTimeline(createdAt, answeredAt, ringStartedAt)
 		}
 	}
 	facts := &callFacts{

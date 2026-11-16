@@ -13,6 +13,7 @@ make e2e-smoke     # one AI outbound call; checks the callee's record, the CDR, 
 make e2e-campaign  # two campaigns (US, CN): answered and unanswered outcomes, SIP probes, run-wide invariants
 make e2e-capacity  # bot-slot overflow (K1), the DID outbound line limit (K2) and a refused bot leg (K3), each in its own application start
 make e2e-frequency # the list of test numbers: two campaigns in a row on a listed number, with a 24 h frequency window
+make e2e-carrier-timeout # a carrier that ends an unanswered call with 408: NO_ANSWER, ringSec, the retry interval (own campaign, 2 h interval)
 make e2e-down      # collect logs, remove containers, volumes and the network
 ```
 
@@ -150,10 +151,22 @@ be replaced by one a real trunk rings.
 | C08 | 183 with early media, never answered | `NO_ANSWER`; CANCEL; no provider session |
 | C09 | number on the do-not-call list | `DNC_SKIPPED`, cause `NUMBER_ON_DNC`; contact `DNC`; zero INVITEs |
 | C10 | 180, then 486; the driver lists the number while the retry waits | attempt 1 `BUSY` (`USER_BUSY`), attempt 2 `DNC_SKIPPED` (`NUMBER_ON_DNC`); contact `DNC`; exactly one INVITE, one CDR (attempt 1's), none for the skipped attempt |
-| P1–P5 | 180, then 480, 408, 503, 484, 410 | recorded, and held to design 10 §7.2's cause table |
+| P1–P5 | 180, then 480, 408, 503, 484, 410 | recorded, and held to design 10 §7.2's cause table; P2's `RECOVERY_ON_TIMER_EXPIRE` is held to the 408 rule instead (below) |
 | C01 | 180, then 200 after 2 s, a tone on the uplink; the bot records `record_lead` `HIGH` and ends the call | `ANSWERED`; lead `HIGH` on the attempt and the contact; exactly one callback, for that call and number, the notes as its message; contact `DONE`; the caller's BYE |
 | C02 | 200, then the customer's BYE at 1 s | `ANSWERED`; contact `DONE`, no lead, no callback; no further INVITE to the number for the rest of the run |
 | C04 | 486 on attempt 1, 200 on attempt 2 (BYE at 3 s) | `BUSY` (`USER_BUSY`), then `ANSWERED`; exactly two INVITEs, at least the 60 s interval apart (less the 1 s INVITE slack, on the simulator's monotonic clock); contact `DONE` with 2 attempts |
+
+P2 (180 at 100 ms, then 408 at 300 ms) is `NO_ANSWER`, not `TRANSIENT` (#576):
+a 408 from the far end after a 180 or 183 means the phone rang, so the attempt
+spends `maxAttempts` (contact `attempts`, not `systemFailures`) and is retried
+after the NO_ANSWER interval; a 408 with no 180/183 stays `TRANSIENT`. The cause
+`RECOVERY_ON_TIMER_EXPIRE` alone does not say which, so the check
+(`expectedOutcome`, `campaign_cases.go`) reads the simulator's dialog for the
+provisional, and `designCauseOutcomes` no longer maps that cause. The rest of
+P2's assertions follow the measured outcome, as for every probe: with the 60 s
+policy it is dialled twice and ends `EXHAUSTED` with `attempts` 2 and
+`systemFailures` 0, both countries agreeing. P2's 200 ms ring is too short to
+measure a `ringSec`; `make e2e-carrier-timeout` is the case that does.
 
 C07's bound is read from the INVITE to the CANCEL on the simulator's
 monotonic clock (`afterInviteMs` on the dialog's `end`, `cancelAfterInviteMs`
@@ -324,7 +337,7 @@ contact keep the canonical `+` number; only the dial string follows the form.
   three, before anything is built or started.
 - `up` fixes the form for the environment and records it in
   `bin/e2e/<project>/dial-form` (removed by `down`). Every other command
-  (`smoke`, `campaign`, `capacity`, `frequency`, `config`) runs in the recorded form, so
+  (`smoke`, `campaign`, `capacity`, `frequency`, `carrier-timeout`, `config`) runs in the recorded form, so
   `e2e-capacity`'s application restarts keep it. An explicit
   `E2E_OUTBOUND_DIAL_FORM` that differs from the recorded one is refused ("the
   environment is up with X; run: make e2e-down"); `down` ignores it, since it
@@ -334,7 +347,8 @@ contact keep the canonical `+` number; only the dial string follows the form.
   edited by hand and is the `E164` file. `scenario.E164_NO_PLUS.json` and
   `scenario.NATIONAL.json` are generated from it by `ScenarioForForm`
   (`internal/e2e/scenario_forms.go`): the key of every campaign contact (the
-  campaign table, K1 and K2's campaigns, K3's campaign) becomes the string
+  campaign table, K1 and K2's campaigns, K3's campaign, the frequency and
+  carrier-timeout cases) becomes the string
   the dialer produces in that form. Every other key stays as it is: the
   smoke's `13800000001` and the direct calls (K1's slot holders, K3's calls)
   are placed through `POST /calls`, which dials its number exactly as sent, in
@@ -545,6 +559,52 @@ The report is `frequency-<time>/report.json` (the assertions, a timeline and
 both campaigns' attempts). Without the entry of step 3 the second dial would
 come a window later; step 2 is that control.
 
+## A carrier that ends an unanswered call with 408
+
+`make e2e-carrier-timeout` (issue #576, `internal/e2e/carrier_timeout*.go`)
+places one campaign call to a callee that sends 180 at 2 s and then a final
+`408` at 25 s, with no BYE and no answer, as a trunk whose own timer ends
+every unanswered call does. Before the fix the attempt ended `TRANSIENT`
+(a system outcome: it spent `maxSystemRetries`, was retried on the transient
+backoff and counted towards the trunk breaker) with `ringSec` 0; it is now
+`NO_ANSWER`.
+
+It has a campaign of its own because the shared campaign tables cannot hold
+it: their ring timeout is 5 s, so the harness's own CANCEL would end the call
+long before the callee's 408, and their retry interval is 60 s, which would
+make the check of the interval a statement about the harness's policy.
+This campaign rings 45 s (above the 25 s 408, below the 59 s the API allows),
+sets `maxAttempts` 3 so the contact is retried and not exhausted, and leaves
+`intervalSec` out so the NO_ANSWER interval is the product default (7200 s);
+the run reads the resolved policy back and fails if the default is anything
+else. One contact, `+1 202 555 0191` (US range, suffix 91; `scenario.json` and,
+generated from it, the other two dial forms), so it runs in every dial form.
+`e2e.sh carrier-timeout` restarts the simulator first (it plays a number's
+n-th behaviour per INVITE) and the driver refuses a simulator that has seen
+the number or whose scenario does not play the 180 at 2000 ms and the 408 at
+25000 ms. The run takes about 40 s: the 25 s call plus a 5 s pause for any late
+revision or stray second INVITE. The campaign is cancelled at the end (and in
+a deferred cleanup if the run stops early), so the retry two hours away never
+fires; the case needs no other cleanup.
+
+What it asserts, and the clock each check reads (see "Clocks"):
+
+| check | clock |
+| --- | --- |
+| the attempt is `FINISHED`, outcome `NO_ANSWER`, hangup cause `RECOVERY_ON_TIMER_EXPIRE` | none (API fields) |
+| the contact, right after the attempt and at the end, has `attempts` 1, `systemFailures` 0, status `ACTIVE`, a `nextAttemptAt`, last outcome `NO_ANSWER`; the campaign is `RUNNING` and `WAITING_RETRY`; no second attempt | none |
+| `nextAttemptAt` minus the attempt's `finishedAt` is 7200 s, within 2 s (`retryTolerance`: both stamps come from the switch's event time and the dialer adds the interval exactly, so the slack covers the two being written apart; the same bound as every other interval check) | switch time (`[switch time]` in the check) |
+| the CDR: one for the attempt, hangup cause `RECOVERY_ON_TIMER_EXPIRE`, no answer, no bill or bot time, the dialled string and the DID | none |
+| `tech.sipStatus` is 408; `tech.ringStartedAt` is present, an RFC 3339 UTC string with fractional seconds | none; `ringStartedAt`'s distance to `finishedAt` (both switch time) is printed, not asserted |
+| `ringSec` is within 1 s of the simulator's own reading of the ring, the final response's `afterInviteMs` minus the first provisional's (about 23 s; ringSec is truncated, so it may read up to a second under). Both numbers are printed, with the same interval as two wall-clock stamps | the simulator's monotonic clock for the reference; `ringSec` is the switch's own difference. Two processes' wall clocks are never compared (#565) |
+| the simulator saw exactly one INVITE for the number during the run, with the 180 and the 408 recorded, the 408 before the ring timeout, no CANCEL and no BYE, nothing unexpected | the simulator's record (`afterInviteMs`) |
+
+The simulator's own ring is also held to 23 s (within 1 s), so a simulator that
+played another script cannot make the `ringSec` comparison vacuous. The report
+is `carrier-timeout-<time>/report.json`: the timeline, every assertion, the
+campaign as created (the resolved policy), the attempt, the contact, the CDR,
+the dialog and the measurements.
+
 ## Reading a run
 
 `bin/e2e/<project>/run/` (git-ignored) holds, after a run:
@@ -559,6 +619,7 @@ come a window later; step 2 is that control.
 | `campaign-<time>/bundles/` | per failed attempt: attempt, dialog, CDRs and the sliced logs |
 | `capacity-<time>/K1/`, `K2/`, `K3/` | each capacity scenario's `report.json` and `capacity.md` (K3's with the switch log's lines) |
 | `frequency-<time>/report.json` | the test-number case: the timeline, every assertion and both campaigns' attempts |
+| `carrier-timeout-<time>/report.json` | the carrier's 408 case: the timeline, every assertion, the campaign's resolved policy, the attempt, the contact, the CDR, the dialog and the measurements |
 | `logs/<service>.log` | each container's output, written on a failed up, smoke, campaign or capacity run and by `e2e-down` |
 | `logs/freeswitch-file.log` | the switch's log file, each call's lines prefixed with its leg id |
 | `logs/sofia-status.txt` | the switch's gateways |

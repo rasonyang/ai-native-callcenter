@@ -587,7 +587,7 @@ func TestABotRowTakesItsTimelineFromTheCall(t *testing.T) {
 			if tt.hasAnswered {
 				answered = session.Add(-tt.answeredBefore)
 			}
-			r.setTimeline(created, answered)
+			r.setTimeline(created, answered, time.Time{})
 
 			ledger := newFakeLedger()
 			r.finish(ledger, testFacts(), slog.New(slog.NewTextHandler(io.Discard, nil)))
@@ -625,4 +625,68 @@ func newStartedRecorder(callID uuid.UUID, startedAt time.Time, actor *transcript
 	r := newCallRecorder(callID, startedAt, actor)
 	r.markStarted()
 	return r
+}
+
+// On a call placed to a customer, the bot's row measures ringSec on the
+// carrier-facing leg like the human path does: first 180 or 183 to the answer,
+// 0 when it never rang (#576). Inbound calls keep start to answer.
+func TestABotRowOfAPlacedCallRingsFromTheFirstProvisional(t *testing.T) {
+	t.Parallel()
+	const talk = 40 * time.Second
+	sec := time.Second
+	for _, tt := range []struct {
+		name          string
+		facts         *callFacts
+		createdBefore time.Duration
+		answeredAfter time.Duration // the carrier's answer, after the call began
+		ringAfter     time.Duration // the first 180/183, after the call began; 0: none
+		wantRing      int
+		wantTechRing  bool
+	}{
+		{"180 at 3 s, answered at 9 s", placedFacts(), 20 * sec, 9 * sec, 3 * sec, 6, true},
+		{"answered with no provisional response", placedFacts(), 20 * sec, 9 * sec, 0, 0, false},
+		{"ring progress after the answer (skew)", placedFacts(), 20 * sec, 9 * sec, 12 * sec, 0, true},
+		{"an inbound call is still start to answer", testFacts(), 20 * sec, 9 * sec, 3 * sec, 9, false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			session := time.Now().Add(-talk)
+			r := newStartedRecorder(uuid.Must(uuid.NewV7()), session, nil)
+			created := session.Add(-tt.createdBefore)
+			var ring time.Time
+			if tt.ringAfter > 0 {
+				ring = created.Add(tt.ringAfter)
+			}
+			r.setTimeline(created, created.Add(tt.answeredAfter), ring)
+
+			ledger := newFakeLedger()
+			r.finish(ledger, tt.facts, slog.New(slog.NewTextHandler(io.Discard, nil)))
+			if len(ledger.cdrs) != 1 {
+				t.Fatalf("rows = %d, want 1", len(ledger.cdrs))
+			}
+			c := ledger.cdrs[0]
+			if c.RingSec != tt.wantRing {
+				t.Errorf("ringSec = %d, want %d", c.RingSec, tt.wantRing)
+			}
+			got, ok := c.Tech[store.CDRTechRingStartedAt]
+			if ok != tt.wantTechRing {
+				t.Errorf("tech.ringStartedAt present = %v, want %v", ok, tt.wantTechRing)
+			}
+			if ok && got != store.FormatRingStartedAt(ring) {
+				t.Errorf("tech.ringStartedAt = %v, want %s", got, store.FormatRingStartedAt(ring))
+			}
+			if _, ok := c.Tech[store.CDRTechSIPStatus]; ok {
+				t.Error("the bot's row carries a sipStatus; its tech describes the bot dialog")
+			}
+			if c.Tech["sipCallId"] != tt.facts.tech["sipCallId"] {
+				t.Errorf("the dialog's own tech keys were lost: %v", c.Tech)
+			}
+		})
+	}
+}
+
+func placedFacts() *callFacts {
+	f := testFacts()
+	f.callType, f.isPlacedToCustomer = callTypeOutbound, true
+	f.tech = map[string]any{"sipCallId": "dialog-1"}
+	return f
 }

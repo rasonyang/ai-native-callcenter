@@ -250,6 +250,12 @@ type Party struct {
 	// BilledSec is the switch's own count of this leg's answered seconds, kept
 	// beside ours so the two can be compared rather than merely trusted.
 	BilledSec int
+	// SIPStatus is the final SIP status the far end ended this leg with (see
+	// SwitchEvent.SIPStatus); zero when none was reported.
+	SIPStatus int
+	// RingStartedAt is when the far end first signalled ringing on this leg
+	// (see SwitchEvent.RingStartedAt); zero when it never did.
+	RingStartedAt time.Time
 	// IsMuted tracks the switch-side mute on this leg. The switch reports no
 	// event for it and no channel variable survives a re-read, so this is the
 	// only record that the agent's microphone is off — which is precisely why
@@ -865,6 +871,10 @@ type PartySnapshot struct {
 	Bridges []BridgeSpan `json:"bridges,omitempty"`
 	// BilledSec is the switch's own count of this leg's answered seconds.
 	BilledSec int `json:"billedSec,omitempty"`
+	// SIPStatus and RingStartedAt feed the CDR's tech and ringSec. The
+	// contract does not declare them on a call, so they stay off the wire.
+	SIPStatus     int        `json:"-"`
+	RingStartedAt *time.Time `json:"-"`
 }
 
 // IsActive reports whether this leg is still on the call.
@@ -909,6 +919,11 @@ func (c *Call) Snapshot() Snapshot {
 			IsMuted:         p.IsMuted,
 			Bridges:         slices.Clone(p.Bridges),
 			BilledSec:       p.BilledSec,
+			SIPStatus:       p.SIPStatus,
+		}
+		if !p.RingStartedAt.IsZero() {
+			rang := p.RingStartedAt
+			ps.RingStartedAt = &rang
 		}
 		if !p.AnsweredAt.IsZero() {
 			answered := p.AnsweredAt

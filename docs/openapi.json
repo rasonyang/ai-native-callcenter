@@ -9514,7 +9514,7 @@
           },
           "ringSec": {
             "type": "integer",
-            "description": "Seconds spent ringing. For a call a person answered, from the answering leg's creation to its bridge; for one nobody answered, from the first leg dialled to the last one released — a queue that re-offers dials a fresh leg each time, so no single leg holds the answer. For a call the bot answered and that never reached a person, the ringing before the bot answered: from startedAt to answeredAt.\n\nNot a segment of the call to be added to the others: on a queued call it lies inside queueWaitSec, and on a call that never queued there is no queue window for it to lie inside, so it overlaps whatever else was happening. See totalSec."
+            "description": "Seconds spent ringing. On a call placed to an outside number (callType OUTBOUND), the ringing of the carrier-facing leg, the one dialled to the customer: from its first 180 or 183 provisional response to its answer when it answered, or to its release when it did not; 0 when that leg never sent a 180 or 183 (it answered, or ended, without ringing). This holds whichever way the call ended, so an AI outbound call that a person later took over still reports the customer's ringing, not the agent leg's. For an agent-placed call the carrier-facing leg is the dialled leg that answered, or, when none did, the one that began ringing first. On other calls: for a call a person answered, from the answering leg's creation to its bridge; for one nobody answered, from the first leg dialled to the last one released — a queue that re-offers dials a fresh leg each time, so no single leg holds the answer. For an inbound call the bot answered and that never reached a person, the ringing before the bot answered: from startedAt to answeredAt.\n\nNot a segment of the call to be added to the others: on a queued call it lies inside queueWaitSec, and on a call that never queued there is no queue window for it to lie inside, so it overlaps whatever else was happening. See totalSec."
           },
           "botSec": {
             "type": "integer",
@@ -9568,7 +9568,7 @@
           },
           "tech": {
             "type": "object",
-            "description": "Technical residue (switch causes and the like); never business data.",
+            "description": "Technical residue (switch causes and the like); never business data. On a call placed to an outside number, the carrier-facing leg adds sipStatus (a number: the SIP status the far end ended the call with, such as 408 for a carrier that ends an unanswered call itself, present only when the switch reported one) and ringStartedAt (an RFC 3339 UTC timestamp with fractional seconds: when that leg first sent a 180 or 183, present only when it did). The keys are open and may grow.",
             "additionalProperties": true
           },
           "legs": {

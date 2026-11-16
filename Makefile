@@ -81,6 +81,10 @@ e2e-capacity: ## Run the capacity scenarios (bot-slot overflow, DID line limit) 
 e2e-frequency: ## Run the test-number case (two campaigns in a row on a listed number) in an application start with a 24 h frequency window
 	deploy/e2e/e2e.sh frequency
 
+.PHONY: e2e-carrier-timeout
+e2e-carrier-timeout: ## Run the carrier's 408 case (a ringing callee that answers 408 after 25 s) in a campaign of its own with the default 2 h NO_ANSWER interval
+	deploy/e2e/e2e.sh carrier-timeout
+
 .PHONY: e2e-down
 e2e-down: ## Collect logs and remove the end-to-end environment, its volumes and its network
 	deploy/e2e/e2e.sh down

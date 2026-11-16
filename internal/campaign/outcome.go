@@ -22,7 +22,9 @@ const (
 	// uses the word for a ring that outlasted its timeout.
 	CauseLateAnswer = "ALLOTTED_TIMEOUT"
 	// CauseRecovery: recovery ended a leg the application had lost track of
-	// (outbound.ReconcileCause). It is also a genuine switch cause.
+	// (outbound.ReconcileCause). It is also the switch's cause when the far
+	// end ends an unanswered call with a SIP 408, which Classify tells apart
+	// by the status (CallEnd.SIPStatus) and the ring progress.
 	CauseRecovery = "RECOVERY_ON_TIMER_EXPIRE"
 	// CauseVanished: the switch no longer had the channel and nothing said
 	// how it ended (telephony.VanishedCause).
@@ -65,7 +67,18 @@ type CallEnd struct {
 	// IsPlacementFailure: the originate never made a channel
 	// (tech.isPlacementFailure); the cause is the job result's.
 	IsPlacementFailure bool
+	// SIPStatus is the final SIP status the far end ended the dialled leg
+	// with (tech.sipStatus); 0 when the switch reported none, which is what a
+	// leg this platform cancelled or reaped itself leaves.
+	SIPStatus int
+	// HasRingProgress: the dialled leg sent a 180 or a 183 before it ended
+	// (tech.ringStartedAt).
+	HasRingProgress bool
 }
+
+// SIPStatusRequestTimeout is the SIP status a carrier sends when it gives up
+// on an unanswered call itself.
+const SIPStatusRequestTimeout = 408
 
 // causeOutcomes is the cause to outcome table of design 10 section 7.2, for a
 // call the customer did not answer. It is data: one row per cause, one test
@@ -134,6 +147,10 @@ func CauseTable() map[string]Outcome {
 //   - A placement failure keeps a customer-side cause's outcome and is
 //     ORIGINATE_FAILED for anything else, which is never an unmapped cause:
 //     every cause but the customer's is the same failure before a channel.
+//   - RECOVERY_ON_TIMER_EXPIRE on a call nobody answered is NO_ANSWER when the
+//     far end sent a SIP 408 after the leg rang (a carrier ending the call
+//     itself), and TRANSIENT otherwise: no ring progress, or no 408 (our own
+//     recovery's reap).
 //   - Otherwise the table decides, and a cause it lacks is TRANSIENT with a
 //     warning and a metric, bounded by maxSystemRetries.
 func Classify(e CallEnd) Outcome {
@@ -157,6 +174,15 @@ func Classify(e CallEnd) Outcome {
 			return OutcomeBotFailed
 		}
 		return OutcomeAnswered
+	}
+	// A carrier that ends an unanswered call itself sends 408, which the
+	// switch reports as RECOVERY_ON_TIMER_EXPIRE. After ringing it is the
+	// customer not answering. Ring progress alone does not say so: our own
+	// recovery's reap uses the same cause, leaves no 408, and can hit a leg
+	// that is ringing. A 408 with no ring progress stays a system failure.
+	if e.HangupCause == CauseRecovery && e.SIPStatus == SIPStatusRequestTimeout &&
+		e.HasRingProgress && !e.IsPlacementFailure {
+		return OutcomeNoAnswer
 	}
 	mapped, isMapped := causeOutcomes[e.HangupCause]
 	if e.IsPlacementFailure {

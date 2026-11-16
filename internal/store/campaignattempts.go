@@ -4,6 +4,7 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -250,6 +251,10 @@ func endingFromCDR(cdr CDR) campaign.Ending {
 	if v, ok := cdr.Tech["isPlacementFailure"].(bool); ok {
 		end.IsPlacementFailure = v
 	}
+	end.SIPStatus = techInt(cdr.Tech[CDRTechSIPStatus])
+	if v, ok := cdr.Tech[CDRTechRingStartedAt].(string); ok && v != "" {
+		end.HasRingProgress = true
+	}
 	// A campaign call never reaches an agent (design 10 section 10), so the
 	// CDR's TalkSec (agent talk time) is zero; the customer's conversation
 	// is the time with the bot, BotSec. Summing both keeps the figure right
@@ -260,6 +265,27 @@ func endingFromCDR(cdr CDR) campaign.Ending {
 		TalkSec:     cdr.BotSec + cdr.TalkSec,
 		EndedAt:     cdr.EndedAt,
 	}
+}
+
+// techInt reads a JSON number out of the CDR's tech, which holds a Go int on
+// the in-memory row and a float64 on one read back from jsonb. Anything else
+// is 0.
+func techInt(v any) int {
+	switch n := v.(type) {
+	case int:
+		return n
+	case int64:
+		return int(n)
+	case float64:
+		return int(n)
+	case json.Number:
+		i, err := n.Int64()
+		if err != nil {
+			return 0
+		}
+		return int(i)
+	}
+	return 0
 }
 
 // apply is the finish routine (design 10 section 5.4) on a locked attempt.

@@ -86,6 +86,11 @@ func scenarioKeyClasses() (campaign map[string]campaignKeyOwner, direct map[stri
 			return nil, nil, err
 		}
 	}
+	for _, cs := range CarrierTimeoutCases {
+		if err := addCampaign(CarrierTimeoutRegion, cs, CarrierTimeoutScenarioID); err != nil {
+			return nil, nil, err
+		}
+	}
 	for _, id := range []string{"K1", "K2"} {
 		sc := CapacityScenarios[id]
 		for _, r := range sc.Regions {

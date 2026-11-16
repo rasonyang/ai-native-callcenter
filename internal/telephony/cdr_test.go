@@ -517,7 +517,7 @@ func TestACallPlacedForAnAgentWhoNeverSignedInIsStillTheirPhonesCall(t *testing.
 				AnsweredAt: atPtr(0), ReleasedAt: atPtr(30),
 				Bridges: []BridgeSpan{{OtherChannelID: "chan-out", StartedAt: at(8), EndedAt: at(30)}}},
 			{Role: RoleTarget, Number: "18688886669", ChannelID: "chan-out",
-				CreatedAt: at(2), AnsweredAt: atPtr(8), ReleasedAt: atPtr(30),
+				CreatedAt: at(2), RingStartedAt: atPtr(3), AnsweredAt: atPtr(8), ReleasedAt: atPtr(30),
 				Bridges: []BridgeSpan{{OtherChannelID: "chan-agent", StartedAt: at(8), EndedAt: at(30)}}},
 		},
 	}
@@ -530,8 +530,10 @@ func TestACallPlacedForAnAgentWhoNeverSignedInIsStillTheirPhonesCall(t *testing.
 		t.Errorf("talkSec = %d, want 22 — the conversation happened whether or not "+
 			"anyone was signed in at the phone", got.TalkSec)
 	}
-	if got.RingSec != 6 {
-		t.Errorf("ringSec = %d, want 6 (dialled at 2, answered at 8)", got.RingSec)
+	// The owner's decision on #576: a placed call rings from the trunk leg's
+	// first 180 (3) to its answer (8), not from the leg's creation (2).
+	if got.RingSec != 5 {
+		t.Errorf("ringSec = %d, want 5 (first 180 at 3, answered at 8)", got.RingSec)
 	}
 	if len(got.Legs) != 1 || got.Legs[0].Kind != "TRUNK" || got.Legs[0].Label != "18688886669" {
 		t.Errorf("legs = %+v, want one TRUNK leg for the number dialled — a DIALING leg "+
@@ -569,7 +571,7 @@ func TestAssembleAttributesCallsTheAgentPlaced(t *testing.T) {
 				AnsweredAt: atPtr(0), ReleasedAt: atPtr(30),
 				Bridges: []BridgeSpan{{OtherChannelID: "chan-out", StartedAt: at(8), EndedAt: at(30)}}},
 			{Role: RoleTarget, Number: "18688886669", ChannelID: "chan-out",
-				CreatedAt: at(2), AnsweredAt: atPtr(8), ReleasedAt: atPtr(30),
+				CreatedAt: at(2), RingStartedAt: atPtr(3), AnsweredAt: atPtr(8), ReleasedAt: atPtr(30),
 				Bridges: []BridgeSpan{{OtherChannelID: "chan-agent", StartedAt: at(8), EndedAt: at(30)}}},
 		},
 	}
@@ -583,8 +585,10 @@ func TestAssembleAttributesCallsTheAgentPlaced(t *testing.T) {
 	if got.PrimaryAgentID == nil || *got.PrimaryAgentID != agentID {
 		t.Error("the call the agent placed has no primary agent")
 	}
-	if got.RingSec != 6 {
-		t.Errorf("ringSec = %d, want 6 (dialled at 2, answered at 8)", got.RingSec)
+	// The owner's decision on #576: a placed call rings from the trunk leg's
+	// first 180 (3) to its answer (8), not from the leg's creation (2).
+	if got.RingSec != 5 {
+		t.Errorf("ringSec = %d, want 5 (first 180 at 3, answered at 8)", got.RingSec)
 	}
 	if got.TalkSec != 22 {
 		t.Errorf("talkSec = %d, want 22 (answered at 8, ended at 30)", got.TalkSec)

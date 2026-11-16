@@ -3,6 +3,7 @@
 package store
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -45,6 +46,39 @@ func TestACDRReadsAsACampaignOutcome(t *testing.T) {
 			}
 			if got.HangupCause != tt.cdr.HangupCause || got.TalkSec != tt.cdr.BotSec || !got.EndedAt.Equal(tt.cdr.EndedAt) {
 				t.Errorf("ending = %+v", got)
+			}
+		})
+	}
+}
+
+// A carrier that ends an unanswered call itself with a 408 after ringing is the
+// customer not answering (#576). The row carries what the switch said in its
+// tech: a Go int on the row just assembled, a float64 on one read back from
+// jsonb, a json.Number from a decoder that asks for them.
+func TestACarriers408AfterRingingReadsAsNoAnswer(t *testing.T) {
+	start := time.Date(2026, 6, 1, 14, 0, 0, 0, time.UTC)
+	ring := FormatRingStartedAt(start.Add(2 * time.Second))
+	tests := []struct {
+		name string
+		tech map[string]any
+		want campaign.Outcome
+	}{
+		{"status as an int, as just assembled", map[string]any{CDRTechSIPStatus: 408, CDRTechRingStartedAt: ring}, campaign.OutcomeNoAnswer},
+		{"status as read back from jsonb", map[string]any{CDRTechSIPStatus: float64(408), CDRTechRingStartedAt: ring}, campaign.OutcomeNoAnswer},
+		{"status as an int64", map[string]any{CDRTechSIPStatus: int64(408), CDRTechRingStartedAt: ring}, campaign.OutcomeNoAnswer},
+		{"status as a json.Number", map[string]any{CDRTechSIPStatus: json.Number("408"), CDRTechRingStartedAt: ring}, campaign.OutcomeNoAnswer},
+		{"408 and the leg never rang", map[string]any{CDRTechSIPStatus: 408}, campaign.OutcomeTransient},
+		{"an empty ringStartedAt is no ring progress", map[string]any{CDRTechSIPStatus: 408, CDRTechRingStartedAt: ""}, campaign.OutcomeTransient},
+		{"rang and no status: our own reap", map[string]any{CDRTechRingStartedAt: ring}, campaign.OutcomeTransient},
+		{"a status that is not a number", map[string]any{CDRTechSIPStatus: "408", CDRTechRingStartedAt: ring}, campaign.OutcomeTransient},
+		{"another status", map[string]any{CDRTechSIPStatus: float64(503), CDRTechRingStartedAt: ring}, campaign.OutcomeTransient},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cdr := CDR{CallID: uuid.Must(uuid.NewV7()), Status: CDRStatusNoAnswer, HangupCause: "RECOVERY_ON_TIMER_EXPIRE",
+				EndedAt: start.Add(26 * time.Second), Tech: tt.tech}
+			if got := endingFromCDR(cdr).Outcome; got != tt.want {
+				t.Errorf("outcome = %s, want %s", got, tt.want)
 			}
 		})
 	}

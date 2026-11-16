@@ -376,7 +376,7 @@ func run() error {
 		}, slog.Default()).WithDNC(st.DNC())
 
 	outboundSvc.SetCallStart(func(callID uuid.UUID) (time.Time, bool) {
-		createdAt, _, ok := registry.CallTimeline(callID)
+		createdAt, _, _, ok := registry.CallTimeline(callID)
 		return createdAt, ok
 	})
 

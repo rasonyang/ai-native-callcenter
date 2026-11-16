@@ -4,6 +4,7 @@ package telephony
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"sync"
 	"testing"
@@ -543,22 +544,72 @@ func TestCallTimelineIsTheCallsStartAndTheCarrierLegsAnswer(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	gotCreated, gotAnswered, ok := reg.CallTimeline(callID)
-	if !ok || !gotCreated.Equal(created) || !gotAnswered.IsZero() {
+	gotCreated, gotAnswered, gotRing, ok := reg.CallTimeline(callID)
+	if !ok || !gotCreated.Equal(created) || !gotAnswered.IsZero() || !gotRing.IsZero() {
 		t.Fatalf("before the answer: got %v, %v, %v; want %v, zero, true", gotCreated, gotAnswered, ok, created)
 	}
 
 	if err := reg.Do(callID, func(c *Call) {
-		c.PartyByChannel("carrier-chan").AnsweredAt = answered
+		p := c.PartyByChannel("carrier-chan")
+		p.AnsweredAt = answered
+		p.RingStartedAt = created.Add(2 * time.Second)
 	}); err != nil {
 		t.Fatal(err)
 	}
-	gotCreated, gotAnswered, ok = reg.CallTimeline(callID)
-	if !ok || !gotCreated.Equal(created) || !gotAnswered.Equal(answered) {
+	gotCreated, gotAnswered, gotRing, ok = reg.CallTimeline(callID)
+	if !ok || !gotCreated.Equal(created) || !gotAnswered.Equal(answered) || !gotRing.Equal(created.Add(2*time.Second)) {
 		t.Fatalf("after the answer: got %v, %v, %v; want %v, %v, true", gotCreated, gotAnswered, ok, created, answered)
 	}
 
-	if _, _, ok := reg.CallTimeline(uuid.Must(uuid.NewV7())); ok {
+	if _, _, _, ok := reg.CallTimeline(uuid.Must(uuid.NewV7())); ok {
 		t.Error("an unknown call reported a timeline")
+	}
+}
+
+// A leg's ring start and the far end's SIP status reach the snapshot from the
+// switch events: the ring start from the answer or, on a leg that never
+// answered, the hangup; the status from the hangup. Neither is on the wire.
+func TestARingStartAndSIPStatusReachTheSnapshot(t *testing.T) {
+	t.Parallel()
+	reg, rec := newTestRegistry(t)
+	callID := uuid.Must(uuid.NewV7())
+	call, err := reg.CreateCall(context.Background(), callID, events.CallTypeOutbound, "en", false, testTime)
+	if err != nil {
+		t.Fatal(err)
+	}
+	call.AddParty("chan-a", "13800138000", testTime)
+	call.AddParty("chan-b", "13800138001", testTime)
+	for _, ch := range []string{"chan-a", "chan-b"} {
+		if err := reg.BindChannel(ch, callID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ring := testTime.Add(2 * time.Second)
+	reg.Dispatch(SwitchEvent{Kind: KindChannelAnswer, ChannelID: "chan-a",
+		OccurredAt: testTime.Add(5 * time.Second), RingStartedAt: ring})
+	reg.Dispatch(SwitchEvent{Kind: KindChannelHangup, ChannelID: "chan-b", HangupCause: "RECOVERY_ON_TIMER_EXPIRE",
+		OccurredAt: testTime.Add(25 * time.Second), RingStartedAt: ring, SIPStatus: 408})
+	rec.waitFor(t, events.TypePartyReleased)
+
+	snap, err := reg.Snapshot(callID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range snap.Parties {
+		if p.RingStartedAt == nil || !p.RingStartedAt.Equal(ring) {
+			t.Errorf("%s: RingStartedAt = %v, want %v", p.ChannelID, p.RingStartedAt, ring)
+		}
+	}
+	for _, p := range snap.Parties {
+		want := 0
+		if p.ChannelID == "chan-b" {
+			want = 408
+		}
+		if p.SIPStatus != want {
+			t.Errorf("%s: SIPStatus = %d, want %d", p.ChannelID, p.SIPStatus, want)
+		}
+	}
+	if b, err := json.Marshal(snap.Parties[0]); err != nil || strings.Contains(string(b), "ingStartedAt") || strings.Contains(string(b), "sipStatus") {
+		t.Errorf("the snapshot writes the new fields to the wire: %s (%v)", b, err)
 	}
 }

@@ -1532,7 +1532,7 @@ type CDR struct {
 	// QueueWaitSec Seconds the caller waited in queue, from joining to being bridged to an agent, or to leaving if they never were. Ringing happens inside this window, so ringSec is a sub-interval of it rather than an addition to it. On a call that passed through several queues it is the first stay's wait, in the queue queueId names; the journey (legs) carries every stay's own wait.
 	QueueWaitSec int `json:"queueWaitSec"`
 
-	// RingSec Seconds spent ringing. For a call a person answered, from the answering leg's creation to its bridge; for one nobody answered, from the first leg dialled to the last one released — a queue that re-offers dials a fresh leg each time, so no single leg holds the answer. For a call the bot answered and that never reached a person, the ringing before the bot answered: from startedAt to answeredAt.
+	// RingSec Seconds spent ringing. On a call placed to an outside number (callType OUTBOUND), the ringing of the carrier-facing leg, the one dialled to the customer: from its first 180 or 183 provisional response to its answer when it answered, or to its release when it did not; 0 when that leg never sent a 180 or 183 (it answered, or ended, without ringing). This holds whichever way the call ended, so an AI outbound call that a person later took over still reports the customer's ringing, not the agent leg's. For an agent-placed call the carrier-facing leg is the dialled leg that answered, or, when none did, the one that began ringing first. On other calls: for a call a person answered, from the answering leg's creation to its bridge; for one nobody answered, from the first leg dialled to the last one released — a queue that re-offers dials a fresh leg each time, so no single leg holds the answer. For an inbound call the bot answered and that never reached a person, the ringing before the bot answered: from startedAt to answeredAt.
 	//
 	// Not a segment of the call to be added to the others: on a queued call it lies inside queueWaitSec, and on a call that never queued there is no queue window for it to lie inside, so it overlaps whatever else was happening. See totalSec.
 	RingSec   int       `json:"ringSec"`
@@ -1544,7 +1544,7 @@ type CDR struct {
 	// TalkSec Seconds an agent had two-way media with the caller, measured from the bridges on the agent legs and unioned across them, so a call passed from one agent to another counts both stretches once. A leg that answered without a bridge — an auto-answer phone in front of nobody, a codec mismatch — contributes nothing. Hold counts as talk.
 	TalkSec int `json:"talkSec"`
 
-	// Tech Technical residue (switch causes and the like); never business data.
+	// Tech Technical residue (switch causes and the like); never business data. On a call placed to an outside number, the carrier-facing leg adds sipStatus (a number: the SIP status the far end ended the call with, such as 408 for a carrier that ends an unanswered call itself, present only when the switch reported one) and ringStartedAt (an RFC 3339 UTC timestamp with fractional seconds: when that leg first sent a 180 or 183, present only when it did). The keys are open and may grow.
 	Tech     *map[string]interface{} `json:"tech,omitempty"`
 	ToNumber string                  `json:"toNumber"`
 
