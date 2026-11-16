@@ -205,7 +205,20 @@ func (s *Service) forgetJobLocked(job *trackedJob) {
 // answer window starts now, because the switch rings it from now and the
 // window armed when the originate timed out may be mostly spent. The leg of a
 // placement already given up on is ended at once (unconfirmed.go).
-func (s *Service) noteChannel(channelID string) {
+//
+// An AI outbound leg (aicc_placed_by=DIAL_AI) that this process tracks in none
+// of legJobs, pending or lateLegs is one it did not place and has not re-armed:
+// the leg of a placement a previous process gave up on or lost track of, created
+// by a switch that was slow to run the originate. Nothing will bridge it, so a
+// customer answering it would hear silence; it is ended like a late leg (#573).
+// A leg the cold-start or reconnect listing re-armed is in pending (its
+// CHANNEL_CREATE can still be dispatched after the listing), and an unconfirmed
+// placement adopted by unconfirmedExpired keeps its pending entry. The decision
+// is taken under the same lock as those checks, so it is atomic with
+// unconfirmedExpired's. Whether the call's attempt is already settled is not
+// asked: a re-armed leg that is answered gets its real CDR, which revises it.
+func (s *Service) noteChannel(ev telephony.SwitchEvent) {
+	channelID := ev.ChannelID
 	s.mu.Lock()
 	if job := s.legJobs[channelID]; job != nil {
 		if job.isUnconfirmed && !job.hadChannel {
@@ -218,10 +231,19 @@ func (s *Service) noteChannel(channelID string) {
 		job.hadChannel = true
 	}
 	late, isLate := s.takeLateLegLocked(channelID)
+	_, isArmed := s.pending[channelID]
+	_, isPlaced := s.legJobs[channelID]
+	isUntracked := ev.PlacedBy == telephony.PlacedByDialAI && !isLate && !isArmed && !isPlaced
 	s.mu.Unlock()
 	if isLate {
 		s.log.Warn("the switch created a leg after its placement was recorded as failed; hanging it up",
 			"callId", late.callID, "channelId", channelID, "cause", LateAnswerCause)
+		go s.reap(channelID, LateAnswerCause)
+		return
+	}
+	if isUntracked {
+		s.log.Warn("the switch created an AI outbound leg this process did not place and has not armed; hanging it up",
+			"callId", ev.PlacedCallID, "channelId", channelID, "cause", LateAnswerCause)
 		go s.reap(channelID, LateAnswerCause)
 	}
 }

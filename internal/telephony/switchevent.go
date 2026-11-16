@@ -299,6 +299,14 @@ type SwitchEvent struct {
 	// call's type or direction, and on such a leg it is deliberately kept out
 	// of Bot.DID (see isObservedTrunkLeg). Empty when the channel carries none.
 	LegDID string
+	// PlacedBy is the aicc_placed_by stamped on this channel by the operation
+	// that originated it (PlacedByDialAI, PlacedByDial), set from the
+	// originate's own variables, so it is there from CHANNEL_CREATE. Empty on a
+	// channel this application did not originate.
+	PlacedBy string
+	// PlacedCallID is the aicc_call_id the originating operation minted; the
+	// zero value when the channel has none or it is not a uuid.
+	PlacedCallID uuid.UUID
 
 	// Hangup detail.
 	HangupCause     string
@@ -474,6 +482,8 @@ func normalizeChannel(ev *esl.Event, out SwitchEvent) (SwitchEvent, bool) {
 	out.OtherChannelID = ev.Get("Other-Leg-Unique-ID")
 	out.CallTypeHint = ev.Get("variable_aicc_call_type")
 	out.LegDID = ev.Variable("aicc_did")
+	out.PlacedBy = ev.Variable(VarPlacedBy)
+	out.PlacedCallID, _ = uuid.Parse(ev.Variable("aicc_call_id"))
 
 	// mod_callcenter dials the agent on a waiting caller's behalf and stamps
 	// that caller's channel onto the leg it creates, which is the only thing

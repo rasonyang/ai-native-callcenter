@@ -694,3 +694,33 @@ func TestNormalizeReadsTheSwitchesOwnBilledSeconds(t *testing.T) {
 		t.Errorf("BilledSec = %d on a leg that never answered, want 0", quiet.BilledSec)
 	}
 }
+
+func TestNormalizeReadsWhoPlacedTheLegFromItsCreation(t *testing.T) {
+	t.Parallel()
+	callID := "019ff973-6b32-7557-b7c4-11b3fdb692f1"
+	create := func(vars map[string]string) SwitchEvent {
+		h := map[string]string{
+			"Event-Name": "CHANNEL_CREATE",
+			"Unique-ID":  "019ff973-6b32-7557-b7c4-11b3fdb692f0",
+		}
+		for k, v := range vars {
+			h["variable_"+k] = v
+		}
+		got, ok := Normalize(event(h))
+		if !ok {
+			t.Fatal("Normalize rejected a channel create")
+		}
+		return got
+	}
+
+	ai := create(map[string]string{VarPlacedBy: PlacedByDialAI, "aicc_call_id": callID})
+	if ai.PlacedBy != PlacedByDialAI || ai.PlacedCallID.String() != callID {
+		t.Errorf("AI leg: PlacedBy = %q, PlacedCallID = %s", ai.PlacedBy, ai.PlacedCallID)
+	}
+	if got := create(map[string]string{VarPlacedBy: PlacedByDial}).PlacedBy; got != PlacedByDial {
+		t.Errorf("click-to-dial leg: PlacedBy = %q", got)
+	}
+	if got := create(nil); got.PlacedBy != "" || got.PlacedCallID != uuid.Nil {
+		t.Errorf("a leg nobody here placed: PlacedBy = %q, PlacedCallID = %s", got.PlacedBy, got.PlacedCallID)
+	}
+}

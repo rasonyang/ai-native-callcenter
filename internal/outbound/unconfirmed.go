@@ -46,7 +46,10 @@ import (
 //   - a channel for it that turns up after that is ended at once (see
 //     lateLegs): the platform has already recorded the call as not placed, a
 //     campaign may already have scheduled the contact again, and a leg nobody
-//     will bridge must not be left parked on a person.
+//     will bridge must not be left parked on a person. The memory is in the
+//     process: after a restart the same leg is recognised by what it is
+//     (aicc_placed_by=DIAL_AI, held by nothing here), and ended the same way by
+//     noteChannel (#573).
 
 // ErrPlacementUnconfirmed means the originate was written to the switch and the
 // switch did not confirm it: not in time, or not before the link closed. The
