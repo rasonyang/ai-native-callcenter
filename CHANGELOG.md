@@ -5,7 +5,38 @@ under one tag, `rasonyang/ai-native-callcenter` and `rasonyang/freeswitch-aicc`;
 run them together. From v0.2.0 on, the GitHub release of the same tag also
 carries the one-line installer's files.
 
-## Unreleased
+## v0.8.6 - 2026-11-16
+
+### Upgrade notes
+
+- Migration 00048 runs at startup. It creates the `test_numbers` table and adds
+  two boolean columns with a constant default of false,
+  `campaign_attempts.is_test_number` and `campaign_contacts.is_frequency_held`.
+  Existing rows are not rewritten or changed: every attempt made so far was to
+  a number that was not on a list, and no contact is marked as held.
+- API contract: additive only. New operations `GET` / `POST /test-numbers` and
+  `DELETE /test-numbers/{number}` (scopes `testnumbers:read` and
+  `testnumbers:write`, granted to supervisors and administrators), the
+  `isTestNumber` filter on the attempt and contact listings and the outcome
+  summary, `isTestNumber` on an attempt, `frequencyHoldEndsAt` on a contact, and
+  the new enum values `WAITING_FREQUENCY` (campaign `activity`) and
+  `TEST_NUMBER_LIMIT_REACHED` (error code). A client that switches over those
+  enums must handle the new values. An API key that should reach the new
+  routes needs the new scopes.
+  `make api-breaking BASE=v0.8.5` reports no breaking change, only 557
+  `response-property-enum-value-added` warnings from those two values.
+- **Behaviour change for integrators.** The `prefix` search of
+  `GET /dnc-numbers` now reads digits without `+` or `00` in the deployment's
+  default country code (`138` searches `+86138` with code 86; it used to search
+  `+138`), and a prefix that is not a number is refused `422 VALIDATION_FAILED`
+  where it used to be accepted and match nothing.
+- No application setting is added, removed or changed in default. The comment
+  on `AICC_CAMPAIGN_FREQUENCY_WINDOW` in `.env.example` now mentions the list
+  of test numbers.
+- Upgrade both images together, as always: they are published under one tag
+  and the deploy stack names both. The switch image has no change in this
+  release (unchanged since v0.8.2); its tag moves so that the pair still
+  matches.
 
 ### Changed
 
@@ -14,7 +45,7 @@ carries the one-line installer's files.
   reads a number: with code 86, `138` searches `+86138` (it used to search
   `+138` and find nothing). Spaces, dashes and brackets are ignored, a leading
   trunk `0` is dropped, and a prefix that is not a number is refused
-  `422 VALIDATION_FAILED`.
+  `422 VALIDATION_FAILED` (#578).
 
 ### Added
 
@@ -31,9 +62,9 @@ carries the one-line installer's files.
   numbers (`409 TEST_NUMBER_LIMIT_REACHED`). Adding a number makes the contacts
   that were waiting out the window for it due at once. The list's `prefix`
   search reads a number as an added one is: digits without `+` or `00` are
-  national in the default country code, so `138` finds `+8613800138000`. The exemption is this
-  platform's alone: a carrier line's own per-callee limits still apply unless
-  the carrier exempts the number too.
+  national in the default country code, so `138` finds `+8613800138000`. The
+  exemption is this platform's alone: a carrier line's own per-callee limits
+  still apply unless the carrier exempts the number too (#578).
 - A campaign says why it waits. `activity` is `WAITING_FREQUENCY` (with
   `nextDialAt`) when the first pending contact is held by another campaign's
   call, instead of `WAITING_RETRY`, which read as if the campaign had tried;
@@ -41,7 +72,8 @@ carries the one-line installer's files.
 - An attempt records whether its number was a test number when it was placed
   (`isTestNumber`; delisting later does not change it). `isTestNumber` is a
   filter on the attempt and contact listings and on the outcome summary, so a
-  summary can leave test calls out and still equal the filtered listings.
+  summary can leave test calls out and still equal the filtered listings
+  (#578).
 
 ### Fixed
 
@@ -53,6 +85,12 @@ carries the one-line installer's files.
   lead filed no callback, and the contact kept no lead intent. A lead is now
   accepted until the call has its real record, and that record applies it once
   (#559).
+- The end-to-end suite for outbound calls (`deploy/e2e/`): the callee
+  simulator schedules its 180/183 and 200 responses on its monotonic clock, not
+  on a wall-clock stamp of a VM whose clock is stepped, and case C10 reads the
+  skipped attempt by its outcome (`DNC_SKIPPED`/`NUMBER_ON_DNC`) instead of
+  comparing two wall-clock stamps. No bound changed. `deploy/e2e/README.md`
+  says which clock each check reads (#565).
 
 ## v0.8.5 - 2026-11-14
 
