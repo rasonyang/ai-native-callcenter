@@ -231,3 +231,35 @@ func TestCallbackUnknownFormIsE164(t *testing.T) {
 		}
 	}
 }
+
+func TestCanonicalPrefix(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name, in, cc, want string
+		reason             Reason
+	}{
+		{"national digits", "138", "86", "+86138", ""},
+		{"trunk zero dropped", "010", "86", "+8610", ""},
+		{"a lone zero", "0", "86", "+86", ""},
+		{"plus kept", "+86138", "86", "+86138", ""},
+		{"plus and spaces", "+86 138", "86", "+86138", ""},
+		{"double zero", "0086138", "86", "+86138", ""},
+		{"double zero and dash", "0086-138", "1", "+86138", ""},
+		{"brackets", "(010)", "86", "+8610", ""},
+		{"spaced national", "138 0013", "86", "+861380013", ""},
+		{"another country", "+1", "86", "+1", ""},
+		{"a bare one is national", "1", "86", "+861", ""},
+		{"empty", "", "86", "", ""},
+		{"only separators", " - ", "86", "", ""},
+		{"letters", "abc", "86", "", NumberInvalid},
+		{"letters after plus", "+86abc", "86", "", NumberInvalid},
+		{"no default code", "138", "", "", NumberInvalid},
+		{"plus needs no default code", "+86138", "", "+86138", ""},
+	}
+	for _, tt := range tests {
+		got, err := CanonicalPrefix(tt.in, tt.cc)
+		if got != tt.want || ReasonOf(err) != tt.reason {
+			t.Errorf("%s: CanonicalPrefix(%q, %q) = %q, %v; want %q, %q", tt.name, tt.in, tt.cc, got, err, tt.want, tt.reason)
+		}
+	}
+}

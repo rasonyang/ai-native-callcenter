@@ -1324,7 +1324,7 @@ export interface paths {
         };
         /**
          * List the do-not-call numbers
-         * @description Newest first. prefix matches the start of the canonical E.164 number (a complete number finds exactly that entry); write the leading + URL-encoded as %2B, or it reads as a space. Needs dnc:read.
+         * @description Newest first. prefix matches the start of the canonical E.164 number (a complete number finds exactly that entry) and is read like a number being added. Needs dnc:read.
          */
         get: operations["listDncNumbers"];
         put?: never;
@@ -1370,7 +1370,7 @@ export interface paths {
         };
         /**
          * List the test numbers
-         * @description Newest first. prefix matches the start of the canonical E.164 number (a complete number finds exactly that entry); write the leading + URL-encoded as %2B, or it reads as a space. Needs testnumbers:read.
+         * @description Newest first. prefix matches the start of the canonical E.164 number (a complete number finds exactly that entry) and is read like a number being added. Needs testnumbers:read.
          */
         get: operations["listTestNumbers"];
         put?: never;
@@ -6275,7 +6275,7 @@ export interface operations {
     listDncNumbers: {
         parameters: {
             query?: {
-                /** @description Canonical E.164 prefix, for example +8613. Omitted or empty returns everything. */
+                /** @description A number prefix in any common spelling. "+8613" and "008613" are international; digits without either are national in the deployment's default country code (AICC_DEFAULT_COUNTRY_CODE), so "138" is "+86138" when it is 86, and one leading trunk 0 is dropped. Spaces, dashes, dots and round brackets are ignored; an unencoded + (which arrives as a space) still reads as +. A value that is not a number is 422 VALIDATION_FAILED, params {field: "prefix", rule: NUMBER_INVALID}. Omitted or empty returns everything. */
                 prefix?: string;
                 limit?: number;
                 offset?: number;
@@ -6297,6 +6297,7 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -6368,7 +6369,7 @@ export interface operations {
     listTestNumbers: {
         parameters: {
             query?: {
-                /** @description Canonical E.164 prefix, for example +8613. Omitted or empty returns everything. */
+                /** @description A number prefix in any common spelling. "+8613" and "008613" are international; digits without either are national in the deployment's default country code (AICC_DEFAULT_COUNTRY_CODE), so "138" is "+86138" when it is 86, and one leading trunk 0 is dropped. Spaces, dashes, dots and round brackets are ignored; an unencoded + (which arrives as a space) still reads as +. A value that is not a number is 422 VALIDATION_FAILED, params {field: "prefix", rule: NUMBER_INVALID}. Omitted or empty returns everything. */
                 prefix?: string;
                 limit?: number;
                 offset?: number;
@@ -6390,6 +6391,7 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
     };

@@ -3645,7 +3645,7 @@ type ListContactsParams struct {
 
 // ListDNCNumbersParams defines parameters for ListDNCNumbers.
 type ListDNCNumbersParams struct {
-	// Prefix Canonical E.164 prefix, for example +8613. Omitted or empty returns everything.
+	// Prefix A number prefix in any common spelling. "+8613" and "008613" are international; digits without either are national in the deployment's default country code (AICC_DEFAULT_COUNTRY_CODE), so "138" is "+86138" when it is 86, and one leading trunk 0 is dropped. Spaces, dashes, dots and round brackets are ignored; an unencoded + (which arrives as a space) still reads as +. A value that is not a number is 422 VALIDATION_FAILED, params {field: "prefix", rule: NUMBER_INVALID}. Omitted or empty returns everything.
 	Prefix *string `form:"prefix,omitempty" json:"prefix,omitempty"`
 	Limit  *int    `form:"limit,omitempty" json:"limit,omitempty"`
 	Offset *int    `form:"offset,omitempty" json:"offset,omitempty"`
@@ -3695,7 +3695,7 @@ type GetReportQueuesParams struct {
 
 // ListTestNumbersParams defines parameters for ListTestNumbers.
 type ListTestNumbersParams struct {
-	// Prefix Canonical E.164 prefix, for example +8613. Omitted or empty returns everything.
+	// Prefix A number prefix in any common spelling. "+8613" and "008613" are international; digits without either are national in the deployment's default country code (AICC_DEFAULT_COUNTRY_CODE), so "138" is "+86138" when it is 86, and one leading trunk 0 is dropped. Spaces, dashes, dots and round brackets are ignored; an unencoded + (which arrives as a space) still reads as +. A value that is not a number is 422 VALIDATION_FAILED, params {field: "prefix", rule: NUMBER_INVALID}. Omitted or empty returns everything.
 	Prefix *string `form:"prefix,omitempty" json:"prefix,omitempty"`
 	Limit  *int    `form:"limit,omitempty" json:"limit,omitempty"`
 	Offset *int    `form:"offset,omitempty" json:"offset,omitempty"`

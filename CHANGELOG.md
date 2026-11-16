@@ -7,6 +7,15 @@ carries the one-line installer's files.
 
 ## Unreleased
 
+### Changed
+
+- The `prefix` search of the do-not-call list (`GET /dnc-numbers`) reads digits
+  without `+` or `00` in the deployment's default country code, as the add form
+  reads a number: with code 86, `138` searches `+86138` (it used to search
+  `+138` and find nothing). Spaces, dashes and brackets are ignored, a leading
+  trunk `0` is dropped, and a prefix that is not a number is refused
+  `422 VALIDATION_FAILED`.
+
 ### Added
 
 - A list of test numbers, for teams that test campaigns on their own phones.
@@ -20,7 +29,9 @@ carries the one-line installer's files.
   a number in any spelling, as the do-not-call list does. Every entry gives up
   a protection that exists for customers, so the list holds at most 100
   numbers (`409 TEST_NUMBER_LIMIT_REACHED`). Adding a number makes the contacts
-  that were waiting out the window for it due at once. The exemption is this
+  that were waiting out the window for it due at once. The list's `prefix`
+  search reads a number as an added one is: digits without `+` or `00` are
+  national in the default country code, so `138` finds `+8613800138000`. The exemption is this
   platform's alone: a carrier line's own per-callee limits still apply unless
   the carrier exempts the number too.
 - A campaign says why it waits. `activity` is `WAITING_FREQUENCY` (with

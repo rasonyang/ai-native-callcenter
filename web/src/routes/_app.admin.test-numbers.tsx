@@ -1,4 +1,5 @@
 import { createFileRoute } from '@tanstack/react-router'
+import { Search } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -109,10 +110,11 @@ function TestNumbersPage() {
         </Button>
       </form>
 
-      <div className="mb-3">
+      <div className="relative mb-3 w-64">
+        <Search className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
         <Input
           aria-label={t('testNumbers.search')}
-          className="w-64"
+          className="pl-7"
           placeholder={t('testNumbers.searchPlaceholder')}
           value={search}
           onChange={(e) => {

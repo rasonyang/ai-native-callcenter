@@ -167,3 +167,83 @@ func TestOnlyScopedCredentialsReachTheTestNumberList(t *testing.T) {
 		}
 	}
 }
+
+// listPrefix asks a number listing for a prefix the way the generated wrapper
+// hands it over: the raw query is decoded, so an unencoded "+" is a space.
+func listPrefix(t *testing.T, rawQuery string, list func(http.ResponseWriter, *http.Request, *string)) (int, []string) {
+	t.Helper()
+	q, err := url.ParseQuery(rawQuery)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var prefix *string
+	if v, ok := q["prefix"]; ok {
+		prefix = &v[0]
+	}
+	w := httptest.NewRecorder()
+	list(w, httptest.NewRequest(http.MethodGet, "/x?"+rawQuery, nil), prefix)
+	var page struct {
+		Items []struct {
+			Number string `json:"number"`
+		} `json:"items"`
+	}
+	_ = json.Unmarshal(w.Body.Bytes(), &page)
+	var out []string
+	for _, it := range page.Items {
+		out = append(out, it.Number)
+	}
+	return w.Code, out
+}
+
+// The prefix of a listing is read like a number: digits with no "+" or "00" are
+// national in the default country code.
+func checkPrefixSearch(t *testing.T, list func(http.ResponseWriter, *http.Request, *string)) {
+	t.Helper()
+	for _, q := range []string{
+		"prefix=138", "prefix=%2B86138", "prefix=+86138", "prefix=0086138", "prefix=138%200013",
+		"prefix=%2B86%20138", "prefix=(0)138", "prefix=1",
+	} {
+		if code, got := listPrefix(t, q, list); code != http.StatusOK || len(got) != 1 || got[0] != "+8613800138000" {
+			t.Errorf("%q: %d %v, want only +8613800138000", q, code, got)
+		}
+	}
+	// "1" is national, so +861: the +1 entry is not found by it.
+	if code, got := listPrefix(t, "prefix=139", list); code != http.StatusOK || len(got) != 0 {
+		t.Errorf("139: %d %v, want nothing", code, got)
+	}
+	for _, q := range []string{"prefix=", ""} {
+		if code, got := listPrefix(t, q, list); code != http.StatusOK || len(got) != 2 {
+			t.Errorf("%q: %d %v, want everything", q, code, got)
+		}
+	}
+	if code, got := listPrefix(t, "prefix=%2B1", list); code != http.StatusOK || len(got) != 1 || got[0] != "+14155550100" {
+		t.Errorf("+1: %d %v, want the +1 entry", code, got)
+	}
+	if code, _ := listPrefix(t, "prefix=abc", list); code != http.StatusUnprocessableEntity {
+		t.Errorf("a prefix of letters: %d, want 422", code)
+	}
+}
+
+func TestTheTestNumberSearchReadsAPrefixInTheDefaultCountryCode(t *testing.T) {
+	s, st := newTestNumberServer(t, "86")
+	for _, n := range []string{"+8613800138000", "+14155550100"} {
+		if _, _, err := st.TestNumbers().Add(context.Background(), n, "", nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	checkPrefixSearch(t, func(w http.ResponseWriter, r *http.Request, p *string) {
+		s.ListTestNumbers(w, r, api.ListTestNumbersParams{Prefix: p})
+	})
+}
+
+func TestTheDNCSearchReadsAPrefixInTheDefaultCountryCode(t *testing.T) {
+	d := newDNCStack(t, "86")
+	for _, n := range []string{"+8613800138000", "+14155550100"} {
+		if _, _, err := d.st.DNC().Add(context.Background(), n, "MANUAL", nil, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	checkPrefixSearch(t, func(w http.ResponseWriter, r *http.Request, p *string) {
+		d.server.ListDNCNumbers(w, r, api.ListDNCNumbersParams{Prefix: p})
+	})
+}

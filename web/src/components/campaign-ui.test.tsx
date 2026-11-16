@@ -736,6 +736,18 @@ describe('the do-not-call page', () => {
     expect(await screen.findByText(text)).toBeInTheDocument()
   })
 
+  it('sends a prefix typed without a plus sign as it is, leaving the country code to the server', async () => {
+    const seen: string[] = []
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      seen.push(String(input))
+      return json({ items: [], total: 0 })
+    }))
+    const { user } = renderWithProviders(<Page />)
+    await user.type(await screen.findByLabelText('Search numbers'), '138 0')
+    await waitFor(() => expect(seen.some((u) => u.includes('prefix=1380'))).toBe(true))
+    expect(seen.some((u) => u.includes('%2B'))).toBe(false)
+  })
+
   it('searches by prefix with the plus sign encoded, and removes after a confirm', async () => {
     const seen: Array<{ method: string; url: string }> = []
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init: RequestInit = {}) => {
@@ -748,7 +760,7 @@ describe('the do-not-call page', () => {
     }))
     const { user } = renderWithProviders(<Page />)
     expect(await screen.findByText('+8613800138000')).toBeInTheDocument()
-    await user.type(screen.getByLabelText('Search by prefix'), '+86 138')
+    await user.type(screen.getByLabelText('Search numbers'), '+86 138')
     await waitFor(() => expect(seen.some((s) => s.url.includes('prefix=%2B86138'))).toBe(true))
 
     await user.click(screen.getByTitle('Delete'))

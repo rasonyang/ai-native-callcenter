@@ -27,10 +27,9 @@ type TestNumberService interface {
 
 // ListTestNumbers pages the list, newest first.
 func (s *Server) ListTestNumbers(w http.ResponseWriter, r *http.Request, params api.ListTestNumbersParams) {
-	// See ListDNCNumbers: an unencoded "+" arrives as a space.
-	prefix := strings.TrimSpace(stringOr(params.Prefix))
-	if prefix != "" && !strings.HasPrefix(prefix, "+") {
-		prefix = "+" + prefix
+	prefix, ok := s.searchPrefix(w, params.Prefix)
+	if !ok {
+		return
 	}
 	items, total, err := s.testNumbers.List(r.Context(), store.TestNumberFilter{
 		Prefix: prefix,
