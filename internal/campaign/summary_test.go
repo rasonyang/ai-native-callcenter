@@ -71,7 +71,7 @@ func TestTheVocabulariesTheSummaryWalks(t *testing.T) {
 
 func TestTheSummaryOfAnUnknownCampaignIsNotFound(t *testing.T) {
 	f := newFixture(t, Env{})
-	if _, err := f.svc.OutcomeSummary(context.Background(), uuid.Must(uuid.NewV7())); !errors.Is(err, ErrNotFound) {
+	if _, err := f.svc.OutcomeSummary(context.Background(), uuid.Must(uuid.NewV7()), nil); !errors.Is(err, ErrNotFound) {
 		t.Errorf("unknown campaign: %v", err)
 	}
 }

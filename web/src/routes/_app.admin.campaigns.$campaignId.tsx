@@ -14,6 +14,7 @@ import { PageHeader } from '@/components/page-header'
 import { Pager } from '@/components/pager'
 import { Select } from '@/components/record-dialog'
 import { CellText, DataTable, TBody, THead, TableMessage, Td, Th, Tr } from '@/components/table'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useNameThisPage } from '@/lib/breadcrumb'
@@ -285,7 +286,7 @@ function SettingsTab({ campaign }: { campaign: Campaign }) {
   )
 }
 
-function ContactsTab({ campaign }: { campaign: Campaign }) {
+export function ContactsTab({ campaign }: { campaign: Campaign }) {
   const { t, i18n } = useTranslation()
   const [status, setStatus] = useState<CampaignContactStatus | ''>('')
   const [intent, setIntent] = useState<CampaignLeadIntent | ''>('')
@@ -364,7 +365,11 @@ function ContactsTab({ campaign }: { campaign: Campaign }) {
                 {row.lastOutcome ? t(`campaign.outcomes.${row.lastOutcome}`) : '—'}
               </Td>
               <Td className="tabular text-xs text-muted-foreground">
-                {row.nextAttemptAt ? time.format(new Date(row.nextAttemptAt)) : '—'}
+                {row.frequencyHoldEndsAt
+                  ? t('campaign.frequencyHeld', { when: time.format(new Date(row.frequencyHoldEndsAt)) })
+                  : row.nextAttemptAt
+                    ? time.format(new Date(row.nextAttemptAt))
+                    : '—'}
               </Td>
               <Td className="text-xs">
                 {row.leadIntent ? t(`campaign.intents.${row.leadIntent}`) : '—'}
@@ -378,7 +383,7 @@ function ContactsTab({ campaign }: { campaign: Campaign }) {
   )
 }
 
-function AttemptsTab({ campaign }: { campaign: Campaign }) {
+export function AttemptsTab({ campaign }: { campaign: Campaign }) {
   const { t, i18n } = useTranslation()
   const [outcome, setOutcome] = useState<CampaignOutcome | ''>('')
   const [page, setPage] = useState(0)
@@ -427,7 +432,10 @@ function AttemptsTab({ campaign }: { campaign: Campaign }) {
             <Tr key={row.id}>
               <Td className="tabular text-xs">{time.format(new Date(row.startedAt))}</Td>
               <Td className="tabular">
-                <CellText maxWidth="max-w-40" minWidth="min-w-upto-32">{row.number}</CellText>
+                <span className="flex items-center gap-2">
+                  <CellText maxWidth="max-w-40" minWidth="min-w-upto-32">{row.number}</CellText>
+                  {row.isTestNumber && <Badge>{t('campaign.testNumber')}</Badge>}
+                </span>
               </Td>
               <Td className="text-xs">
                 {row.outcome ? t(`campaign.outcomes.${row.outcome}`) : t('campaign.attemptStates.DIALING')}

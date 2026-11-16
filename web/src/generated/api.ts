@@ -1324,7 +1324,7 @@ export interface paths {
         };
         /**
          * List the do-not-call numbers
-         * @description Newest first. prefix matches the start of the canonical E.164 number (a complete number finds exactly that entry); write the leading + URL-encoded as %2B, or it reads as a space. Needs dnc:read.
+         * @description Newest first. prefix matches the start of the canonical E.164 number (a complete number finds exactly that entry) and is read like a number being added. Needs dnc:read.
          */
         get: operations["listDncNumbers"];
         put?: never;
@@ -1356,6 +1356,54 @@ export interface paths {
          * @description The path carries the canonical E.164 number with its + URL-encoded as %2B (an unencoded + also works). Anything that is not canonical is 422 VALIDATION_FAILED; a canonical number that is not listed is 404. Needs dnc:write.
          */
         delete: operations["deleteDncNumber"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/test-numbers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the test numbers
+         * @description Newest first. prefix matches the start of the canonical E.164 number (a complete number finds exactly that entry) and is read like a number being added. Needs testnumbers:read.
+         */
+        get: operations["listTestNumbers"];
+        put?: never;
+        /**
+         * Add a number to the list of test numbers
+         * @description The cross-campaign frequency window (AICC_CAMPAIGN_FREQUENCY_WINDOW) does not hold back a number on this list: a campaign may dial it although another campaign reached it lately. Nothing else changes: a number on the do-not-call list is still never dialled, a number being dialled is still skipped, calling windows and AICC_OUTBOUND_HOURS still apply, and a campaign's own maxAttempts and retry policy are unchanged. Contacts of running campaigns that were waiting out the frequency window for this number are due again at once. The exemption is this platform's alone: a carrier line's own limits on calls to one callee still apply.
+         *
+         *     The number may be written in any common form: it is canonicalised to E.164 with the deployment's default country code (AICC_DEFAULT_COUNTRY_CODE) before it is stored, so "+86 138-0013-8000", "0086 138 0013 8000" and, with country code 86, "13800138000" are one entry. A number that cannot be canonicalised is refused with 422 VALIDATION_FAILED, params {field: "number", rule: NUMBER_EMPTY | NUMBER_INVALID}.
+         *
+         *     The list holds at most 100 numbers: every entry gives up a protection that exists for customers. Adding a new number to a full list is refused with 409 TEST_NUMBER_LIMIT_REACHED, params {limit: 100}. Idempotent: adding a number that is already listed changes nothing and answers 200 with the existing entry (its original note, time and author), full list or not; a new entry answers 201. Needs testnumbers:write.
+         */
+        post: operations["createTestNumber"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/test-numbers/{number}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Take a number off the list of test numbers
+         * @description The path carries the canonical E.164 number with its + URL-encoded as %2B (an unencoded + also works). Anything that is not canonical is 422 VALIDATION_FAILED; a canonical number that is not listed is 404. From then on the frequency window holds the number back like any other. Needs testnumbers:write.
+         */
+        delete: operations["deleteTestNumber"];
         options?: never;
         head?: never;
         patch?: never;
@@ -1524,7 +1572,7 @@ export interface paths {
         };
         /**
          * List a campaign's contacts
-         * @description In import order. status, leadIntent and lastOutcome narrow the list. Needs campaigns:read.
+         * @description In import order. status, leadIntent, lastOutcome and isTestNumber narrow the list. Needs campaigns:read.
          */
         get: operations["listCampaignContacts"];
         put?: never;
@@ -1552,7 +1600,7 @@ export interface paths {
         };
         /**
          * List a campaign's attempts
-         * @description Newest first. contactId and outcome narrow the list. Needs campaigns:read.
+         * @description Newest first. contactId, outcome and isTestNumber narrow the list. Needs campaigns:read.
          */
         get: operations["listCampaignAttempts"];
         put?: never;
@@ -1572,7 +1620,7 @@ export interface paths {
         };
         /**
          * Get what a campaign's calls came to
-         * @description Attempts by outcome, contacts by last outcome and by lead, the two kinds of opt-out, and the callbacks the campaign's leads filed, counted from what is stored when the request is made. Each count is the total of a listing filtered the same way, named on its field. Needs campaigns:read.
+         * @description Attempts by outcome, contacts by last outcome and by lead, the two kinds of opt-out, and the callbacks the campaign's leads filed, counted from what is stored when the request is made. Each count is the total of a listing filtered the same way, named on its field. isTestNumber leaves test calls out (or keeps only them) and filters every listing alike: attempts by their own isTestNumber, contacts, leads and opt-outs by their latest finished attempt's, callbacks by the attempt of the call that filed them. Needs campaigns:read.
          */
         get: operations["getCampaignOutcomeSummary"];
         put?: never;
@@ -1919,7 +1967,7 @@ export interface components {
          * @description Machine-readable, translatable failure identifier. The frontend renders errors.<CODE>; the backend never localizes.
          * @enum {string}
          */
-        ErrorCode: "INVALID_CREDENTIALS" | "SESSION_EXPIRED" | "FORBIDDEN" | "AGENT_REQUIRED" | "AGENT_IMPERSONATION_NOT_ALLOWED" | "INSUFFICIENT_SCOPE" | "VALIDATION_FAILED" | "TERMINAL_ANNOUNCE_REQUIRED" | "USER_DATA_TOO_LARGE" | "NUMBER_ON_DNC" | "DID_CHANNELS_EXHAUSTED" | "DID_NOT_OUTBOUND" | "OUTBOUND_NOT_CONFIGURED" | "CAMPAIGN_FLOW_HAS_TRANSFER" | "CAMPAIGN_DID_NOT_OUTBOUND" | "CAMPAIGN_RING_TIMEOUT_TOO_LONG" | "CAMPAIGN_WINDOW_OUTSIDE_LIMIT" | "CAMPAIGN_FIELD_LOCKED" | "CAMPAIGN_INVALID_TRANSITION" | "NOT_FOUND" | "METHOD_NOT_ALLOWED" | "CONFLICT" | "EXTENSION_IN_USE" | "EXTENSION_ASSIGNED_TO_AGENT" | "LAST_ADMIN" | "EXTENSION_POOL_EXHAUSTED" | "AGENT_ALREADY_LOGGED_IN" | "AGENT_NOT_LOGGED_IN" | "AGENT_NOT_IN_WRAP_UP" | "DEVICE_NOT_REGISTERED" | "TRANSCRIPTION_DISABLED" | "CALL_NOT_FOUND" | "NOT_CALL_PARTY" | "OPERATION_NOT_ALLOWED_FOR_CALL_TYPE" | "TRANSFER_IN_PROGRESS" | "USER_SUSPENDED" | "SWITCH_DOWN" | "STORAGE_DOWN" | "RATE_LIMITED" | "INTERNAL";
+        ErrorCode: "INVALID_CREDENTIALS" | "SESSION_EXPIRED" | "FORBIDDEN" | "AGENT_REQUIRED" | "AGENT_IMPERSONATION_NOT_ALLOWED" | "INSUFFICIENT_SCOPE" | "VALIDATION_FAILED" | "TERMINAL_ANNOUNCE_REQUIRED" | "USER_DATA_TOO_LARGE" | "NUMBER_ON_DNC" | "DID_CHANNELS_EXHAUSTED" | "DID_NOT_OUTBOUND" | "OUTBOUND_NOT_CONFIGURED" | "CAMPAIGN_FLOW_HAS_TRANSFER" | "CAMPAIGN_DID_NOT_OUTBOUND" | "CAMPAIGN_RING_TIMEOUT_TOO_LONG" | "CAMPAIGN_WINDOW_OUTSIDE_LIMIT" | "CAMPAIGN_FIELD_LOCKED" | "CAMPAIGN_INVALID_TRANSITION" | "TEST_NUMBER_LIMIT_REACHED" | "NOT_FOUND" | "METHOD_NOT_ALLOWED" | "CONFLICT" | "EXTENSION_IN_USE" | "EXTENSION_ASSIGNED_TO_AGENT" | "LAST_ADMIN" | "EXTENSION_POOL_EXHAUSTED" | "AGENT_ALREADY_LOGGED_IN" | "AGENT_NOT_LOGGED_IN" | "AGENT_NOT_IN_WRAP_UP" | "DEVICE_NOT_REGISTERED" | "TRANSCRIPTION_DISABLED" | "CALL_NOT_FOUND" | "NOT_CALL_PARTY" | "OPERATION_NOT_ALLOWED_FOR_CALL_TYPE" | "TRANSFER_IN_PROGRESS" | "USER_SUSPENDED" | "SWITCH_DOWN" | "STORAGE_DOWN" | "RATE_LIMITED" | "INTERNAL";
         /** @description The single error envelope body: an error code plus interpolation params. Message is diagnostic English, never shown to end users. */
         Error: {
             code: components["schemas"]["ErrorCode"];
@@ -3476,6 +3524,31 @@ export interface components {
             /** @description Total rows matching the filter, for paging. */
             total: number;
         };
+        /** @description One entry on the list of test numbers. */
+        TestNumber: {
+            /** @description Canonical E.164, for example +8613800138000. */
+            number: string;
+            /** @description Who or what the number is, for the people who maintain the list (for example "QA desk phone"). Absent when none was given. */
+            note?: string;
+            /** Format: date-time */
+            createdAt: string;
+            /**
+             * Format: uuid
+             * @description The account that added it. Absent when an API key did; the audit trail names the key.
+             */
+            createdBy?: string;
+        };
+        TestNumberList: {
+            items: components["schemas"]["TestNumber"][];
+            /** @description Total rows matching the filter, for paging. */
+            total: number;
+        };
+        TestNumberWrite: {
+            /** @description The number in any common form; see createTestNumber. */
+            number: string;
+            /** @description Optional: who or what the number is. Ignored when the number was already listed. */
+            note?: string;
+        };
         /**
          * @description DRAFT is being written and dials nothing. RUNNING dials. PAUSED has stopped admitting new calls (pauseReason says who stopped it); calls in flight finish. COMPLETED and CANCELLED are final: nothing changes, contacts and leads stay readable. COMPLETED is reached only by the dialer, when nothing is left to dial and nothing is in flight; there is no operation for it.
          * @enum {string}
@@ -3700,6 +3773,11 @@ export interface components {
              * @description When it may be dialled next. Absent unless ACTIVE and the campaign has started.
              */
             nextAttemptAt?: string;
+            /**
+             * Format: date-time
+             * @description Set while the contact is ACTIVE and another campaign reached its number within the deployment's cross-campaign frequency window (AICC_CAMPAIGN_FREQUENCY_WINDOW): the time that hold ends (the other campaign's latest touch plus the window), after which this campaign may dial it. Absent otherwise, and always absent for a number on the list of test numbers. Computed when the contact is read.
+             */
+            frequencyHoldEndsAt?: string;
             lastOutcome?: components["schemas"]["CampaignOutcome"];
             leadIntent?: components["schemas"]["CampaignLeadIntent"];
             leadNotes?: string;
@@ -3764,10 +3842,10 @@ export interface components {
             rows: components["schemas"]["CampaignImportRowResult"][];
         };
         /**
-         * @description What a RUNNING campaign is doing right now, computed by the dialer and never stored. DIALING: calls are in flight. WAITING_WINDOW: every pending contact is outside its calling window (the campaign stays RUNNING; the window reopens by itself). WAITING_RETRY: no pending contact is due yet. AT_CAPACITY: due contacts are held back by a limit (the campaign's maxConcurrent, the deployment's ringing cap, or bot capacity).
+         * @description What a RUNNING campaign is doing right now, computed by the dialer and never stored. DIALING: calls are in flight. WAITING_WINDOW: every pending contact is outside its calling window (the campaign stays RUNNING; the window reopens by itself). WAITING_RETRY: no pending contact is due yet. WAITING_FREQUENCY: nothing is in flight and the earliest pending contact is held by the cross-campaign frequency window: another campaign reached its number lately, so this one waits until that touch plus AICC_CAMPAIGN_FREQUENCY_WINDOW (nextDialAt). The campaign has made no attempt for those contacts. Adding the number to the list of test numbers lifts the hold. When a closed calling window opens later than the hold ends, the activity is WAITING_WINDOW; when both end at the same time, WAITING_FREQUENCY. AT_CAPACITY: due contacts are held back by a limit (the campaign's maxConcurrent, the deployment's ringing cap, or bot capacity).
          * @enum {string}
          */
-        CampaignActivity: "DIALING" | "WAITING_WINDOW" | "WAITING_RETRY" | "AT_CAPACITY";
+        CampaignActivity: "DIALING" | "WAITING_WINDOW" | "WAITING_RETRY" | "WAITING_FREQUENCY" | "AT_CAPACITY";
         /**
          * @description DIALING until the call ended and its outcome was written, once; a fuller CDR may later revise the outcome of a FINISHED attempt, never its state.
          * @enum {string}
@@ -3800,6 +3878,8 @@ export interface components {
             talkSec?: number;
             /** @description True when the outcome reached the customer, so it counts against maxAttempts and holds the number from other campaigns for the deployment's frequency window. */
             isTouched: boolean;
+            /** @description True when the number was on the list of test numbers at the moment the attempt was placed. History: taking the number off the list later does not change it. */
+            isTestNumber: boolean;
             leadIntent?: components["schemas"]["CampaignLeadIntent"];
             leadNotes?: string;
             /** Format: date-time */
@@ -3911,7 +3991,7 @@ export interface components {
                 "application/json": components["schemas"]["ErrorResponse"];
             };
         };
-        /** @description The request collides with current state. Codes CONFLICT, EXTENSION_IN_USE, EXTENSION_ASSIGNED_TO_AGENT, EXTENSION_POOL_EXHAUSTED, LAST_ADMIN, AGENT_ALREADY_LOGGED_IN, AGENT_NOT_LOGGED_IN, AGENT_NOT_IN_WRAP_UP, DEVICE_NOT_REGISTERED, TRANSCRIPTION_DISABLED, OUTBOUND_NOT_CONFIGURED (the deployment has no AICC_OUTBOUND_ENDPOINT: createCall for AI_OUTBOUND, startCampaign and resumeCampaign). Holding, retrieving and transferring an INTERNAL call answer OPERATION_NOT_ALLOWED_FOR_CALL_TYPE; transferring a caller whose previous transfer the switch has not yet confirmed answers TRANSFER_IN_PROGRESS. Campaign operations answer CAMPAIGN_INVALID_TRANSITION (the operation does not exist in the campaign's status) or CAMPAIGN_FIELD_LOCKED (params.fields lists what cannot change in that status); publishing a flow revision or rebinding a DID that would give a campaign that has not finished a way to a person answers CAMPAIGN_FLOW_HAS_TRANSFER; clearing allowOutbound on a DID such a campaign dials from answers CAMPAIGN_DID_NOT_OUTBOUND. */
+        /** @description The request collides with current state. Codes CONFLICT, EXTENSION_IN_USE, EXTENSION_ASSIGNED_TO_AGENT, EXTENSION_POOL_EXHAUSTED, LAST_ADMIN, AGENT_ALREADY_LOGGED_IN, AGENT_NOT_LOGGED_IN, AGENT_NOT_IN_WRAP_UP, DEVICE_NOT_REGISTERED, TRANSCRIPTION_DISABLED, OUTBOUND_NOT_CONFIGURED (the deployment has no AICC_OUTBOUND_ENDPOINT: createCall for AI_OUTBOUND, startCampaign and resumeCampaign). Holding, retrieving and transferring an INTERNAL call answer OPERATION_NOT_ALLOWED_FOR_CALL_TYPE; transferring a caller whose previous transfer the switch has not yet confirmed answers TRANSFER_IN_PROGRESS. Campaign operations answer CAMPAIGN_INVALID_TRANSITION (the operation does not exist in the campaign's status) or CAMPAIGN_FIELD_LOCKED (params.fields lists what cannot change in that status); publishing a flow revision or rebinding a DID that would give a campaign that has not finished a way to a person answers CAMPAIGN_FLOW_HAS_TRANSFER; clearing allowOutbound on a DID such a campaign dials from answers CAMPAIGN_DID_NOT_OUTBOUND. Adding a new number to a full list of test numbers answers TEST_NUMBER_LIMIT_REACHED. */
         Conflict: {
             headers: {
                 [name: string]: unknown;
@@ -6195,7 +6275,7 @@ export interface operations {
     listDncNumbers: {
         parameters: {
             query?: {
-                /** @description Canonical E.164 prefix, for example +8613. Omitted or empty returns everything. */
+                /** @description A number prefix in any common spelling. "+8613" and "008613" are international; digits without either are national in the deployment's default country code (AICC_DEFAULT_COUNTRY_CODE), so "138" is "+86138" when it is 86, and one leading trunk 0 is dropped. Spaces, dashes, dots and round brackets are ignored; an unencoded + (which arrives as a space) still reads as +. A value that is not a number is 422 VALIDATION_FAILED, params {field: "prefix", rule: NUMBER_INVALID}. Omitted or empty returns everything. */
                 prefix?: string;
                 limit?: number;
                 offset?: number;
@@ -6217,6 +6297,7 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -6259,6 +6340,101 @@ export interface operations {
         };
     };
     deleteDncNumber: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Canonical E.164, for example +8613800138000. */
+                number: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Removed. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["UnprocessableEntity"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    listTestNumbers: {
+        parameters: {
+            query?: {
+                /** @description A number prefix in any common spelling. "+8613" and "008613" are international; digits without either are national in the deployment's default country code (AICC_DEFAULT_COUNTRY_CODE), so "138" is "+86138" when it is 86, and one leading trunk 0 is dropped. Spaces, dashes, dots and round brackets are ignored; an unencoded + (which arrives as a space) still reads as +. A value that is not a number is 422 VALIDATION_FAILED, params {field: "prefix", rule: NUMBER_INVALID}. Omitted or empty returns everything. */
+                prefix?: string;
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description One page plus the total for the filter. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TestNumberList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            422: components["responses"]["UnprocessableEntity"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    createTestNumber: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TestNumberWrite"];
+            };
+        };
+        responses: {
+            /** @description The number was already on the list; the existing entry. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TestNumber"];
+                };
+            };
+            /** @description The number was added. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TestNumber"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    deleteTestNumber: {
         parameters: {
             query?: never;
             header?: never;
@@ -6572,6 +6748,8 @@ export interface operations {
                 leadIntent?: components["schemas"]["CampaignLeadIntent"];
                 /** @description Only contacts whose latest finished attempt ended so. A contact no attempt has finished for has no lastOutcome and is never in such a list. */
                 lastOutcome?: components["schemas"]["CampaignOutcome"];
+                /** @description Absent: every contact. true: only contacts whose latest finished attempt was to a listed test number (see CampaignAttempt.isTestNumber). false: only the others, a contact no attempt has finished for included. */
+                isTestNumber?: boolean;
                 limit?: number;
                 offset?: number;
             };
@@ -6646,6 +6824,8 @@ export interface operations {
             query?: {
                 contactId?: string;
                 outcome?: components["schemas"]["CampaignOutcome"];
+                /** @description Absent: every attempt. true: only attempts to a number that was on the list of test numbers when the attempt was placed. false: only the others. */
+                isTestNumber?: boolean;
                 limit?: number;
                 offset?: number;
             };
@@ -6675,7 +6855,10 @@ export interface operations {
     };
     getCampaignOutcomeSummary: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Absent: everything, as before. false: leave out everything counted from a test-number attempt (the attempt, its contact's outcome, lead and opt-out, its callback). true: count only those. */
+                isTestNumber?: boolean;
+            };
             header?: never;
             path: {
                 campaignId: string;

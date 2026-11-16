@@ -90,6 +90,9 @@ const (
 	// in the campaign's current status: starting one that is running,
 	// deleting one that has started, importing into one that has finished.
 	CodeCampaignInvalidTransition ErrorCode = "CAMPAIGN_INVALID_TRANSITION"
+	// CodeTestNumberLimitReached refuses a new number on a full list of test
+	// numbers (409). params.limit is the list's size.
+	CodeTestNumberLimitReached ErrorCode = "TEST_NUMBER_LIMIT_REACHED"
 	// CodeMethodNotAllowed answers the router's own refusal, so that a
 	// wrong method lands in the same envelope as everything else. Without
 	// it chi replies 405 with an empty body and no content type, and the

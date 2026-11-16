@@ -106,6 +106,12 @@ var OperationSecurityByRoute = map[string]OperationSecurity{
 		KeyScopes:     []string{"config:write"},
 		NeedsCSRF:     true,
 	},
+	"DELETE /test-numbers/{number}": {
+		OperationID:   "deleteTestNumber",
+		SessionScopes: []string{"testnumbers:write"},
+		KeyScopes:     []string{"testnumbers:write"},
+		NeedsCSRF:     true,
+	},
 	"DELETE /webhook-subscriptions/{subscriptionId}": {
 		OperationID:   "deleteWebhookSubscription",
 		SessionScopes: []string{"config:write"},
@@ -332,6 +338,11 @@ var OperationSecurityByRoute = map[string]OperationSecurity{
 		OperationID:   "getSystemHealth",
 		SessionScopes: []string{"config:read"},
 		KeyScopes:     []string{"config:read"},
+	},
+	"GET /test-numbers": {
+		OperationID:   "listTestNumbers",
+		SessionScopes: []string{"testnumbers:read"},
+		KeyScopes:     []string{"testnumbers:read"},
 	},
 	"GET /users": {
 		OperationID:   "listUsers",
@@ -615,6 +626,12 @@ var OperationSecurityByRoute = map[string]OperationSecurity{
 		OperationID:   "createRecordingReview",
 		SessionScopes: []string{"quality:review"},
 		KeyScopes:     nil,
+		NeedsCSRF:     true,
+	},
+	"POST /test-numbers": {
+		OperationID:   "createTestNumber",
+		SessionScopes: []string{"testnumbers:write"},
+		KeyScopes:     []string{"testnumbers:write"},
 		NeedsCSRF:     true,
 	},
 	"POST /users": {

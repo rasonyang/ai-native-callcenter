@@ -286,6 +286,8 @@ webhook_subscriptions(…) / webhook_deliveries(…)                  -- 00026; 
 --   dnc_numbers (00036)                     the global do-not-call list (10 §3.4, §12)
 --   campaigns / campaign_contacts (00037), campaign_attempts (00038)
 --                                           AI outbound campaigns (10 §3)
+--   test_numbers (00048), campaign_attempts.is_test_number,
+--   campaign_contacts.is_frequency_held     numbers exempt from the campaign frequency window (10 §3.4a, §5.2)
 --   cdrs.campaign_id (00039), dids.max_outbound_channels (00040)   (10 §3.5, §6.6)
 --   campaign_contacts.last_attempt_id / last_call_id (00042)        (10 §3.2, §14)
 ```

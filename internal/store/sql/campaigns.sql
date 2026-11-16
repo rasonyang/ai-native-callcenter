@@ -63,7 +63,7 @@ WHERE id = $1 AND status = 'DRAFT';
 -- the start on, an ACTIVE contact is due now.
 -- name: ArmCampaignContacts :execrows
 UPDATE campaign_contacts
-SET next_attempt_at = now(), updated_at = now()
+SET next_attempt_at = now(), is_frequency_held = false, updated_at = now()
 WHERE campaign_id = $1 AND status = 'ACTIVE' AND next_attempt_at IS NULL;
 
 -- name: PauseCampaign :execrows
@@ -118,21 +118,47 @@ RETURNING id, number_e164;
 SELECT id, number_e164 FROM campaign_contacts
 WHERE campaign_id = $1 AND number_e164 = ANY(sqlc.arg('numbers')::text[]);
 
+-- last_touch is the latest touch of another campaign within the frequency
+-- window on an ACTIVE contact's number, the time its hold ends minus the
+-- window; null when nothing holds the contact, and always null for a number on
+-- the list of test numbers. The caller says the hold binds only when the
+-- contact carries is_frequency_held or is not due after the hold ends. Judged at read time from the same facts the dialer
+-- uses (DueCampaignContacts), so it is never stored.
 -- name: ListCampaignContacts :many
-SELECT * FROM campaign_contacts
-WHERE campaign_id = sqlc.arg('campaign_id')
-  AND (sqlc.arg('status')::text = '' OR status = sqlc.arg('status'))
-  AND (sqlc.arg('lead_intent')::text = '' OR lead_intent = sqlc.arg('lead_intent'))
-  AND (sqlc.arg('last_outcome')::text = '' OR last_outcome = sqlc.arg('last_outcome'))
-ORDER BY created_at, id
+SELECT sqlc.embed(c), h.last_touch::timestamptz AS last_touch
+FROM campaign_contacts c
+LEFT JOIN LATERAL (
+    SELECT max(a.started_at) AS last_touch
+    FROM campaign_attempts a
+    WHERE c.status = 'ACTIVE'
+      AND a.number_e164 = c.number_e164
+      AND a.campaign_id <> c.campaign_id
+      AND a.is_touched
+      AND a.started_at > sqlc.arg('now')::timestamptz
+          - make_interval(secs => sqlc.arg('frequency_sec')::float8)
+      AND NOT EXISTS (SELECT 1 FROM test_numbers t WHERE t.number_e164 = c.number_e164)
+) h ON true
+LEFT JOIN campaign_attempts la ON la.id = c.last_attempt_id
+WHERE c.campaign_id = sqlc.arg('campaign_id')
+  AND (sqlc.narg('is_test_number')::boolean IS NULL
+       OR COALESCE(la.is_test_number, false) = sqlc.narg('is_test_number')::boolean)
+  AND (sqlc.arg('status')::text = '' OR c.status = sqlc.arg('status'))
+  AND (sqlc.arg('lead_intent')::text = '' OR c.lead_intent = sqlc.arg('lead_intent'))
+  AND (sqlc.arg('last_outcome')::text = '' OR c.last_outcome = sqlc.arg('last_outcome'))
+ORDER BY c.created_at, c.id
 LIMIT sqlc.arg('page_limit') OFFSET sqlc.arg('page_offset');
 
+-- The test-number flag of a contact is its latest finished attempt's
+-- (last_attempt_id); a contact no attempt has finished for is not flagged.
 -- name: CountCampaignContacts :one
-SELECT count(*) FROM campaign_contacts
-WHERE campaign_id = sqlc.arg('campaign_id')
-  AND (sqlc.arg('status')::text = '' OR status = sqlc.arg('status'))
-  AND (sqlc.arg('lead_intent')::text = '' OR lead_intent = sqlc.arg('lead_intent'))
-  AND (sqlc.arg('last_outcome')::text = '' OR last_outcome = sqlc.arg('last_outcome'));
+SELECT count(*) FROM campaign_contacts c
+LEFT JOIN campaign_attempts la ON la.id = c.last_attempt_id
+WHERE c.campaign_id = sqlc.arg('campaign_id')
+  AND (sqlc.narg('is_test_number')::boolean IS NULL
+       OR COALESCE(la.is_test_number, false) = sqlc.narg('is_test_number')::boolean)
+  AND (sqlc.arg('status')::text = '' OR c.status = sqlc.arg('status'))
+  AND (sqlc.arg('lead_intent')::text = '' OR c.lead_intent = sqlc.arg('lead_intent'))
+  AND (sqlc.arg('last_outcome')::text = '' OR c.last_outcome = sqlc.arg('last_outcome'));
 
 -- The outcome summary (GET /campaigns/{campaignId}/outcome-summary). Nothing
 -- is kept as a running total: every count is read here, grouped by the
@@ -140,16 +166,20 @@ WHERE campaign_id = sqlc.arg('campaign_id')
 -- the same filter. The contacts by status, last_outcome and lead_intent
 -- (CountCampaignContacts); the attempts by outcome (CountCampaignAttempts).
 -- name: CampaignContactGroups :many
-SELECT status, last_outcome, lead_intent, count(*)::bigint AS n
-FROM campaign_contacts
-WHERE campaign_id = $1
-GROUP BY status, last_outcome, lead_intent;
+SELECT c.status, c.last_outcome, c.lead_intent, count(*)::bigint AS n
+FROM campaign_contacts c
+LEFT JOIN campaign_attempts la ON la.id = c.last_attempt_id
+WHERE c.campaign_id = sqlc.arg('campaign_id')
+  AND (sqlc.narg('is_test_number')::boolean IS NULL
+       OR COALESCE(la.is_test_number, false) = sqlc.narg('is_test_number')::boolean)
+GROUP BY c.status, c.last_outcome, c.lead_intent;
 
 -- Only a FINISHED attempt has an outcome (ck_campaign_attempts_finished).
 -- name: CampaignAttemptOutcomes :many
 SELECT outcome, count(*)::bigint AS n
 FROM campaign_attempts
-WHERE campaign_id = $1 AND state = 'FINISHED'
+WHERE campaign_id = sqlc.arg('campaign_id') AND state = 'FINISHED'
+  AND (sqlc.narg('is_test_number')::boolean IS NULL OR is_test_number = sqlc.narg('is_test_number')::boolean)
 GROUP BY outcome;
 
 -- The callbacks the campaign's calls filed, by status. A campaign call files
@@ -159,5 +189,6 @@ GROUP BY outcome;
 SELECT cb.status, count(*)::bigint AS n
 FROM callbacks cb
 JOIN campaign_attempts a ON a.call_id = cb.call_id
-WHERE a.campaign_id = $1
+WHERE a.campaign_id = sqlc.arg('campaign_id')
+  AND (sqlc.narg('is_test_number')::boolean IS NULL OR a.is_test_number = sqlc.narg('is_test_number')::boolean)
 GROUP BY cb.status;

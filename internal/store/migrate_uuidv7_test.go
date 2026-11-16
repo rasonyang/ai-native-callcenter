@@ -120,7 +120,12 @@ func TestMigrationRequiresUUIDv7CallAndCampaignIDs(t *testing.T) {
 		t.Errorf("changing a call_id to a v7: %v", err)
 	}
 
-	// The real upsert replaces a legacy v4 CDR.
+	// The real upsert replaces a legacy v4 CDR. The store's queries are the
+	// current ones, so the schema is brought up to date first (the rollback
+	// below goes down through every later migration to 46).
+	if err := goose.UpContext(ctx, db, "migrations"); err != nil {
+		t.Fatalf("migrating to the latest: %v", err)
+	}
 	st, err := Open(ctx, dsn, 4)
 	if err != nil {
 		t.Fatalf("open store: %v", err)

@@ -93,6 +93,7 @@ function attempt(n: number, overrides: Partial<CampaignAttempt> = {}): CampaignA
     hangupCause: 'NORMAL_CLEARING',
     talkSec: 245,
     isTouched: true,
+    isTestNumber: false,
     startedAt: at,
     finishedAt: '2026-10-20T09:17:00Z',
     ...overrides,
@@ -151,7 +152,7 @@ function render(
         return { items, total: items.length === contactRows.length ? 120 : items.length }
       }
       if (path.startsWith(`/campaigns/${CAMPAIGN_ID}/attempts`)) return { items: attemptRows, total: 120 }
-      if (path === `/campaigns/${CAMPAIGN_ID}/outcome-summary`) return summaryReply
+      if (path.split('?')[0] === `/campaigns/${CAMPAIGN_ID}/outcome-summary`) return summaryReply
       return undefined
     },
   })
@@ -170,6 +171,19 @@ async function drawn() {
 
 
 restoreLanguage()
+
+describe('campaign contacts held by another campaign', () => {
+  // The hold sentence replaces the plain next-attempt time in the same cell.
+  layoutTest('campaigns/$campaignId contacts (frequency hold)', async (ctx) => {
+    render({
+      campaign: campaign({ activity: 'WAITING_FREQUENCY' }),
+      contacts: contacts({ frequencyHoldEndsAt: '2026-10-31T01:00:00Z' }),
+    })
+    await drawn()
+    await waitForRows(5)
+    await expectLayout(ctx)
+  })
+})
 
 describe('campaign detail header', () => {
   // The control: a running campaign in its wordiest state, every button.
@@ -302,6 +316,32 @@ describe('campaign detail, attempts tab', () => {
       await expectLayout(ctx)
     })
   }
+})
+
+describe('campaign detail, test-number marks', () => {
+  // The tag sits beside the number in the same cell, also when the number is long.
+  layoutTest('campaigns/$campaignId attempts (test-number badge)', async (ctx) => {
+    const { user } = render({
+      attempts: [
+        attempt(1, { isTestNumber: true }),
+        attempt(2, { isTestNumber: true, number: asciiRun(6000, 7) }),
+        attempt(3, {}),
+      ],
+    })
+    await drawn()
+    await openTab(user, 'campaign.tabs.attempts')
+    await screen.findAllByText(i18n.t('campaign.testNumber'))
+    await expectLayout(ctx)
+  })
+
+  layoutTest('campaigns/$campaignId outcomes (test calls left out)', async (ctx) => {
+    const { user } = render()
+    await drawn()
+    await openTab(user, 'campaign.tabs.outcomes')
+    await user.click(await screen.findByRole('checkbox', { name: i18n.t('campaign.summary.leaveOutTestCalls') }))
+    await screen.findByText(i18n.t('campaign.summary.optOutsNote'))
+    await expectLayout(ctx)
+  })
 })
 
 describe('campaign detail, leads tab', () => {

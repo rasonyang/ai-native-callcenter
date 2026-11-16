@@ -50,7 +50,7 @@ func (stubCampaigns) ListAttempts(context.Context, uuid.UUID, campaign.AttemptFi
 	return nil, 0, nil
 }
 
-func (stubCampaigns) OutcomeSummary(_ context.Context, id uuid.UUID) (campaign.OutcomeSummary, error) {
+func (stubCampaigns) OutcomeSummary(_ context.Context, id uuid.UUID, _ *bool) (campaign.OutcomeSummary, error) {
 	return campaign.NewOutcomeSummary(id), nil
 }
 

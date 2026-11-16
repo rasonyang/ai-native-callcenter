@@ -81,6 +81,11 @@ func scenarioKeyClasses() (campaign map[string]campaignKeyOwner, direct map[stri
 			}
 		}
 	}
+	for _, cs := range FrequencyCases {
+		if err := addCampaign(FrequencyRegion, cs, FrequencyScenarioID); err != nil {
+			return nil, nil, err
+		}
+	}
 	for _, id := range []string{"K1", "K2"} {
 		sc := CapacityScenarios[id]
 		for _, r := range sc.Regions {

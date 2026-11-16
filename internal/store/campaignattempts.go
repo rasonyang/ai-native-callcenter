@@ -407,7 +407,7 @@ func attemptOf(r queries.CampaignAttempt) campaign.Attempt {
 		ID: r.ID, CampaignID: r.CampaignID, ContactID: r.CampaignContactID, Number: r.NumberE164,
 		CallID: r.CallID, LegID: r.LegID, OriginateJobID: deref(r.OriginateJobID),
 		State: campaign.AttemptState(r.State), Outcome: campaign.Outcome(deref(r.Outcome)),
-		HangupCause: deref(r.HangupCause), TalkSec: int(derefInt(r.TalkSec)), IsTouched: r.IsTouched,
+		HangupCause: deref(r.HangupCause), TalkSec: int(derefInt(r.TalkSec)), IsTouched: r.IsTouched, IsTestNumber: r.IsTestNumber,
 		LeadIntent: campaign.LeadIntent(deref(r.LeadIntent)), LeadNotes: deref(r.LeadNotes),
 		StartedAt: r.StartedAt.Time, FinishedAt: timeOrNil(r.FinishedAt),
 	}

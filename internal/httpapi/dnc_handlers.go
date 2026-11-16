@@ -26,12 +26,9 @@ type DNCService interface {
 
 // ListDNCNumbers pages the list, newest first.
 func (s *Server) ListDNCNumbers(w http.ResponseWriter, r *http.Request, params api.ListDNCNumbersParams) {
-	// A canonical number starts with "+", which an unencoded query string
-	// turns into a space. A prefix with no "+" can only mean the plus was lost
-	// (or omitted), so it is put back rather than matching nothing.
-	prefix := strings.TrimSpace(stringOr(params.Prefix))
-	if prefix != "" && !strings.HasPrefix(prefix, "+") {
-		prefix = "+" + prefix
+	prefix, ok := s.searchPrefix(w, params.Prefix)
+	if !ok {
+		return
 	}
 	items, total, err := s.dnc.List(r.Context(), store.DNCFilter{
 		Prefix: prefix,
@@ -122,4 +119,25 @@ func dncNumberOf(e store.DNCNumber) api.DNCNumber {
 		Number: e.Number, Source: api.DNCSource(e.Source), CallID: e.CallID,
 		CreatedAt: e.CreatedAt, CreatedBy: e.CreatedBy,
 	}
+}
+
+// searchPrefix reads the prefix query parameter of a number listing. An
+// unencoded "+" arrives as a leading space, so a value that starts with a space
+// is "+" and the rest (read before anything is trimmed); the rest is read as a
+// number is (phonenum.CanonicalPrefix): "+" or "00" is international, and
+// digits without either are national in the deployment's default country code.
+// A prefix that is not a number is refused 422 VALIDATION_FAILED, as an
+// added number is. It reports false after answering.
+func (s *Server) searchPrefix(w http.ResponseWriter, raw *string) (string, bool) {
+	v := stringOr(raw)
+	if strings.HasPrefix(v, " ") {
+		v = "+" + v[1:]
+	}
+	prefix, err := phonenum.CanonicalPrefix(v, s.cfg.DefaultCountryCode)
+	if err != nil {
+		writeError(w, http.StatusUnprocessableEntity, CodeValidationFailed, err.Error(),
+			map[string]any{"field": "prefix", "rule": string(phonenum.ReasonOf(err))})
+		return "", false
+	}
+	return prefix, true
 }

@@ -54,7 +54,8 @@
     "webhooks": "Webhook",
     "keys": "API Key",
     "campaigns": "外呼活动",
-    "dnc": "免打扰名单"
+    "dnc": "免打扰名单",
+    "testNumbers": "测试号码"
   },
   "roles": {
     "AGENT": "坐席",
@@ -121,6 +122,7 @@
     "TRANSCRIPTION_DISABLED": "此部署未启用通话后转写",
     "USER_DATA_TOO_LARGE": "这通电话装不下这些业务数据：最多 {{maxKeys}} 个键，每个值 {{maxValueBytes}} 字节。一个都没有写入。",
     "NUMBER_ON_DNC": "该号码在免打扰名单中，未发起呼叫。",
+    "TEST_NUMBER_LIMIT_REACHED": "测试号码名单已满（最多 {{limit}} 个）。请先移除一个再添加。",
     "DID_CHANNELS_EXHAUSTED": "该号码的外呼线路已达上限，未发起呼叫。",
     "DID_NOT_OUTBOUND": "该号码未开启外呼，不能作为主叫号码。请先为该号码开启外呼。未发起呼叫。",
     "OUTBOUND_NOT_CONFIGURED": "这个部署还不能外呼：没有设置 AICC_OUTBOUND_ENDPOINT。请先按 deploy/carrier.md 接入运营商网关，再重试。没有发起任何呼叫。",
@@ -887,8 +889,8 @@
     "numberPlaceholder": "任意格式，例如 +86 138-0013-8000",
     "add": "添加",
     "added": "{{number}} 已在名单中。",
-    "search": "按前缀搜索",
-    "searchPlaceholder": "以此开头，例如 +86138",
+    "search": "搜索号码",
+    "searchPlaceholder": "搜索号码，如 138",
     "number": "号码",
     "source": "来源",
     "addedAt": "添加时间",
@@ -899,6 +901,23 @@
       "IMPORT": "批量导入",
       "CONVERSATION": "通话中提出"
     }
+  },
+  "testNumbers": {
+    "hint": "不受跨活动呼叫间隔限制的号码，用于在自己的手机上测试外呼活动。每增加一个号码，就放弃对该号码的一项客户保护。",
+    "scope": "名单内的号码可被先后运行的多个活动连续呼叫，无需等待。免打扰名单和拨打时段仍然有效，运营商自身对被叫号码的限制不受影响。名单最多 {{limit}} 个号码。",
+    "numberToAdd": "要添加的号码",
+    "numberPlaceholder": "任意格式，例如 +86 138-0013-8000",
+    "noteToAdd": "备注",
+    "notePlaceholder": "可选，例如 测试台座机",
+    "add": "添加",
+    "added": "{{number}} 已在名单中。",
+    "search": "搜索测试号码",
+    "searchPlaceholder": "搜索号码，如 138",
+    "number": "号码",
+    "note": "备注",
+    "addedAt": "添加时间",
+    "none": "名单中没有测试号码。",
+    "removeConfirm": "移除 {{number}}？之后各活动需等待呼叫间隔才会再次呼叫该号码。"
   },
   "campaign": {
     "hint": "AI 外呼名单。每个接通的电话由该号码的流程应答，后续跟进通过回电完成。",
@@ -925,12 +944,14 @@
       "DIALING": "正在外呼",
       "WAITING_WINDOW": "等待拨打时段",
       "WAITING_RETRY": "等待重试",
+      "WAITING_FREQUENCY": "被其他活动的呼叫占用",
       "AT_CAPACITY": "受容量限制暂缓"
     },
     "activitiesWhen": {
       "DIALING": "正在外呼",
       "WAITING_WINDOW": "等待拨打时段（{{when}}）",
       "WAITING_RETRY": "等待重试（{{when}}）",
+      "WAITING_FREQUENCY": "被其他活动的呼叫占用，至 {{when}}",
       "AT_CAPACITY": "受容量限制暂缓"
     },
     "when": {
@@ -988,6 +1009,7 @@
     "systemFailures": "未能触达客户的呼叫次数",
     "lastOutcome": "最近结果",
     "nextAttempt": "下次呼叫",
+    "frequencyHeld": "被其他活动的呼叫占用，至 {{when}}",
     "leadIntent": "意向",
     "allIntents": "全部意向",
     "intents": {
@@ -1025,7 +1047,9 @@
     "talkTime": "通话时长",
     "call": "通话",
     "openCall": "查看通话",
+    "testNumber": "测试号码",
     "summary": {
+      "leaveOutTestCalls": "不含测试号码的呼叫",
       "byOutcome": "按呼叫结果",
       "attempts": "呼叫次数",
       "contactsLastOutcome": "联系人（最后一次呼叫）",

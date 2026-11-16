@@ -92,6 +92,45 @@ func Canonical(raw, defaultCountryCode string) (string, error) {
 	return s, nil
 }
 
+// CanonicalPrefix reads the start of a number, for a search, as Canonical reads
+// a whole one (its rules 1 to 3, without the length check): spaces, dashes,
+// dots and round brackets are dropped; a leading "+" stays and a leading "00"
+// becomes "+"; anything else is national, loses one leading trunk "0" and gets
+// "+" and defaultCountryCode in front. "138" is "+86138" when the code is 86,
+// "010" is "+8610". Empty in, empty out (everything matches). Anything that is
+// not "+" and digits afterwards, or a national prefix with no default country
+// code, is NumberInvalid.
+func CanonicalPrefix(raw, defaultCountryCode string) (string, error) {
+	var b strings.Builder
+	for _, r := range raw {
+		switch r {
+		case ' ', '-', '.', '(', ')':
+			continue
+		}
+		b.WriteRune(r)
+	}
+	s := b.String()
+	if s == "" {
+		return "", nil
+	}
+	switch {
+	case strings.HasPrefix(s, "+"):
+	case strings.HasPrefix(s, "00"):
+		s = "+" + s[2:]
+	default:
+		if defaultCountryCode == "" {
+			return "", &Error{NumberInvalid}
+		}
+		s = "+" + defaultCountryCode + strings.TrimPrefix(s, "0")
+	}
+	for i := 1; i < len(s); i++ {
+		if s[i] < '0' || s[i] > '9' {
+			return "", &Error{NumberInvalid}
+		}
+	}
+	return s, nil
+}
+
 // IsCanonical reports whether s is already canonical E.164.
 func IsCanonical(s string) bool {
 	if len(s) < 2+minTail || len(s) > 2+maxTail || s[0] != '+' {

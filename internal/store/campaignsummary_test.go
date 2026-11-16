@@ -541,7 +541,7 @@ func TestACampaignsOutcomeSummaryCountsWhatItsCallsCameTo(t *testing.T) {
 	t.Run("every count is what was written, a direct count and the listing's total", func(t *testing.T) {
 		for _, c := range s.campaigns {
 			w := s.want[c.ID]
-			sum, err := s.cs.OutcomeSummary(ctx, c.ID)
+			sum, err := s.cs.OutcomeSummary(ctx, c.ID, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -612,7 +612,7 @@ func TestACampaignsOutcomeSummaryCountsWhatItsCallsCameTo(t *testing.T) {
 	})
 
 	t.Run("an unknown campaign is not found", func(t *testing.T) {
-		if _, err := s.cs.OutcomeSummary(ctx, uuid.Must(uuid.NewV7())); !errors.Is(err, campaign.ErrNotFound) {
+		if _, err := s.cs.OutcomeSummary(ctx, uuid.Must(uuid.NewV7()), nil); !errors.Is(err, campaign.ErrNotFound) {
 			t.Errorf("unknown campaign: %v", err)
 		}
 	})
@@ -742,7 +742,7 @@ func (s *summarySeed) summaries(t *testing.T) map[uuid.UUID]map[string]int {
 	t.Helper()
 	out := map[uuid.UUID]map[string]int{}
 	for _, c := range s.campaigns {
-		sum, err := s.cs.OutcomeSummary(context.Background(), c.ID)
+		sum, err := s.cs.OutcomeSummary(context.Background(), c.ID, nil)
 		if err != nil {
 			t.Fatal(err)
 		}

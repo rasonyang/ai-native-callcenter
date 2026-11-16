@@ -49,8 +49,10 @@ services:
       # "Dial forms").
       AICC_OUTBOUND_DIAL_FORM: ${E2E_OUTBOUND_DIAL_FORM:-E164}
       # Off, so a repeat run against the same environment is not held back by
-      # the previous run's touch of the same numbers.
-      AICC_CAMPAIGN_FREQUENCY_WINDOW: "0"
+      # the previous run's touch of the same numbers. `e2e.sh frequency` (the
+      # test-number case, internal/e2e/frequency.go) recreates the application
+      # with E2E_CAMPAIGN_FREQUENCY_WINDOW set, then with it empty again.
+      AICC_CAMPAIGN_FREQUENCY_WINDOW: ${E2E_CAMPAIGN_FREQUENCY_WINDOW:-0}
       # Open all day, so a run never waits for the callee's local morning.
       AICC_OUTBOUND_HOURS: 00:00-24:00
       # Capacity tests (make e2e-capacity, internal/e2e/capacity*.go): e2e.sh

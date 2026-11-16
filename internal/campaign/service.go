@@ -120,7 +120,7 @@ type Repository interface {
 	ListAttempts(ctx context.Context, campaignID uuid.UUID, f AttemptFilter) ([]Attempt, int64, error)
 	// OutcomeSummary counts what a campaign's calls came to, in one snapshot;
 	// ErrNotFound when there is no such campaign.
-	OutcomeSummary(ctx context.Context, campaignID uuid.UUID) (OutcomeSummary, error)
+	OutcomeSummary(ctx context.Context, campaignID uuid.UUID, isTestNumber *bool) (OutcomeSummary, error)
 }
 
 // Controller moves a campaign between statuses. The API asks, the controller
@@ -372,8 +372,8 @@ func (s *Service) ListAttempts(ctx context.Context, id uuid.UUID, f AttemptFilte
 // OutcomeSummary reads what a campaign's calls came to: attempts by outcome,
 // contacts by last outcome and by lead, the two kinds of opt-out and the
 // callbacks its leads filed.
-func (s *Service) OutcomeSummary(ctx context.Context, id uuid.UUID) (OutcomeSummary, error) {
-	return s.repo.OutcomeSummary(ctx, id)
+func (s *Service) OutcomeSummary(ctx context.Context, id uuid.UUID, isTestNumber *bool) (OutcomeSummary, error) {
+	return s.repo.OutcomeSummary(ctx, id, isTestNumber)
 }
 
 // NewService builds the service. A nil controller means RepoController.

@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { DataTable, TBody, THead, Td, Th, Tr } from '@/components/table'
@@ -14,14 +14,45 @@ import { describeError } from '@/lib/errors'
  */
 export function CampaignOutcomes({ campaign }: { campaign: Campaign }) {
   const { t } = useTranslation()
-  const { data, isPending, isError, error } = useCampaignOutcomeSummary(campaign.id)
+  // Kept in component state: no similar toggle on this screen is remembered.
+  const [isTestCallsLeftOut, setIsTestCallsLeftOut] = useState(false)
+  const { data, isPending, isError, error } = useCampaignOutcomeSummary(
+    campaign.id,
+    isTestCallsLeftOut ? { isTestNumber: false } : {},
+  )
 
-  if (isPending) return <p className="text-xs text-muted-foreground">{t('common.loading')}</p>
-  if (isError || !data) return <p className="text-xs text-muted-foreground">{describeError(error, t)}</p>
+  const toggle = (
+    <label className="mb-3 flex w-fit items-center gap-2 text-sm">
+      <input
+        type="checkbox"
+        checked={isTestCallsLeftOut}
+        onChange={(e) => setIsTestCallsLeftOut(e.target.checked)}
+      />
+      {t('campaign.summary.leaveOutTestCalls')}
+    </label>
+  )
+  if (isPending) {
+    return (
+      <>
+        {toggle}
+        <p className="text-xs text-muted-foreground">{t('common.loading')}</p>
+      </>
+    )
+  }
+  if (isError || !data) {
+    return (
+      <>
+        {toggle}
+        <p className="text-xs text-muted-foreground">{describeError(error, t)}</p>
+      </>
+    )
+  }
 
   const lastOutcome = new Map(data.contactsByLastOutcome.map((row) => [row.outcome, row.count]))
 
   return (
+    <>
+    {toggle}
     <div className="grid gap-4 xl:grid-cols-2">
       <Section title={t('campaign.summary.byOutcome')}>
         <DataTable>
@@ -106,6 +137,7 @@ export function CampaignOutcomes({ campaign }: { campaign: Campaign }) {
         </Section>
       </div>
     </div>
+    </>
   )
 }
 

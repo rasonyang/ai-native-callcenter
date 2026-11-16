@@ -115,7 +115,7 @@ func (d *DialerStore) HeldByFrequency(ctx context.Context, campaignID uuid.UUID,
 // Defer moves contacts to a later due time. A contact that is no longer
 // waiting (claimed for a dial, finished) or whose time is already later is
 // left alone.
-func (d *DialerStore) Defer(ctx context.Context, ids []uuid.UUID, at []time.Time) error {
+func (d *DialerStore) Defer(ctx context.Context, ids []uuid.UUID, at []time.Time, isHeld bool) error {
 	if len(ids) == 0 {
 		return nil
 	}
@@ -123,7 +123,7 @@ func (d *DialerStore) Defer(ctx context.Context, ids []uuid.UUID, at []time.Time
 	for i, t := range at {
 		ats[i] = ts(t)
 	}
-	_, err := d.q.DeferContacts(ctx, queries.DeferContactsParams{Ids: ids, Ats: ats})
+	_, err := d.q.DeferContacts(ctx, queries.DeferContactsParams{Ids: ids, Ats: ats, IsHeld: isHeld})
 	return err
 }
 
@@ -144,6 +144,32 @@ func (d *DialerStore) Pending(ctx context.Context, campaignID uuid.UUID, now tim
 		ActiveTotal: int(r.ActiveTotal), DueNow: int(r.DueNow), AllTotal: int(r.AllTotal),
 		NextFuture: timeOrNil(r.NextFuture),
 	}, nil
+}
+
+// FrequencyHold is when the cross-campaign frequency window stops holding the
+// contact back, nil when no other campaign's touch within the window does (a
+// number on the list of test numbers is never held).
+func (d *DialerStore) FrequencyHold(ctx context.Context, contactID uuid.UUID, now time.Time,
+	frequency time.Duration) (*time.Time, error) {
+	r, err := d.q.ContactFrequencyTouch(ctx, queries.ContactFrequencyTouchParams{
+		ContactID: contactID, Now: ts(now), FrequencySec: frequency.Seconds(),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("frequency hold of contact %s: %w", contactID, err)
+	}
+	if !r.Valid {
+		return nil, nil
+	}
+	end := r.Time.Add(frequency)
+	return &end, nil
+}
+
+// RearmFrequencyHeld makes the contacts of RUNNING campaigns that the frequency
+// window deferred (and only those) due at now, for a number that joined the
+// list of test numbers.
+func (d *DialerStore) RearmFrequencyHeld(ctx context.Context, now time.Time) error {
+	_, err := d.q.RearmFrequencyHeld(ctx, ts(now))
+	return err
 }
 
 // EarliestPending is the ACTIVE contact that is due first, nil if none waits.
@@ -285,14 +311,14 @@ func (c *CampaignStore) ListAttempts(ctx context.Context, campaignID uuid.UUID,
 		f.Limit = 50
 	}
 	rows, err := c.q.ListCampaignAttempts(ctx, queries.ListCampaignAttemptsParams{
-		CampaignID: campaignID, ContactID: f.ContactID, Outcome: string(f.Outcome),
+		CampaignID: campaignID, ContactID: f.ContactID, Outcome: string(f.Outcome), IsTestNumber: f.IsTestNumber,
 		PageLimit: int32(f.Limit), PageOffset: int32(f.Offset),
 	})
 	if err != nil {
 		return nil, 0, fmt.Errorf("list attempts of %s: %w", campaignID, err)
 	}
 	total, err := c.q.CountCampaignAttempts(ctx, queries.CountCampaignAttemptsParams{
-		CampaignID: campaignID, ContactID: f.ContactID, Outcome: string(f.Outcome),
+		CampaignID: campaignID, ContactID: f.ContactID, Outcome: string(f.Outcome), IsTestNumber: f.IsTestNumber,
 	})
 	if err != nil {
 		return nil, 0, fmt.Errorf("count attempts of %s: %w", campaignID, err)

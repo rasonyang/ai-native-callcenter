@@ -57,6 +57,18 @@ func (d *Dialer) pass(ctx context.Context) {
 			d.touch(c.ID)
 		}
 	}
+	if d.testDirty {
+		d.testDirty = false
+		// A number joined the list of test numbers: contacts of running
+		// campaigns that were waiting out the frequency window for it are due
+		// again. They are judged like any due contact in this pass.
+		if d.cfg.Frequency > 0 {
+			if err := d.st.RearmFrequencyHeld(ctx, now); err != nil {
+				d.log.Error("dialer: cannot re-arm contacts held for a test number", "error", err)
+				d.testDirty = true
+			}
+		}
+	}
 	for _, c := range running {
 		if d.rearm[c.ID] {
 			delete(d.rearm, c.ID)
@@ -291,7 +303,7 @@ func (d *Dialer) refill(ctx context.Context, c campaign.Campaign, b *bucket, now
 				}
 				ids, ats = append(ids, h.ContactID), append(ats, at)
 			}
-			if err := d.st.Defer(ctx, ids, ats); err != nil {
+			if err := d.st.Defer(ctx, ids, ats, true); err != nil {
 				return moved, err
 			}
 			moved = true
@@ -318,7 +330,7 @@ func (d *Dialer) refill(ctx context.Context, c campaign.Campaign, b *bucket, now
 			b.ready = append(b.ready, ct)
 		}
 		if len(ids) > 0 {
-			if err := d.st.Defer(ctx, ids, ats); err != nil {
+			if err := d.st.Defer(ctx, ids, ats, false); err != nil {
 				return moved, err
 			}
 			moved = true
@@ -704,9 +716,7 @@ func (d *Dialer) account(ctx context.Context, c campaign.Campaign, b *bucket, no
 	default:
 		p.Activity = campaign.ActivityWaitingRetry
 		if first, err := d.st.EarliestPending(ctx, c.ID); err == nil && first != nil {
-			if sched, ok := d.scheduleFor(c, *first); ok && !sched.IsOpen(now) {
-				p.Activity = campaign.ActivityWaitingWindow
-			}
+			p.Activity = d.waitingActivity(ctx, c, *first, now)
 		}
 	}
 	d.progress[c.ID] = p
@@ -714,6 +724,48 @@ func (d *Dialer) account(ctx context.Context, c campaign.Campaign, b *bucket, no
 		return time.Time{}
 	}
 	return *pending.NextFuture
+}
+
+// waitingActivity says why a campaign with nothing in flight and nothing at
+// capacity is waiting, judged by the contact it would dial first. A hold by
+// another campaign's recent call (the frequency window) and a closed calling
+// window each end at a time; the one that ends later is what the campaign is
+// waiting for, and a tie goes to the frequency window, which is the reason an
+// operator can do something about (the list of test numbers). Neither: the
+// contact's own retry time has not come.
+func (d *Dialer) waitingActivity(ctx context.Context, c campaign.Campaign, first campaign.Contact, now time.Time) campaign.Activity {
+	sched, hasSchedule := d.scheduleFor(c, first)
+	windowOpensAt := now
+	if hasSchedule && !sched.IsOpen(now) {
+		if at, found := sched.NextStart(now); found {
+			windowOpensAt = at
+		} else {
+			// No opening within reach: the window is what holds it.
+			return campaign.ActivityWaitingWindow
+		}
+	}
+	if d.cfg.Frequency > 0 {
+		end, err := d.st.FrequencyHold(ctx, first.ID, now, d.cfg.Frequency)
+		if err != nil {
+			d.log.Error("dialer: cannot read a contact's frequency hold", "campaignId", c.ID, "contactId", first.ID, "error", err)
+		} else if end != nil && end.After(now) && !end.Before(windowOpensAt) {
+			// The hold binds unless the contact's own retry time is later than
+			// when it could be dialled once the hold is over.
+			dialAt := *end
+			if hasSchedule {
+				if open, found := sched.NextOpen(dialAt); found {
+					dialAt = open
+				}
+			}
+			if first.NextAttemptAt == nil || !first.NextAttemptAt.After(dialAt.Add(time.Second)) {
+				return campaign.ActivityWaitingFrequency
+			}
+		}
+	}
+	if windowOpensAt.After(now) {
+		return campaign.ActivityWaitingWindow
+	}
+	return campaign.ActivityWaitingRetry
 }
 
 // publish replaces the read side with the account of each running campaign,

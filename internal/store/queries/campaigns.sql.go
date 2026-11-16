@@ -9,11 +9,12 @@ import (
 	"context"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const armCampaignContacts = `-- name: ArmCampaignContacts :execrows
 UPDATE campaign_contacts
-SET next_attempt_at = now(), updated_at = now()
+SET next_attempt_at = now(), is_frequency_held = false, updated_at = now()
 WHERE campaign_id = $1 AND status = 'ACTIVE' AND next_attempt_at IS NULL
 `
 
@@ -31,8 +32,14 @@ const campaignAttemptOutcomes = `-- name: CampaignAttemptOutcomes :many
 SELECT outcome, count(*)::bigint AS n
 FROM campaign_attempts
 WHERE campaign_id = $1 AND state = 'FINISHED'
+  AND ($2::boolean IS NULL OR is_test_number = $2::boolean)
 GROUP BY outcome
 `
+
+type CampaignAttemptOutcomesParams struct {
+	CampaignID   uuid.UUID `json:"campaignId"`
+	IsTestNumber *bool     `json:"isTestNumber"`
+}
 
 type CampaignAttemptOutcomesRow struct {
 	Outcome *string `json:"outcome"`
@@ -40,8 +47,8 @@ type CampaignAttemptOutcomesRow struct {
 }
 
 // Only a FINISHED attempt has an outcome (ck_campaign_attempts_finished).
-func (q *Queries) CampaignAttemptOutcomes(ctx context.Context, campaignID uuid.UUID) ([]CampaignAttemptOutcomesRow, error) {
-	rows, err := q.db.Query(ctx, campaignAttemptOutcomes, campaignID)
+func (q *Queries) CampaignAttemptOutcomes(ctx context.Context, arg CampaignAttemptOutcomesParams) ([]CampaignAttemptOutcomesRow, error) {
+	rows, err := q.db.Query(ctx, campaignAttemptOutcomes, arg.CampaignID, arg.IsTestNumber)
 	if err != nil {
 		return nil, err
 	}
@@ -65,8 +72,14 @@ SELECT cb.status, count(*)::bigint AS n
 FROM callbacks cb
 JOIN campaign_attempts a ON a.call_id = cb.call_id
 WHERE a.campaign_id = $1
+  AND ($2::boolean IS NULL OR a.is_test_number = $2::boolean)
 GROUP BY cb.status
 `
+
+type CampaignCallbackStatusesParams struct {
+	CampaignID   uuid.UUID `json:"campaignId"`
+	IsTestNumber *bool     `json:"isTestNumber"`
+}
 
 type CampaignCallbackStatusesRow struct {
 	Status string `json:"status"`
@@ -76,8 +89,8 @@ type CampaignCallbackStatusesRow struct {
 // The callbacks the campaign's calls filed, by status. A campaign call files
 // at most one, for a HIGH lead (InsertCallbackForCall), under its own call id,
 // so they are found through the attempts' call ids and never by phone number.
-func (q *Queries) CampaignCallbackStatuses(ctx context.Context, campaignID uuid.UUID) ([]CampaignCallbackStatusesRow, error) {
-	rows, err := q.db.Query(ctx, campaignCallbackStatuses, campaignID)
+func (q *Queries) CampaignCallbackStatuses(ctx context.Context, arg CampaignCallbackStatusesParams) ([]CampaignCallbackStatusesRow, error) {
+	rows, err := q.db.Query(ctx, campaignCallbackStatuses, arg.CampaignID, arg.IsTestNumber)
 	if err != nil {
 		return nil, err
 	}
@@ -130,11 +143,19 @@ func (q *Queries) CampaignContactCounts(ctx context.Context, campaignIds []uuid.
 }
 
 const campaignContactGroups = `-- name: CampaignContactGroups :many
-SELECT status, last_outcome, lead_intent, count(*)::bigint AS n
-FROM campaign_contacts
-WHERE campaign_id = $1
-GROUP BY status, last_outcome, lead_intent
+SELECT c.status, c.last_outcome, c.lead_intent, count(*)::bigint AS n
+FROM campaign_contacts c
+LEFT JOIN campaign_attempts la ON la.id = c.last_attempt_id
+WHERE c.campaign_id = $1
+  AND ($2::boolean IS NULL
+       OR COALESCE(la.is_test_number, false) = $2::boolean)
+GROUP BY c.status, c.last_outcome, c.lead_intent
 `
+
+type CampaignContactGroupsParams struct {
+	CampaignID   uuid.UUID `json:"campaignId"`
+	IsTestNumber *bool     `json:"isTestNumber"`
+}
 
 type CampaignContactGroupsRow struct {
 	Status      string  `json:"status"`
@@ -148,8 +169,8 @@ type CampaignContactGroupsRow struct {
 // columns the listings filter on, so a count is the total of a listing with
 // the same filter. The contacts by status, last_outcome and lead_intent
 // (CountCampaignContacts); the attempts by outcome (CountCampaignAttempts).
-func (q *Queries) CampaignContactGroups(ctx context.Context, campaignID uuid.UUID) ([]CampaignContactGroupsRow, error) {
-	rows, err := q.db.Query(ctx, campaignContactGroups, campaignID)
+func (q *Queries) CampaignContactGroups(ctx context.Context, arg CampaignContactGroupsParams) ([]CampaignContactGroupsRow, error) {
+	rows, err := q.db.Query(ctx, campaignContactGroups, arg.CampaignID, arg.IsTestNumber)
 	if err != nil {
 		return nil, err
 	}
@@ -188,23 +209,30 @@ func (q *Queries) CancelCampaign(ctx context.Context, id uuid.UUID) (int64, erro
 }
 
 const countCampaignContacts = `-- name: CountCampaignContacts :one
-SELECT count(*) FROM campaign_contacts
-WHERE campaign_id = $1
-  AND ($2::text = '' OR status = $2)
-  AND ($3::text = '' OR lead_intent = $3)
-  AND ($4::text = '' OR last_outcome = $4)
+SELECT count(*) FROM campaign_contacts c
+LEFT JOIN campaign_attempts la ON la.id = c.last_attempt_id
+WHERE c.campaign_id = $1
+  AND ($2::boolean IS NULL
+       OR COALESCE(la.is_test_number, false) = $2::boolean)
+  AND ($3::text = '' OR c.status = $3)
+  AND ($4::text = '' OR c.lead_intent = $4)
+  AND ($5::text = '' OR c.last_outcome = $5)
 `
 
 type CountCampaignContactsParams struct {
-	CampaignID  uuid.UUID `json:"campaignId"`
-	Status      string    `json:"status"`
-	LeadIntent  string    `json:"leadIntent"`
-	LastOutcome string    `json:"lastOutcome"`
+	CampaignID   uuid.UUID `json:"campaignId"`
+	IsTestNumber *bool     `json:"isTestNumber"`
+	Status       string    `json:"status"`
+	LeadIntent   string    `json:"leadIntent"`
+	LastOutcome  string    `json:"lastOutcome"`
 }
 
+// The test-number flag of a contact is its latest finished attempt's
+// (last_attempt_id); a contact no attempt has finished for is not flagged.
 func (q *Queries) CountCampaignContacts(ctx context.Context, arg CountCampaignContactsParams) (int64, error) {
 	row := q.db.QueryRow(ctx, countCampaignContacts,
 		arg.CampaignID,
+		arg.IsTestNumber,
 		arg.Status,
 		arg.LeadIntent,
 		arg.LastOutcome,
@@ -494,27 +522,59 @@ func (q *Queries) InsertCampaignContacts(ctx context.Context, arg InsertCampaign
 }
 
 const listCampaignContacts = `-- name: ListCampaignContacts :many
-SELECT id, campaign_id, number_e164, number_raw, time_zone, slots, status, attempts, system_failures, next_attempt_at, last_outcome, lead_intent, lead_notes, created_at, updated_at, last_attempt_id, last_call_id FROM campaign_contacts
-WHERE campaign_id = $1
-  AND ($2::text = '' OR status = $2)
-  AND ($3::text = '' OR lead_intent = $3)
-  AND ($4::text = '' OR last_outcome = $4)
-ORDER BY created_at, id
-LIMIT $6 OFFSET $5
+SELECT c.id, c.campaign_id, c.number_e164, c.number_raw, c.time_zone, c.slots, c.status, c.attempts, c.system_failures, c.next_attempt_at, c.last_outcome, c.lead_intent, c.lead_notes, c.created_at, c.updated_at, c.last_attempt_id, c.last_call_id, c.is_frequency_held, h.last_touch::timestamptz AS last_touch
+FROM campaign_contacts c
+LEFT JOIN LATERAL (
+    SELECT max(a.started_at) AS last_touch
+    FROM campaign_attempts a
+    WHERE c.status = 'ACTIVE'
+      AND a.number_e164 = c.number_e164
+      AND a.campaign_id <> c.campaign_id
+      AND a.is_touched
+      AND a.started_at > $1::timestamptz
+          - make_interval(secs => $2::float8)
+      AND NOT EXISTS (SELECT 1 FROM test_numbers t WHERE t.number_e164 = c.number_e164)
+) h ON true
+LEFT JOIN campaign_attempts la ON la.id = c.last_attempt_id
+WHERE c.campaign_id = $3
+  AND ($4::boolean IS NULL
+       OR COALESCE(la.is_test_number, false) = $4::boolean)
+  AND ($5::text = '' OR c.status = $5)
+  AND ($6::text = '' OR c.lead_intent = $6)
+  AND ($7::text = '' OR c.last_outcome = $7)
+ORDER BY c.created_at, c.id
+LIMIT $9 OFFSET $8
 `
 
 type ListCampaignContactsParams struct {
-	CampaignID  uuid.UUID `json:"campaignId"`
-	Status      string    `json:"status"`
-	LeadIntent  string    `json:"leadIntent"`
-	LastOutcome string    `json:"lastOutcome"`
-	PageOffset  int32     `json:"pageOffset"`
-	PageLimit   int32     `json:"pageLimit"`
+	Now          pgtype.Timestamptz `json:"now"`
+	FrequencySec float64            `json:"frequencySec"`
+	CampaignID   uuid.UUID          `json:"campaignId"`
+	IsTestNumber *bool              `json:"isTestNumber"`
+	Status       string             `json:"status"`
+	LeadIntent   string             `json:"leadIntent"`
+	LastOutcome  string             `json:"lastOutcome"`
+	PageOffset   int32              `json:"pageOffset"`
+	PageLimit    int32              `json:"pageLimit"`
 }
 
-func (q *Queries) ListCampaignContacts(ctx context.Context, arg ListCampaignContactsParams) ([]CampaignContact, error) {
+type ListCampaignContactsRow struct {
+	CampaignContact CampaignContact    `json:"campaignContact"`
+	LastTouch       pgtype.Timestamptz `json:"lastTouch"`
+}
+
+// last_touch is the latest touch of another campaign within the frequency
+// window on an ACTIVE contact's number, the time its hold ends minus the
+// window; null when nothing holds the contact, and always null for a number on
+// the list of test numbers. The caller says the hold binds only when the
+// contact carries is_frequency_held or is not due after the hold ends. Judged at read time from the same facts the dialer
+// uses (DueCampaignContacts), so it is never stored.
+func (q *Queries) ListCampaignContacts(ctx context.Context, arg ListCampaignContactsParams) ([]ListCampaignContactsRow, error) {
 	rows, err := q.db.Query(ctx, listCampaignContacts,
+		arg.Now,
+		arg.FrequencySec,
 		arg.CampaignID,
+		arg.IsTestNumber,
 		arg.Status,
 		arg.LeadIntent,
 		arg.LastOutcome,
@@ -525,27 +585,29 @@ func (q *Queries) ListCampaignContacts(ctx context.Context, arg ListCampaignCont
 		return nil, err
 	}
 	defer rows.Close()
-	items := []CampaignContact{}
+	items := []ListCampaignContactsRow{}
 	for rows.Next() {
-		var i CampaignContact
+		var i ListCampaignContactsRow
 		if err := rows.Scan(
-			&i.ID,
-			&i.CampaignID,
-			&i.NumberE164,
-			&i.NumberRaw,
-			&i.TimeZone,
-			&i.Slots,
-			&i.Status,
-			&i.Attempts,
-			&i.SystemFailures,
-			&i.NextAttemptAt,
-			&i.LastOutcome,
-			&i.LeadIntent,
-			&i.LeadNotes,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-			&i.LastAttemptID,
-			&i.LastCallID,
+			&i.CampaignContact.ID,
+			&i.CampaignContact.CampaignID,
+			&i.CampaignContact.NumberE164,
+			&i.CampaignContact.NumberRaw,
+			&i.CampaignContact.TimeZone,
+			&i.CampaignContact.Slots,
+			&i.CampaignContact.Status,
+			&i.CampaignContact.Attempts,
+			&i.CampaignContact.SystemFailures,
+			&i.CampaignContact.NextAttemptAt,
+			&i.CampaignContact.LastOutcome,
+			&i.CampaignContact.LeadIntent,
+			&i.CampaignContact.LeadNotes,
+			&i.CampaignContact.CreatedAt,
+			&i.CampaignContact.UpdatedAt,
+			&i.CampaignContact.LastAttemptID,
+			&i.CampaignContact.LastCallID,
+			&i.CampaignContact.IsFrequencyHeld,
+			&i.LastTouch,
 		); err != nil {
 			return nil, err
 		}

@@ -44,6 +44,18 @@ func (stubDNC) List(context.Context, store.DNCFilter) ([]store.DNCNumber, int64,
 	return nil, 0, nil
 }
 
+// stubTestNumbers is the list of test numbers for the tests that only need the
+// routes mounted.
+type stubTestNumbers struct{}
+
+func (stubTestNumbers) Add(context.Context, string, string, *uuid.UUID) (store.TestNumber, bool, error) {
+	return store.TestNumber{}, true, nil
+}
+func (stubTestNumbers) Remove(context.Context, string) error { return nil }
+func (stubTestNumbers) List(context.Context, store.TestNumberFilter) ([]store.TestNumber, int64, error) {
+	return nil, 0, nil
+}
+
 // countingSwitch is the switch as the dialer sees it: it records every
 // originate and accepts everything.
 type countingSwitch struct {

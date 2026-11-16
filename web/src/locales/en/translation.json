@@ -54,7 +54,8 @@
     "webhooks": "Webhooks",
     "keys": "API Keys",
     "campaigns": "Campaigns",
-    "dnc": "Do not call"
+    "dnc": "Do not call",
+    "testNumbers": "Test numbers"
   },
   "roles": {
     "AGENT": "Agent",
@@ -121,6 +122,7 @@
     "TRANSCRIPTION_DISABLED": "Post-call transcription is not enabled on this deployment",
     "USER_DATA_TOO_LARGE": "The call has no room for this business data: at most {{maxKeys}} keys, {{maxValueBytes}} bytes each. Nothing was written.",
     "NUMBER_ON_DNC": "That number is on the do-not-call list. No call was placed.",
+    "TEST_NUMBER_LIMIT_REACHED": "The list of test numbers is full ({{limit}} numbers). Remove one before adding another.",
     "DID_CHANNELS_EXHAUSTED": "That DID has reached its outbound line limit. No call was placed.",
     "DID_NOT_OUTBOUND": "That number is not allowed to dial out, so it cannot be the caller id. Allow outbound on the number first. No call was placed.",
     "OUTBOUND_NOT_CONFIGURED": "This deployment cannot place outbound calls: AICC_OUTBOUND_ENDPOINT is not set. Connect a carrier (deploy/carrier.md), then try again. Nothing was dialled.",
@@ -891,8 +893,8 @@
     "numberPlaceholder": "Any format, for example +86 138-0013-8000",
     "add": "Add",
     "added": "{{number}} is on the list.",
-    "search": "Search by prefix",
-    "searchPlaceholder": "Starts with, for example +86138",
+    "search": "Search numbers",
+    "searchPlaceholder": "Search by number, e.g. 138",
     "number": "Number",
     "source": "Source",
     "addedAt": "Added",
@@ -903,6 +905,23 @@
       "IMPORT": "Imported",
       "CONVERSATION": "Asked on a call"
     }
+  },
+  "testNumbers": {
+    "hint": "Numbers exempt from the cross-campaign frequency window, for testing campaigns on your own phones. Every entry gives up a protection that exists for customers.",
+    "scope": "A listed number can be dialled by consecutive campaigns without waiting. The do-not-call list still applies, calling hours still apply, and a carrier's own per-callee limits are not affected. The list holds at most {{limit}} numbers.",
+    "numberToAdd": "Number to add",
+    "numberPlaceholder": "Any format, for example +86 138-0013-8000",
+    "noteToAdd": "Note",
+    "notePlaceholder": "Optional, for example QA desk phone",
+    "add": "Add",
+    "added": "{{number}} is on the list.",
+    "search": "Search test numbers",
+    "searchPlaceholder": "Search by number, e.g. 138",
+    "number": "Number",
+    "note": "Note",
+    "addedAt": "Added",
+    "none": "No test numbers.",
+    "removeConfirm": "Remove {{number}}? Campaigns will wait for the frequency window before dialling it again."
   },
   "campaign": {
     "hint": "AI outbound lists. Each answered call talks to the number's flow; follow-up is by callback.",
@@ -929,12 +948,14 @@
       "DIALING": "dialling",
       "WAITING_WINDOW": "waiting for calling hours",
       "WAITING_RETRY": "waiting to retry",
+      "WAITING_FREQUENCY": "held by another campaign's call",
       "AT_CAPACITY": "held back at capacity"
     },
     "activitiesWhen": {
       "DIALING": "dialling",
       "WAITING_WINDOW": "waiting for calling hours ({{when}})",
       "WAITING_RETRY": "waiting to retry ({{when}})",
+      "WAITING_FREQUENCY": "held by another campaign's call until {{when}}",
       "AT_CAPACITY": "held back at capacity"
     },
     "when": {
@@ -992,6 +1013,7 @@
     "systemFailures": "Attempts that never reached the customer",
     "lastOutcome": "Last outcome",
     "nextAttempt": "Next attempt",
+    "frequencyHeld": "held by another campaign's call until {{when}}",
     "leadIntent": "Lead intent",
     "allIntents": "All intents",
     "intents": {
@@ -1029,7 +1051,9 @@
     "talkTime": "Talk time",
     "call": "Call",
     "openCall": "Open call",
+    "testNumber": "test number",
     "summary": {
+      "leaveOutTestCalls": "Leave out test calls",
       "byOutcome": "By outcome",
       "attempts": "Attempts",
       "contactsLastOutcome": "Contacts (last call)",

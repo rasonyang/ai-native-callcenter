@@ -171,6 +171,9 @@ func TestScenarioKeysStayApartInEveryForm(t *testing.T) {
 		for _, cs := range K3.CampaignCases() {
 			check("K3 "+cs.ID, K3.Region.DialKey(cs, form), K3.Region)
 		}
+		for _, cs := range FrequencyCases {
+			check(FrequencyScenarioID+" "+cs.ID, FrequencyRegion.DialKey(cs, form), FrequencyRegion)
+		}
 		// Every dialled key is in the form's file; the file holds nothing else
 		// but the direct calls and the smoke number.
 		s := loadScenarioFor(t, form)

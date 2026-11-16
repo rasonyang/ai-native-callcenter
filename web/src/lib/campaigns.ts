@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query'
+import { keepPreviousData, useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query'
 import type { TFunction } from 'i18next'
 
 import type { components } from '@/generated/api'
@@ -66,7 +66,7 @@ export const IMPORT_CHUNK_SIZE = 5000
 
 // --- REST -----------------------------------------------------------------
 
-function query(params: Record<string, string | number | undefined>): string {
+function query(params: Record<string, string | number | boolean | undefined>): string {
   const search = new URLSearchParams()
   for (const [key, value] of Object.entries(params)) {
     if (value !== undefined && value !== '') search.set(key, String(value))
@@ -85,6 +85,8 @@ export interface ContactFilter {
   status?: CampaignContactStatus
   leadIntent?: CampaignLeadIntent
   lastOutcome?: CampaignOutcome
+  /** Absent: all; false leaves test-number contacts out; true keeps only them. */
+  isTestNumber?: boolean
   limit?: number
   offset?: number
 }
@@ -92,8 +94,14 @@ export interface ContactFilter {
 export interface AttemptFilter {
   contactId?: string
   outcome?: CampaignOutcome
+  isTestNumber?: boolean
   limit?: number
   offset?: number
+}
+
+/** isTestNumber=false leaves test calls out of every count (absent: all). */
+export interface SummaryFilter {
+  isTestNumber?: boolean
 }
 
 export const campaignApi = {
@@ -123,7 +131,8 @@ export const campaignApi = {
     request<components['schemas']['CampaignAttemptList']>(
       `/campaigns/${id}/attempts${query({ ...filter })}`,
     ),
-  outcomeSummary: (id: string) => request<CampaignOutcomeSummary>(`/campaigns/${id}/outcome-summary`),
+  outcomeSummary: (id: string, filter: SummaryFilter = {}) =>
+    request<CampaignOutcomeSummary>(`/campaigns/${id}/outcome-summary${query({ ...filter })}`),
 }
 
 // --- Cache keys and queries -------------------------------------------------
@@ -180,10 +189,12 @@ export function useCampaignAttempts(id: string, filter: AttemptFilter) {
  * it is fetched only while it is on screen and refetched when the campaign's
  * counters move (applyCampaignUpdated).
  */
-export function useCampaignOutcomeSummary(id: string) {
+export function useCampaignOutcomeSummary(id: string, filter: SummaryFilter = {}) {
   return useQuery({
-    queryKey: outcomeSummaryKey(id),
-    queryFn: () => campaignApi.outcomeSummary(id),
+    queryKey: [...outcomeSummaryKey(id), filter],
+    queryFn: () => campaignApi.outcomeSummary(id, filter),
+    // Toggling the filter keeps the old counts on screen until the new ones arrive.
+    placeholderData: keepPreviousData,
   })
 }
 

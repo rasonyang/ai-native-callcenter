@@ -1,6 +1,6 @@
 import {
   Activity, BarChart3, Bot, BookUser, FileClock, Headphones, KeyRound, LayoutDashboard,
-  ListChecks, Megaphone, Phone, PhoneOff, PhoneCall, PhoneForwarded, ScrollText, ShieldCheck, Users, Webhook,
+  ListChecks, Megaphone, Phone, FlaskConical, PhoneOff, PhoneCall, PhoneForwarded, ScrollText, ShieldCheck, Users, Webhook,
 } from 'lucide-react'
 
 
@@ -81,6 +81,8 @@ export const NAV: NavGroup[] = [
       { to: '/admin/campaigns', labelKey: 'nav.campaigns', icon: Megaphone, roles: ['ADMIN', 'SUPERVISOR'], isReady: true },
       { to: '/admin/callbacks', labelKey: 'nav.callbacks', icon: PhoneForwarded, roles: ['ADMIN', 'SUPERVISOR'], isReady: true },
       { to: '/admin/dnc', labelKey: 'nav.dnc', icon: PhoneOff, roles: ['ADMIN', 'SUPERVISOR'], isReady: true },
+      // Numbers exempt from the cross-campaign frequency window; testnumbers:read and :write go to supervisors and administrators.
+      { to: '/admin/test-numbers', labelKey: 'nav.testNumbers', icon: FlaskConical, roles: ['ADMIN', 'SUPERVISOR'], isReady: true },
     ],
   },
   {

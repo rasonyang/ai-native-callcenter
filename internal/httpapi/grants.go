@@ -66,6 +66,8 @@ var supervisorScopes = sorted(append([]string{
 	api.ScopeHistoryReadAll,
 	api.ScopeQualityReview,
 	api.ScopeReportsRead,
+	api.ScopeTestnumbersRead,
+	api.ScopeTestnumbersWrite,
 }, agentScopes...))
 
 func sorted(s []string) []string {
