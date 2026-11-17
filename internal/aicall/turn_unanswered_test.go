@@ -172,11 +172,25 @@ func (r *turnRig) timerOpen() bool {
 	return !r.session.timer.speechStoppedAt.IsZero()
 }
 
-// callerStops is speech_stopped, waited for until the measurement is open.
+// turnRigMinWait is how long callerStops keeps the measurement open before it
+// returns.
+const turnRigMinWait = 2 * time.Millisecond
+
+// callerStops is speech_stopped, waited for until the measurement is open and
+// at least 2 ms old. A real provider never answers within a millisecond of the
+// caller's last word, and the first-audio instrument discards a 0 ms sample, so
+// a delta sent in the same millisecond would leave that histogram without its
+// sample.
 func (r *turnRig) callerStops(t *testing.T) {
 	t.Helper()
 	r.send(provider.EventTypeSpeechStopped)
 	waitFor(t, "the measurement to open", r.timerOpen)
+	r.session.mu.Lock()
+	stoppedAt := r.session.timer.speechStoppedAt
+	r.session.mu.Unlock()
+	if wait := turnRigMinWait - time.Since(stoppedAt); wait > 0 {
+		time.Sleep(wait)
+	}
 }
 
 // want checks the log lines and the counters together.
