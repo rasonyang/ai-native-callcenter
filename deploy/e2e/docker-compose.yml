@@ -53,6 +53,12 @@ services:
       # test-number case, internal/e2e/frequency.go) recreates the application
       # with E2E_CAMPAIGN_FREQUENCY_WINDOW set, then with it empty again.
       AICC_CAMPAIGN_FREQUENCY_WINDOW: ${E2E_CAMPAIGN_FREQUENCY_WINDOW:-0}
+      # Off (0), so smoke, campaign and capacity runs, which dial one number
+      # many times, are never held by the daily cap. `e2e.sh dailycap` (the
+      # daily cap case, internal/e2e/dailycap.go) recreates the application
+      # with E2E_OUTBOUND_MAX_DIALS_PER_NUMBER_PER_DAY=3, then with it empty
+      # again.
+      AICC_OUTBOUND_MAX_DIALS_PER_NUMBER_PER_DAY: ${E2E_OUTBOUND_MAX_DIALS_PER_NUMBER_PER_DAY:-0}
       # Open all day, so a run never waits for the callee's local morning.
       AICC_OUTBOUND_HOURS: 00:00-24:00
       # Capacity tests (make e2e-capacity, internal/e2e/capacity*.go): e2e.sh

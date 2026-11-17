@@ -177,6 +177,9 @@ func TestScenarioKeysStayApartInEveryForm(t *testing.T) {
 		for _, cs := range CarrierTimeoutCases {
 			check(CarrierTimeoutScenarioID+" "+cs.ID, CarrierTimeoutRegion.DialKey(cs, form), CarrierTimeoutRegion)
 		}
+		for _, cs := range DailyCapCases {
+			check(DailyCapScenarioID+" "+cs.ID, DailyCapRegion.DialKey(cs, form), DailyCapRegion)
+		}
 		// Every dialled key is in the form's file; the file holds nothing else
 		// but the direct calls and the smoke number.
 		s := loadScenarioFor(t, form)

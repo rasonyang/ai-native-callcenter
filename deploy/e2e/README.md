@@ -13,6 +13,7 @@ make e2e-smoke     # one AI outbound call; checks the callee's record, the CDR, 
 make e2e-campaign  # two campaigns (US, CN): answered and unanswered outcomes, SIP probes, run-wide invariants
 make e2e-capacity  # bot-slot overflow (K1), the DID outbound line limit (K2) and a refused bot leg (K3), each in its own application start
 make e2e-frequency # the list of test numbers: two campaigns in a row on a listed number, with a 24 h frequency window
+make e2e-dailycap  # the daily dial cap: one number dialled to the cap of 3 and no further
 make e2e-carrier-timeout # a carrier that ends an unanswered call with 408: NO_ANSWER, ringSec, the retry interval (own campaign, 2 h interval)
 make e2e-down      # collect logs, remove containers, volumes and the network
 ```
@@ -337,7 +338,7 @@ contact keep the canonical `+` number; only the dial string follows the form.
   three, before anything is built or started.
 - `up` fixes the form for the environment and records it in
   `bin/e2e/<project>/dial-form` (removed by `down`). Every other command
-  (`smoke`, `campaign`, `capacity`, `frequency`, `carrier-timeout`, `config`) runs in the recorded form, so
+  (`smoke`, `campaign`, `capacity`, `frequency`, `dailycap`, `carrier-timeout`, `config`) runs in the recorded form, so
   `e2e-capacity`'s application restarts keep it. An explicit
   `E2E_OUTBOUND_DIAL_FORM` that differs from the recorded one is refused ("the
   environment is up with X; run: make e2e-down"); `down` ignores it, since it
@@ -559,6 +560,48 @@ The report is `frequency-<time>/report.json` (the assertions, a timeline and
 both campaigns' attempts). Without the entry of step 3 the second dial would
 come a window later; step 2 is that control.
 
+## The daily dial cap
+
+`make e2e-dailycap` (issue #577, `internal/e2e/dailycap*.go`) checks that a
+number is dialled at most `AICC_OUTBOUND_MAX_DIALS_PER_NUMBER_PER_DAY` times in
+the contact's local day. The environment runs with the cap at 0 (off:
+`E2E_OUTBOUND_MAX_DIALS_PER_NUMBER_PER_DAY` is empty, which the compose overlay
+turns into 0), so smoke, campaign and capacity runs, which dial one number many
+times, are never held. `e2e.sh dailycap` recreates the application with the cap
+at 3, runs the case, and recreates the application on the default again,
+whatever the result. The case needs an environment that is up and a simulator
+with a fresh record (`e2e.sh dailycap` restarts it); the day's count lives in the
+application's database, so a repeat run in the same environment is held at once:
+`make e2e-down`, `make e2e-up` for each run.
+
+One number of the US range, dedicated to this case (`+1 202 555 0192`), whose
+callee sends 180 and rings until our ring timeout cancels the call, with four
+behaviours (one more than the cap lets through) in `scenario.json` and, generated
+from it, in the other two forms. One campaign with that contact: ring timeout
+5 s, `NO_ANSWER` retried after 60 s (the shortest interval the contract allows),
+`maxAttempts` 6, a calling window open all day. The campaign's time zone is
+chosen at run time as the candidate whose local time is farthest from a
+midnight, so the contact's local day cannot turn over during the run; the
+report records it.
+
+1. The contact is dialled three times, each attempt `NO_ANSWER`. The activity
+   becomes `WAITING_DAILY_CAP`.
+2. A quiet period of 90 s (one retry interval and a dialer pass). The simulator
+   has seen exactly three INVITEs for the number, none after the activity
+   turned; the contact is `ACTIVE` with `attempts` 3 and `systemFailures` 0,
+   unchanged across the period; its `nextAttemptAt` and the campaign's
+   `nextDialAt` are the next local midnight in the zone (2 s of slack). The
+   three CDRs carry the campaign id.
+
+The assertions read the settled state: the first read of `WAITING_DAILY_CAP`
+can come one retry interval before the dialer's next pass defers the contact,
+and in that read `nextDialAt` is still the retry time; the report keeps it as
+`firstCapped`.
+
+The report is `dailycap-<time>/report.json` (the assertions, a timeline, the
+zone, the expected release time, the attempts, the contact and campaign as read
+at the cap and after the quiet period, the CDRs and the simulator's dialogs).
+
 ## A carrier that ends an unanswered call with 408
 
 `make e2e-carrier-timeout` (issue #576, `internal/e2e/carrier_timeout*.go`)
@@ -618,6 +661,7 @@ the dialog and the measurements.
 | `campaign-<time>/probes.md` | the measured table, one block per country, and the first-audio times |
 | `campaign-<time>/bundles/` | per failed attempt: attempt, dialog, CDRs and the sliced logs |
 | `capacity-<time>/K1/`, `K2/`, `K3/` | each capacity scenario's `report.json` and `capacity.md` (K3's with the switch log's lines) |
+| `dailycap-<time>/report.json` | the daily dial cap case: the zone, the timeline, every assertion, the contact and campaign at the cap and after the quiet period |
 | `frequency-<time>/report.json` | the test-number case: the timeline, every assertion and both campaigns' attempts |
 | `carrier-timeout-<time>/report.json` | the carrier's 408 case: the timeline, every assertion, the campaign's resolved policy, the attempt, the contact, the CDR, the dialog and the measurements |
 | `logs/<service>.log` | each container's output, written on a failed up, smoke, campaign or capacity run and by `e2e-down` |
