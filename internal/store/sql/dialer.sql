@@ -61,16 +61,43 @@ WHERE c.campaign_id = sqlc.arg('campaign_id')
 ORDER BY c.next_attempt_at, c.id
 LIMIT sqlc.arg('row_limit');
 
--- Moves contacts to a later due time (outside their calling window, or held by
--- the frequency window; is_held marks the latter, so that listing a number can
--- tell a hold from the campaign's own retry time). Never earlier, and never a contact that was claimed
--- for a dial in the meantime.
+-- Moves contacts to a later due time (outside their calling window, held by the
+-- frequency window, or held by the daily dial cap). hold names the mark the move
+-- leaves: 'FREQUENCY' sets is_frequency_held, 'DAILY_CAP' sets is_daily_cap_held,
+-- '' sets neither; the other mark is always cleared, so a contact carries at most
+-- one and listing a number can tell a hold from the campaign's own retry time.
+-- Never earlier, and never a contact that was claimed for a dial in the
+-- meantime.
 -- name: DeferContacts :execrows
 UPDATE campaign_contacts c
-SET next_attempt_at = v.at, is_frequency_held = sqlc.arg('is_held')::boolean, updated_at = now()
+SET next_attempt_at = v.at,
+    is_frequency_held = (sqlc.arg('hold')::text = 'FREQUENCY'),
+    is_daily_cap_held = (sqlc.arg('hold')::text = 'DAILY_CAP'),
+    updated_at = now()
 FROM (SELECT unnest(sqlc.arg('ids')::uuid[]) AS id, unnest(sqlc.arg('ats')::timestamptz[]) AS at) AS v
 WHERE c.id = v.id AND c.status = 'ACTIVE'
   AND c.next_attempt_at IS NOT NULL AND c.next_attempt_at < v.at;
+
+-- How many times each number was dialled in its local day, for the daily dial
+-- cap: the numbers and the start of each one's day (its contact's zone) come as
+-- two parallel arrays. A dial is a campaign attempt in flight or whose outcome
+-- spent a budget (uncounted_outcomes lists the ones that did not: a DNC skip, a
+-- bad number), from any campaign, plus an ad-hoc outbound call (a CDR with no
+-- campaign) whose canonical callee is the number. A number on the list of test
+-- numbers has no row: it is never capped.
+-- name: DialsTodayByNumber :many
+SELECT v.number_e164::text AS number_e164, v.day_start::timestamptz AS day_start,
+       ((SELECT count(*) FROM campaign_attempts a
+         WHERE a.number_e164 = v.number_e164
+           AND a.started_at >= v.day_start AND a.started_at <= sqlc.arg('now')::timestamptz
+           AND (a.state = 'DIALING' OR a.outcome <> ALL(sqlc.arg('uncounted_outcomes')::text[])))
+        + (SELECT count(*) FROM cdrs d
+           WHERE d.to_number_e164 = v.number_e164
+             AND d.call_type = 'OUTBOUND' AND d.campaign_id IS NULL
+             AND d.started_at >= v.day_start AND d.started_at <= sqlc.arg('now')::timestamptz))::bigint AS dials
+FROM (SELECT unnest(sqlc.arg('numbers')::text[]) AS number_e164,
+             unnest(sqlc.arg('day_starts')::timestamptz[]) AS day_start) v
+WHERE NOT EXISTS (SELECT 1 FROM test_numbers t WHERE t.number_e164 = v.number_e164);
 
 -- A calling window or the outer hours changed: contacts that have never been
 -- tried were deferred to the old window's opening, so they are due again now
@@ -78,7 +105,7 @@ WHERE c.id = v.id AND c.status = 'ACTIVE'
 -- time its policy gave it.
 -- name: RearmUntriedContacts :execrows
 UPDATE campaign_contacts
-SET next_attempt_at = sqlc.arg('now')::timestamptz, is_frequency_held = false, updated_at = now()
+SET next_attempt_at = sqlc.arg('now')::timestamptz, is_frequency_held = false, is_daily_cap_held = false, updated_at = now()
 WHERE campaign_id = sqlc.arg('campaign_id') AND status = 'ACTIVE'
   AND last_outcome IS NULL AND next_attempt_at > sqlc.arg('now')::timestamptz;
 
@@ -107,15 +134,16 @@ WHERE c.id = sqlc.arg('contact_id')
   AND NOT EXISTS (SELECT 1 FROM test_numbers t WHERE t.number_e164 = c.number_e164);
 
 -- A number was put on the list of test numbers: the contacts of RUNNING
--- campaigns that the frequency window deferred (is_frequency_held, set only by
--- the hold's own deferral) are due again. A contact waiting on its campaign's
--- retry policy carries no mark and keeps its time, as does one being dialled.
--- name: RearmFrequencyHeld :execrows
+-- campaigns that the frequency window or the daily dial cap deferred
+-- (is_frequency_held and is_daily_cap_held, set only by those holds' own
+-- deferral) are due again. A contact waiting on its campaign's retry policy
+-- carries no mark and keeps its time, as does one being dialled.
+-- name: RearmHeldContacts :execrows
 UPDATE campaign_contacts c
-SET next_attempt_at = sqlc.arg('now')::timestamptz, is_frequency_held = false, updated_at = now()
+SET next_attempt_at = sqlc.arg('now')::timestamptz, is_frequency_held = false, is_daily_cap_held = false, updated_at = now()
 FROM campaigns ca
 WHERE ca.id = c.campaign_id AND ca.status = 'RUNNING'
-  AND c.status = 'ACTIVE' AND c.is_frequency_held
+  AND c.status = 'ACTIVE' AND (c.is_frequency_held OR c.is_daily_cap_held)
   AND c.next_attempt_at > sqlc.arg('now')::timestamptz
   AND EXISTS (SELECT 1 FROM test_numbers t WHERE t.number_e164 = c.number_e164)
   AND NOT EXISTS (SELECT 1 FROM campaign_attempts d
@@ -156,7 +184,7 @@ LIMIT sqlc.arg('row_limit');
 -- now so that, when the call ends, no retry follows.
 -- name: MarkDialingContactsDNC :execrows
 UPDATE campaign_contacts c
-SET status = 'DNC', next_attempt_at = NULL, is_frequency_held = false, updated_at = now()
+SET status = 'DNC', next_attempt_at = NULL, is_frequency_held = false, is_daily_cap_held = false, updated_at = now()
 WHERE c.status = 'ACTIVE' AND c.next_attempt_at IS NULL
   AND EXISTS (SELECT 1 FROM dnc_numbers d WHERE d.number_e164 = c.number_e164)
   AND EXISTS (SELECT 1 FROM campaign_attempts a

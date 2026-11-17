@@ -107,6 +107,11 @@ type Config struct {
 	// CampaignFrequencyWindow is how long after any campaign reached a number
 	// no other campaign may dial it (AICC_CAMPAIGN_FREQUENCY_WINDOW).
 	CampaignFrequencyWindow time.Duration
+	// OutboundMaxDialsPerNumberPerDay caps the dials to one callee number in a
+	// local day, across every campaign and ad-hoc calls
+	// (AICC_OUTBOUND_MAX_DIALS_PER_NUMBER_PER_DAY). A campaign contact whose
+	// number has reached it waits for the next day's calling window. 0 is off.
+	OutboundMaxDialsPerNumberPerDay int
 	// BotRTPDeadTimeout ends a bot call whose inbound media was flowing and
 	// stopped. BotFirstMediaTimeout ends one that never received any. Zero
 	// disables either; negative is refused.
@@ -434,43 +439,44 @@ func Load() (Config, error) {
 	outboundHeaders, outboundHeadersErr := ParseOutboundSIPHeaders(env(outboundHeadersVar, ""))
 	outboundHours, outboundHoursErr := ParseOutboundHours(env("AICC_OUTBOUND_HOURS", DefaultOutboundHours))
 	c := Config{
-		Env:                     env("AICC_ENV", "dev"),
-		HTTPAddr:                env("AICC_HTTP_ADDR", ":8080"),
-		MetricsAddr:             env("AICC_METRICS_ADDR", "127.0.0.1:9090"),
-		DatabaseURL:             env("AICC_DATABASE_URL", "postgres://aicc:aicc@127.0.0.1:5432/aicc?sslmode=disable"),
-		DatabaseMaxConns:        int32(envInt("AICC_DATABASE_MAX_CONNS", 10)),
-		ESLAddr:                 env("AICC_ESL_ADDR", "127.0.0.1:18021"),
-		ESLPassword:             env("AICC_ESL_PASSWORD", "ClueCon"),
-		SwitchDomain:            env("AICC_SWITCH_DOMAIN", "127.0.0.1"),
-		SIPProfile:              env("AICC_SIP_PROFILE", "internal"),
-		SIPDomain:               env("AICC_SIP_DOMAIN", ""),
-		SIPWSSURL:               env("AICC_SIP_WSS_URL", ""),
-		BotSIPHost:              env("AICC_BOT_SIP_HOST", "0.0.0.0"),
-		BotSIPPort:              envInt("AICC_BOT_SIP_PORT", 6060),
-		BotAllowedPeers:         env("AICC_BOT_ALLOWED_PEERS", ""),
-		BotRTPPortLow:           envInt("AICC_BOT_RTP_PORT_LOW", 26000),
-		BotRTPPortHigh:          envInt("AICC_BOT_RTP_PORT_HIGH", 29999),
-		BotMaxCalls:             envInt("AICC_BOT_MAX_CALLS", 220),
-		BotInboundReserve:       envInt("AICC_BOT_INBOUND_RESERVE", 0),
-		IsBotInboundReserveSet:  envIsSet("AICC_BOT_INBOUND_RESERVE"),
-		OverflowTightenRate:     envFloat("AICC_OVERFLOW_TIGHTEN_RATE", DefaultOverflowTightenRate),
-		OverflowStopRate:        envFloat("AICC_OVERFLOW_STOP_RATE", DefaultOverflowStopRate),
-		OverflowHold:            envDuration("AICC_OVERFLOW_HOLD", DefaultOverflowHold),
-		TrunkBreakerCount:       envInt("AICC_TRUNK_BREAKER_COUNT", DefaultTrunkBreakerCount),
-		ProviderBreakerCount:    envInt("AICC_PROVIDER_BREAKER_COUNT", DefaultProviderBreakerCount),
-		OutboundMaxRinging:      envInt("AICC_OUTBOUND_MAX_RINGING", DefaultOutboundMaxRinging),
-		CampaignFrequencyWindow: envDuration("AICC_CAMPAIGN_FREQUENCY_WINDOW", DefaultCampaignFrequencyWindow),
-		BotRTPDeadTimeout:       envDuration("AICC_BOT_RTP_DEAD_TIMEOUT", 5*time.Second),
-		BotFirstMediaTimeout:    envDuration("AICC_BOT_FIRST_MEDIA_TIMEOUT", 30*time.Second),
-		IsBotGreetingGated:      isGreetingGated,
-		BotGreetingMediaWait:    greetingWait,
-		botGreetingWaitErr:      greetingErr,
-		BotNoInputTimeout:       noInput,
-		botNoInputErr:           noInputErr,
-		BotEchoDumpDir:          env("AICC_BOT_ECHO_DUMP_DIR", ""),
-		BotBackendBase:          env("AICC_BOT_BACKEND_BASE", ""),
-		ToolAllowedHosts:        env("AICC_TOOL_ALLOWED_HOSTS", ""),
-		IsBotEnabled:            envBool("AICC_BOT_ENABLED", true),
+		Env:                             env("AICC_ENV", "dev"),
+		HTTPAddr:                        env("AICC_HTTP_ADDR", ":8080"),
+		MetricsAddr:                     env("AICC_METRICS_ADDR", "127.0.0.1:9090"),
+		DatabaseURL:                     env("AICC_DATABASE_URL", "postgres://aicc:aicc@127.0.0.1:5432/aicc?sslmode=disable"),
+		DatabaseMaxConns:                int32(envInt("AICC_DATABASE_MAX_CONNS", 10)),
+		ESLAddr:                         env("AICC_ESL_ADDR", "127.0.0.1:18021"),
+		ESLPassword:                     env("AICC_ESL_PASSWORD", "ClueCon"),
+		SwitchDomain:                    env("AICC_SWITCH_DOMAIN", "127.0.0.1"),
+		SIPProfile:                      env("AICC_SIP_PROFILE", "internal"),
+		SIPDomain:                       env("AICC_SIP_DOMAIN", ""),
+		SIPWSSURL:                       env("AICC_SIP_WSS_URL", ""),
+		BotSIPHost:                      env("AICC_BOT_SIP_HOST", "0.0.0.0"),
+		BotSIPPort:                      envInt("AICC_BOT_SIP_PORT", 6060),
+		BotAllowedPeers:                 env("AICC_BOT_ALLOWED_PEERS", ""),
+		BotRTPPortLow:                   envInt("AICC_BOT_RTP_PORT_LOW", 26000),
+		BotRTPPortHigh:                  envInt("AICC_BOT_RTP_PORT_HIGH", 29999),
+		BotMaxCalls:                     envInt("AICC_BOT_MAX_CALLS", 220),
+		BotInboundReserve:               envInt("AICC_BOT_INBOUND_RESERVE", 0),
+		IsBotInboundReserveSet:          envIsSet("AICC_BOT_INBOUND_RESERVE"),
+		OverflowTightenRate:             envFloat("AICC_OVERFLOW_TIGHTEN_RATE", DefaultOverflowTightenRate),
+		OverflowStopRate:                envFloat("AICC_OVERFLOW_STOP_RATE", DefaultOverflowStopRate),
+		OverflowHold:                    envDuration("AICC_OVERFLOW_HOLD", DefaultOverflowHold),
+		TrunkBreakerCount:               envInt("AICC_TRUNK_BREAKER_COUNT", DefaultTrunkBreakerCount),
+		ProviderBreakerCount:            envInt("AICC_PROVIDER_BREAKER_COUNT", DefaultProviderBreakerCount),
+		OutboundMaxRinging:              envInt("AICC_OUTBOUND_MAX_RINGING", DefaultOutboundMaxRinging),
+		CampaignFrequencyWindow:         envDuration("AICC_CAMPAIGN_FREQUENCY_WINDOW", DefaultCampaignFrequencyWindow),
+		OutboundMaxDialsPerNumberPerDay: envInt("AICC_OUTBOUND_MAX_DIALS_PER_NUMBER_PER_DAY", DefaultOutboundMaxDialsPerNumberPerDay),
+		BotRTPDeadTimeout:               envDuration("AICC_BOT_RTP_DEAD_TIMEOUT", 5*time.Second),
+		BotFirstMediaTimeout:            envDuration("AICC_BOT_FIRST_MEDIA_TIMEOUT", 30*time.Second),
+		IsBotGreetingGated:              isGreetingGated,
+		BotGreetingMediaWait:            greetingWait,
+		botGreetingWaitErr:              greetingErr,
+		BotNoInputTimeout:               noInput,
+		botNoInputErr:                   noInputErr,
+		BotEchoDumpDir:                  env("AICC_BOT_ECHO_DUMP_DIR", ""),
+		BotBackendBase:                  env("AICC_BOT_BACKEND_BASE", ""),
+		ToolAllowedHosts:                env("AICC_TOOL_ALLOWED_HOSTS", ""),
+		IsBotEnabled:                    envBool("AICC_BOT_ENABLED", true),
 
 		IsTranscriptionEnabled:  envBool("AICC_TRANSCRIPTION_ENABLED", false),
 		StreamAddr:              env("AICC_STREAM_ADDR", "127.0.0.1:8090"),
@@ -702,6 +708,11 @@ func (c Config) validate() error {
 			"AICC_CAMPAIGN_FREQUENCY_WINDOW must be between 0 (off) and %s, got %s",
 			MaxCampaignFrequencyWindow, c.CampaignFrequencyWindow))
 	}
+	if c.OutboundMaxDialsPerNumberPerDay < 0 || c.OutboundMaxDialsPerNumberPerDay > MaxOutboundMaxDialsPerNumberPerDay {
+		errs = append(errs, fmt.Errorf(
+			"AICC_OUTBOUND_MAX_DIALS_PER_NUMBER_PER_DAY must be between 0 (off) and %d, got %d",
+			MaxOutboundMaxDialsPerNumberPerDay, c.OutboundMaxDialsPerNumberPerDay))
+	}
 	if c.BotRTPDeadTimeout < 0 || c.BotFirstMediaTimeout < 0 {
 		errs = append(errs, fmt.Errorf(
 			"AICC_BOT_RTP_DEAD_TIMEOUT and AICC_BOT_FIRST_MEDIA_TIMEOUT must be 0 (off) or more, got %s and %s",
@@ -838,6 +849,10 @@ const (
 	MaxOutboundMaxRinging          = 100000
 	DefaultCampaignFrequencyWindow = 24 * time.Hour
 	MaxCampaignFrequencyWindow     = 30 * 24 * time.Hour
+	// The daily dial cap: the 4th dial of a local day to one number is not
+	// sent. 0 turns it off.
+	DefaultOutboundMaxDialsPerNumberPerDay = 3
+	MaxOutboundMaxDialsPerNumberPerDay     = 100
 )
 
 // Overflow control's defaults (design 10 section 6.5).

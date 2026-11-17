@@ -71,6 +71,10 @@ type Store struct {
 	// window (AICC_CAMPAIGN_FREQUENCY_WINDOW). A contact listing says, from it,
 	// until when another campaign's call holds a contact back. Zero is off.
 	CampaignFrequencyWindow time.Duration
+	// DefaultCountryCode (AICC_DEFAULT_COUNTRY_CODE, digits, no "+") completes a
+	// national callee when the ledger writes an outbound call's canonical
+	// number (cdrs.to_number_e164), which the daily dial cap counts by.
+	DefaultCountryCode string
 	// OutboundHours are the deployment's outer calling hours
 	// (AICC_OUTBOUND_HOURS). A campaign contact's retry is never scheduled
 	// outside them. The zero value means no outer limit.

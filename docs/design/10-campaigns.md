@@ -200,6 +200,7 @@ final.
 | `system_failures` | attempts that never reached the customer; counted against `maxSystemRetries` (§7) |
 | `next_attempt_at` | when it may be dialled next; NULL unless `ACTIVE` |
 | `is_frequency_held` | true while `next_attempt_at` is where the cross-campaign frequency hold put it (§5.2); set only by that deferral and cleared by every other write of `next_attempt_at`. Read by the re-arm when the number is put on the list of test numbers (§3.4a) |
+| `is_daily_cap_held` | the same for the daily dial cap (§5.2): true while `next_attempt_at` is where the cap put it. At most one of the two marks is set (a CHECK); each is cleared by every write of `next_attempt_at` that is not its own deferral, and the re-arm lifts either |
 | `last_outcome` | from the latest attempt |
 | `lead_intent`, `lead_notes` | the recorded lead (§11); NULL means never recorded. A contact with one is never dialled again (§7.2) |
 | `last_attempt_id`, `last_call_id` | the latest finished attempt and its call; NULL before the first attempt finishes. Written with `last_outcome` when the latest attempt settles, so they follow every attempt; once a call records a lead there is no later attempt (§7.2), so the pair names that call (§14). Not foreign keys, like `call_id` everywhere; migration 00042 backfilled them from the latest `FINISHED` attempt by `started_at` |
@@ -233,8 +234,8 @@ Global, not per campaign: `number_e164` (PK), `source` (`MANUAL \| IMPORT \| CON
 
 ### 3.4a `test_numbers`
 
-The numbers a team tests its campaigns on, exempt from the cross-campaign frequency window
-(§5.2) and from nothing else: `number_e164` (PK, canonical, the same CHECK as `dnc_numbers`),
+The numbers a team tests its campaigns on, exempt from the cross-campaign frequency window and
+the daily dial cap (§5.2) and from nothing else: `number_e164` (PK, canonical, the same CHECK as `dnc_numbers`),
 `note` (optional, at most 200 characters), `created_at`, `created_by` (null when an API key added
 it). Modelled on `dnc_numbers`: global, `/test-numbers`, idempotent add, canonicalised with the
 deployment's default country code. Every entry gives up a protection that exists for customers, so
@@ -245,11 +246,18 @@ for the last place cannot both land.
 
 The exemption is this platform's alone. A carrier line's own limits on calls to one callee (a cap
 per callee per day or hour) still apply to a test number unless the carrier exempts it too
-(`deploy/carrier.md`).
+(`deploy/carrier.md`): on a line that refuses the 4th call of the day, a test number's 4th dial is
+sent and refused.
 
 ### 3.5 New columns on existing tables
 
 - `cdrs.campaign_id`, nullable.
+- `cdrs.to_number_e164`, nullable: the canonical callee (`phonenum.Canonical` with the deployment's
+  default country code) of an `OUTBOUND` row that has one, written by the ledger on insert and on
+  a revision; NULL for every other call and for a dialled string that does not canonicalise.
+  `cdrs.to_number` is the string that was dialled, national or E.164, so the daily dial cap (§5.2)
+  counts ad-hoc calls by this column. Not backfilled: ad-hoc dials made before migration 00049 are
+  not counted. Not an API field.
 - `dids.max_outbound_channels`, nullable; NULL means no limit (§6.6).
 
 ---
@@ -282,10 +290,15 @@ DRAFT ──start──▶ RUNNING ──pause──▶ PAUSED ──resume─�
   pending contact is outside its window), `WAITING_RETRY` (no pending contact is due yet),
   `WAITING_FREQUENCY` (nothing is in flight, and the earliest pending contact is held by another
   campaign's call within the frequency window, §5.2; the campaign has made no attempt for it),
-  `AT_CAPACITY` (held back by a cap in §6), plus `nextDialAt`. When a closed calling window
-  and the frequency hold both apply, the activity names whichever ends later (the hold end, last
-  touch + window, against the window's next opening); a tie goes to `WAITING_FREQUENCY`, the
-  reason an operator can act on. A window of 0 never yields it. A contact's own retry time later
+  `WAITING_DAILY_CAP` (nothing is in flight, and the earliest pending contact is held by the
+  daily dial cap, §5.2; the campaign has made no attempt for it),
+  `AT_CAPACITY` (held back by a cap in §6), plus `nextDialAt`. When a closed calling window,
+  the frequency hold and the daily cap apply together, the activity names whichever ends latest
+  (the hold end, last touch + window, against the window's next opening, against the cap's
+  release time); a tie goes to `WAITING_DAILY_CAP`, then `WAITING_FREQUENCY`, the reasons an
+  operator can act on. The cap is judged from the facts (the number's dials today against the
+  cap), not from the contact's mark: after the contact's local midnight the mark may still be set
+  while the cap no longer binds. A window of 0 never yields it. A contact's own retry time later
   than both is `WAITING_RETRY`. The UI shows
   "Running · waiting for calling hours (tomorrow 09:00)".
 - `CANCELLED` and `COMPLETED` are absorbing. Contacts and leads stay readable.
@@ -345,6 +358,8 @@ LIMIT $2
 
 The calling-window check (§8.1) depends on each contact's time zone, so it runs in Go per contact;
 the query over-fetches a small multiple of the free capacity and the actor filters.
+The daily dial cap below is judged in Go too, after the window and in one batched query, because its
+day is the contact's local day.
 
 **Cross-campaign frequency.** Once any campaign has **reached** a number (an outcome that counts
 against `maxAttempts`, §7.2, marked `is_touched` on the attempt), no other campaign may dial it
@@ -371,6 +386,48 @@ campaign's touch inside the deployment's window, number not listed) and only whi
 the contact is marked, or its due time is not later than the hold's end (a retry time past it is
 the campaign's own and is shown as such): "held by another campaign's
 call until …".
+
+**Daily dial cap.** A deployment-wide cap (`AICC_OUTBOUND_MAX_DIALS_PER_NUMBER_PER_DAY`, default
+3, `0` off, range 0 to 100) on dials to one callee number per local day: the 4th dial of the day is
+not sent. It is the deployment's, never a campaign's: the cap belongs to the carrier line.
+
+- *What counts* for number N on the contact's local day, from the day's start to now: every
+  `campaign_attempts` row for N, from any campaign, that is in flight (`DIALING`) or whose
+  outcome spends a budget (`campaign.ClassOf` is not `ClassNone`, so not `DNC_SKIPPED` and not
+  `INVALID_NUMBER`), `ORIGINATE_FAILED` and `TRANSIENT` included (the dialer cannot tell whether
+  the carrier saw the INVITE, and counting is the safe side); a voided attempt is a deleted row and
+  never counts. And every ad-hoc call: a `cdrs` row with `call_type = 'OUTBOUND'`, no `campaign_id`
+  and `to_number_e164 = N`. A campaign call's CDR carries its campaign, so it is not counted twice.
+  A number on the list of test numbers is not counted at all (the query leaves it out).
+- *The day* is the contact's local calendar day in its effective zone: the zone of the schedule
+  `scheduleFor` returns (the contact's own, else the campaign's), UTC when there is none
+  (`Schedule.DayStart`).
+- *Admission.* After the calling-window judgement of a due batch, one batched query
+  (`DialsTodayByNumber`, the numbers and each one's day start as parallel arrays) counts the
+  in-window contacts. Those at or over the cap are deferred to their release time and marked
+  `is_daily_cap_held` (`DeferContacts`, hold kind `DAILY_CAP`); the rest are ready, and the refill
+  loop goes on as after a window deferral. No attempt is written: `attempts` and
+  `system_failures` do not move (§7). Begin and the claim are unchanged; two campaigns racing for
+  the same number are still serialised by the one-`DIALING`-per-number index, and the loser is
+  counted again on its next pass.
+- *Release time* (`Schedule.DailyCapRelease`): the start of the contact's calling window on the
+  next local day, that is the next local midnight moved to the schedule's first opening from there
+  (the next local midnight itself when there is no window or no opening).
+- *Test numbers.* A number on the list is exempt exactly where the frequency check exempts it. The
+  re-arm run for a number that joins the list (`RearmHeldContacts`) lifts a contact carrying either
+  mark, and only a marked one, never by inferring from attempt times; it runs when
+  `AICC_CAMPAIGN_FREQUENCY_WINDOW` or the cap is on. Taking a number off the list needs nothing:
+  the next admission counts today's dials and holds it until the next day's window. The carrier's
+  own limit still applies to a test number's 4th dial.
+- *Activity.* `WAITING_DAILY_CAP` with `nextDialAt` the release time, as §4.1 says. Like the
+  frequency hold it binds only when the contact's own `next_attempt_at` is not later than the
+  release time (one second of slack). A contact whose own retry time falls before the release is
+  deferred to the release (with the cap's mark) by the dialer as soon as it sees it capped, in
+  the pass that reports the activity and not when the retry time comes, so `nextDialAt` is the
+  release time from the first report (at most 20 contacts per pass; the rest follow on the next
+  pass). A retry time after the release is never moved.
+- Dials made before migration 00049 as ad-hoc calls are not counted; campaign attempts always
+  were.
 
 ### 5.3 Write ahead, then dial
 
@@ -772,6 +829,10 @@ after how long; and did this call use up one of the customer's chances?**
   contact's window, it moves to the start of the next window; it is never dropped.
 - **When the retry time comes, the contact is back in the pool**, queued with new contacts by
   `next_attempt_at` (§5.2).
+- **A contact the daily dial cap holds spends neither budget** (§5.2): no attempt is made, so
+  `attempts` and `system_failures` do not move, and its `next_attempt_at` is the next day's window
+  opening. The dials that reached the cap are counted from the attempts already made, whatever
+  they came to.
 
 ### 7.2 Outcomes and default policy
 
@@ -1224,6 +1285,7 @@ configuration today, so only the env names `AICC_OVERFLOW_HOLD` and the like app
 |---|---|---|
 | `AICC_OUTBOUND_HOURS` | `08:00-21:00` callee-local | 8.1 |
 | `AICC_CAMPAIGN_FREQUENCY_WINDOW` | `24h` | 5.2 |
+| `AICC_OUTBOUND_MAX_DIALS_PER_NUMBER_PER_DAY` | `3` (`0` off) | 5.2 |
 | `AICC_BOT_INBOUND_RESERVE` | `max(2, 10%)` of `AICC_BOT_MAX_CALLS` | 6.1 |
 | `AICC_OUTBOUND_MAX_RINGING` | sized to the trunk | 6.1 |
 | `AICC_OVERFLOW_HOLD` | `1500ms` | 6.4 |

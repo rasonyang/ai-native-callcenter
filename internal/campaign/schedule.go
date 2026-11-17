@@ -244,3 +244,31 @@ func (s Schedule) String() string {
 	}
 	return fmt.Sprintf("%s %v %v", zone, s.Window.Days, s.Window.Ranges)
 }
+
+// DayStart is the start of the local calendar day t falls on, in the schedule's
+// zone (UTC when it has none). The daily dial cap counts from it.
+func (s Schedule) DayStart(t time.Time) time.Time {
+	loc := s.Zone
+	if loc == nil {
+		loc = time.UTC
+	}
+	y, m, d := t.In(loc).Date()
+	return wallClock(y, m, d, 0, true, loc)
+}
+
+// DailyCapRelease is when a contact the daily dial cap holds at t may be
+// dialled again: the start of its calling window on the next local day. That is
+// the next local midnight, moved to the first opening of the schedule from
+// there; with no opening within reach (or no window at all) it is the midnight.
+func (s Schedule) DailyCapRelease(t time.Time) time.Time {
+	loc := s.Zone
+	if loc == nil {
+		loc = time.UTC
+	}
+	y, m, d := t.In(loc).Date()
+	midnight := wallClock(y, m, d+1, 0, true, loc)
+	if open, found := s.NextOpen(midnight); found {
+		return open
+	}
+	return midnight
+}

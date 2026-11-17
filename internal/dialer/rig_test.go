@@ -228,10 +228,12 @@ func (s *fakeSlots) set(u voice.Usage) {
 type opts struct {
 	maxRinging int
 	frequency  time.Duration
-	trunkN     int
-	providerM  int
-	slots      *fakeSlots
-	lines      Lines
+	// dailyCap is the daily dial cap; zero is off.
+	dailyCap  int
+	trunkN    int
+	providerM int
+	slots     *fakeSlots
+	lines     Lines
 	// outer calling hours; default 08:00-21:00.
 	outer string
 	// held keeps the reconcile gate closed until released.
@@ -316,7 +318,7 @@ func newRig(t *testing.T, o opts) *rig {
 		}
 	}
 	r.cfg = Config{
-		MaxRinging: o.maxRinging, Frequency: o.frequency, OutboundHours: outer,
+		MaxRinging: o.maxRinging, Frequency: o.frequency, OutboundHours: outer, MaxDialsPerNumberPerDay: o.dailyCap,
 		TrunkBreakerCount: o.trunkN, ProviderBreakerCount: o.providerM,
 	}
 	if r.cfg.MaxRinging == 0 {

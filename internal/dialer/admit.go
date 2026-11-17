@@ -60,10 +60,11 @@ func (d *Dialer) pass(ctx context.Context) {
 	if d.testDirty {
 		d.testDirty = false
 		// A number joined the list of test numbers: contacts of running
-		// campaigns that were waiting out the frequency window for it are due
-		// again. They are judged like any due contact in this pass.
-		if d.cfg.Frequency > 0 {
-			if err := d.st.RearmFrequencyHeld(ctx, now); err != nil {
+		// campaigns that were waiting out the frequency window or the daily dial
+		// cap for it are due again. They are judged like any due contact in this
+		// pass.
+		if d.cfg.Frequency > 0 || d.cfg.MaxDialsPerNumberPerDay > 0 {
+			if err := d.st.RearmHeld(ctx, now); err != nil {
 				d.log.Error("dialer: cannot re-arm contacts held for a test number", "error", err)
 				d.testDirty = true
 			}
@@ -303,7 +304,7 @@ func (d *Dialer) refill(ctx context.Context, c campaign.Campaign, b *bucket, now
 				}
 				ids, ats = append(ids, h.ContactID), append(ats, at)
 			}
-			if err := d.st.Defer(ctx, ids, ats, true); err != nil {
+			if err := d.st.Defer(ctx, ids, ats, campaign.HoldFrequency); err != nil {
 				return moved, err
 			}
 			moved = true
@@ -317,6 +318,7 @@ func (d *Dialer) refill(ctx context.Context, c campaign.Campaign, b *bucket, now
 		if len(due) == 0 {
 			return moved, nil
 		}
+		var open []campaign.Contact
 		for _, ct := range due {
 			sched, ok := d.scheduleFor(c, ct)
 			if ok && !sched.IsOpen(now) {
@@ -327,14 +329,21 @@ func (d *Dialer) refill(ctx context.Context, c campaign.Campaign, b *bucket, now
 				ids, ats = append(ids, ct.ID), append(ats, at)
 				continue
 			}
-			b.ready = append(b.ready, ct)
+			open = append(open, ct)
 		}
 		if len(ids) > 0 {
-			if err := d.st.Defer(ctx, ids, ats, false); err != nil {
+			if err := d.st.Defer(ctx, ids, ats, campaign.HoldNone); err != nil {
 				return moved, err
 			}
 			moved = true
 		}
+		// The daily dial cap, judged for the contacts inside their window.
+		ready, capped, err := d.holdByDailyCap(ctx, c, open, now)
+		if err != nil {
+			return moved, err
+		}
+		b.ready = append(b.ready, ready...)
+		moved = moved || capped
 		if len(b.ready) > 0 {
 			return moved, nil
 		}
@@ -342,6 +351,48 @@ func (d *Dialer) refill(ctx context.Context, c campaign.Campaign, b *bucket, now
 	// More is waiting than one pass will sort out.
 	d.isDirty = true
 	return moved, nil
+}
+
+// holdByDailyCap splits contacts that are inside their calling window by the
+// daily dial cap: those whose number was dialled the cap's number of times in
+// the contact's local day are moved to the start of their calling window on the
+// next local day (marked is_daily_cap_held; no attempt is made and no budget is
+// spent), and the rest are returned as ready. One query counts them all. A
+// number on the list of test numbers counts as zero and is never held. It
+// reports whether it moved any contact.
+func (d *Dialer) holdByDailyCap(ctx context.Context, c campaign.Campaign, contacts []campaign.Contact, now time.Time) ([]campaign.Contact, bool, error) {
+	limit := d.cfg.MaxDialsPerNumberPerDay
+	if limit <= 0 || len(contacts) == 0 {
+		return contacts, false, nil
+	}
+	numbers := make([]string, len(contacts))
+	days := make([]time.Time, len(contacts))
+	scheds := make([]campaign.Schedule, len(contacts))
+	for i, ct := range contacts {
+		scheds[i], _ = d.scheduleFor(c, ct) // no schedule: the zero one, a UTC day
+		numbers[i], days[i] = ct.Number, scheds[i].DayStart(now)
+	}
+	dials, err := d.st.DialsToday(ctx, numbers, days, now)
+	if err != nil {
+		return nil, false, err
+	}
+	var ready []campaign.Contact
+	var ids []uuid.UUID
+	var ats []time.Time
+	for i, ct := range contacts {
+		if dials[i] < limit {
+			ready = append(ready, ct)
+			continue
+		}
+		ids, ats = append(ids, ct.ID), append(ats, scheds[i].DailyCapRelease(now))
+	}
+	if len(ids) == 0 {
+		return ready, false, nil
+	}
+	if err := d.st.Defer(ctx, ids, ats, campaign.HoldDailyCap); err != nil {
+		return nil, false, err
+	}
+	return ready, true, nil
 }
 
 // scheduleFor is the contact's calling schedule: its zone, else the
@@ -682,8 +733,17 @@ func (d *Dialer) pauseNoEndpoint(ctx context.Context, id uuid.UUID) {
 		"set it and resume, see deploy/carrier.md", "campaignId", id)
 }
 
+// maxEagerCapDefers bounds how many daily-cap-held contacts one account pass
+// defers to their release time; see account.
+const maxEagerCapDefers = 20
+
 // account computes what the campaign is doing, completes it when the list is
-// exhausted, and returns the earliest time it needs another look.
+// exhausted, and returns the earliest time it needs another look. When the
+// earliest pending contact is held by the daily dial cap but its own retry
+// time is earlier than the release, account defers it to the release at once
+// (marked as refill marks it), so nextDialAt and the activity describe the
+// next contact the dialer would really dial and not a retry time at which
+// nothing can be placed.
 func (d *Dialer) account(ctx context.Context, c campaign.Campaign, b *bucket, now time.Time) time.Time {
 	pending, err := d.st.Pending(ctx, c.ID, now)
 	if err != nil {
@@ -715,8 +775,31 @@ func (d *Dialer) account(ctx context.Context, c campaign.Campaign, b *bucket, no
 		p.Activity = campaign.ActivityDialing
 	default:
 		p.Activity = campaign.ActivityWaitingRetry
-		if first, err := d.st.EarliestPending(ctx, c.ID); err == nil && first != nil {
-			p.Activity = d.waitingActivity(ctx, c, *first, now)
+		for deferred := 0; ; deferred++ {
+			first, err := d.st.EarliestPending(ctx, c.ID)
+			if err != nil || first == nil {
+				break
+			}
+			act, release := d.waitingActivity(ctx, c, *first, now)
+			p.Activity = act
+			// A contact held by the daily cap whose own retry time comes
+			// before the cap lifts would be due with nothing to dial: defer
+			// it to the release now, as refill would when it came due, so
+			// nextDialAt names a time at which a call can really go out. At
+			// most maxEagerCapDefers per pass; the rest wait for the next one,
+			// which comes no later than the earliest of their retry times.
+			if release == nil || deferred >= maxEagerCapDefers {
+				break
+			}
+			if err := d.st.Defer(ctx, []uuid.UUID{first.ID}, []time.Time{*release}, campaign.HoldDailyCap); err != nil {
+				d.log.Error("dialer: cannot defer a capped contact", "campaignId", c.ID, "contactId", first.ID, "error", err)
+				break
+			}
+			if pending, err = d.st.Pending(ctx, c.ID, now); err != nil {
+				d.log.Error("dialer: cannot read the campaign's contacts", "campaignId", c.ID, "error", err)
+				return time.Time{}
+			}
+			p.NextDialAt = pending.NextFuture
 		}
 	}
 	d.progress[c.ID] = p
@@ -728,12 +811,21 @@ func (d *Dialer) account(ctx context.Context, c campaign.Campaign, b *bucket, no
 
 // waitingActivity says why a campaign with nothing in flight and nothing at
 // capacity is waiting, judged by the contact it would dial first. A hold by
-// another campaign's recent call (the frequency window) and a closed calling
-// window each end at a time; the one that ends later is what the campaign is
-// waiting for, and a tie goes to the frequency window, which is the reason an
-// operator can do something about (the list of test numbers). Neither: the
+// another campaign's recent call (the frequency window), a hold by the daily
+// dial cap and a closed calling window each end at a time; the one that ends
+// latest is what the campaign is waiting for. A tie goes to the daily cap, then
+// to the frequency window, which are the reasons an operator can do something
+// about (the list of test numbers) before the closed window. None of them: the
 // contact's own retry time has not come.
-func (d *Dialer) waitingActivity(ctx context.Context, c campaign.Campaign, first campaign.Contact, now time.Time) campaign.Activity {
+//
+// The cap is judged from the facts (the number's dials today against the cap),
+// not from the contact's mark: after the local midnight the mark may still be
+// set while the cap no longer binds.
+//
+// The second result is the cap's release time when the cap binds and the
+// contact's retry time is strictly before it (the caller defers the contact
+// there); nil otherwise.
+func (d *Dialer) waitingActivity(ctx context.Context, c campaign.Campaign, first campaign.Contact, now time.Time) (campaign.Activity, *time.Time) {
 	sched, hasSchedule := d.scheduleFor(c, first)
 	windowOpensAt := now
 	if hasSchedule && !sched.IsOpen(now) {
@@ -741,31 +833,56 @@ func (d *Dialer) waitingActivity(ctx context.Context, c campaign.Campaign, first
 			windowOpensAt = at
 		} else {
 			// No opening within reach: the window is what holds it.
-			return campaign.ActivityWaitingWindow
+			return campaign.ActivityWaitingWindow, nil
 		}
 	}
+	// A hold binds unless the contact's own retry time is later than when it
+	// could be dialled once the hold is over.
+	binds := func(dialAt time.Time) bool {
+		return first.NextAttemptAt == nil || !first.NextAttemptAt.After(dialAt.Add(time.Second))
+	}
+	var freqAt, capAt time.Time
+	var deferTo *time.Time
 	if d.cfg.Frequency > 0 {
 		end, err := d.st.FrequencyHold(ctx, first.ID, now, d.cfg.Frequency)
 		if err != nil {
 			d.log.Error("dialer: cannot read a contact's frequency hold", "campaignId", c.ID, "contactId", first.ID, "error", err)
 		} else if end != nil && end.After(now) && !end.Before(windowOpensAt) {
-			// The hold binds unless the contact's own retry time is later than
-			// when it could be dialled once the hold is over.
 			dialAt := *end
 			if hasSchedule {
 				if open, found := sched.NextOpen(dialAt); found {
 					dialAt = open
 				}
 			}
-			if first.NextAttemptAt == nil || !first.NextAttemptAt.After(dialAt.Add(time.Second)) {
-				return campaign.ActivityWaitingFrequency
+			if binds(dialAt) {
+				freqAt = dialAt
 			}
 		}
 	}
-	if windowOpensAt.After(now) {
-		return campaign.ActivityWaitingWindow
+	if d.cfg.MaxDialsPerNumberPerDay > 0 {
+		dials, err := d.st.DialsToday(ctx, []string{first.Number}, []time.Time{sched.DayStart(now)}, now)
+		if err != nil {
+			d.log.Error("dialer: cannot read a contact's dials today", "campaignId", c.ID, "contactId", first.ID, "error", err)
+		} else if len(dials) == 1 && dials[0] >= d.cfg.MaxDialsPerNumberPerDay {
+			release := sched.DailyCapRelease(now)
+			if !release.Before(windowOpensAt) && binds(release) {
+				capAt = release
+				if first.NextAttemptAt != nil && first.NextAttemptAt.Before(release) {
+					deferTo = &release
+				}
+			}
+		}
 	}
-	return campaign.ActivityWaitingRetry
+	switch {
+	case !capAt.IsZero() && (freqAt.IsZero() || !capAt.Before(freqAt)):
+		return campaign.ActivityWaitingDailyCap, deferTo
+	case !freqAt.IsZero():
+		return campaign.ActivityWaitingFrequency, deferTo
+	}
+	if windowOpensAt.After(now) {
+		return campaign.ActivityWaitingWindow, deferTo
+	}
+	return campaign.ActivityWaitingRetry, deferTo
 }
 
 // publish replaces the read side with the account of each running campaign,

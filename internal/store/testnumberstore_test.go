@@ -448,7 +448,7 @@ func TestListingANumberRearmsOnlyWhatTheFrequencyWindowDeferred(t *testing.T) {
 	d := st.Dialer()
 	held, own := bids[cts[0].Number], bids[cts[1].Number]
 	hold := time.Now().Add(50 * time.Minute)
-	if err := d.Defer(ctx, []uuid.UUID{held}, []time.Time{hold}, true); err != nil {
+	if err := d.Defer(ctx, []uuid.UUID{held}, []time.Time{hold}, campaign.HoldFrequency); err != nil {
 		t.Fatal(err)
 	}
 	// B's own retry time, three hours out: later than A's touch plus the window.
@@ -482,7 +482,7 @@ func TestListingANumberRearmsOnlyWhatTheFrequencyWindowDeferred(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := d.RearmFrequencyHeld(ctx, time.Now()); err != nil {
+	if err := d.RearmHeld(ctx, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	dueAt := func(id uuid.UUID) (at *time.Time, marked bool) {
@@ -500,7 +500,7 @@ func TestListingANumberRearmsOnlyWhatTheFrequencyWindowDeferred(t *testing.T) {
 
 	// The claim clears the mark; so does the settle.
 	third := bids[cts[2].Number]
-	if err := d.Defer(ctx, []uuid.UUID{third}, []time.Time{time.Now().Add(2 * time.Hour)}, true); err != nil {
+	if err := d.Defer(ctx, []uuid.UUID{third}, []time.Time{time.Now().Add(2 * time.Hour)}, campaign.HoldFrequency); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := st.Pool.Exec(ctx, `UPDATE campaign_contacts SET next_attempt_at = now() WHERE id = $1`, third); err != nil {

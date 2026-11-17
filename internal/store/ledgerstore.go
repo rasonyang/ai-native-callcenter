@@ -17,6 +17,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/rasonyang/ai-native-callcenter/internal/campaign"
+	"github.com/rasonyang/ai-native-callcenter/internal/phonenum"
 	"github.com/rasonyang/ai-native-callcenter/internal/recording"
 	"github.com/rasonyang/ai-native-callcenter/internal/store/queries"
 )
@@ -37,12 +38,15 @@ type LedgerStore struct {
 	// onAttemptFinished announces it once the CDR's transaction holds.
 	attempts          attemptFinisher
 	onAttemptFinished func(campaign.Finished)
+	// defaultCountryCode completes a national callee into cdrs.to_number_e164.
+	defaultCountryCode string
 }
 
 // Ledger returns the call ledger.
 func (s *Store) Ledger() *LedgerStore {
 	return &LedgerStore{q: s.Queries, pool: s.Pool, onCallbackSettled: s.OnCallbackSettled,
-		attempts: s.finisher(), onAttemptFinished: s.OnAttemptFinished}
+		attempts: s.finisher(), onAttemptFinished: s.OnAttemptFinished,
+		defaultCountryCode: s.DefaultCountryCode}
 }
 
 // The CDR tech keys of the carrier-facing leg of a call placed to an outside
@@ -217,6 +221,16 @@ func (l *LedgerStore) InsertCDR(ctx context.Context, cdr CDR) error {
 		unbackedClaims = []string{}
 	}
 
+	// The callee in canonical form, for an outbound call that has one: what the
+	// daily dial cap counts an ad-hoc call by. NULL when the dialled string does
+	// not canonicalise, and for every other kind of call.
+	var calleeE164 *string
+	if cdr.CallType == "OUTBOUND" {
+		if n, err := phonenum.Canonical(cdr.ToNumber, l.defaultCountryCode); err == nil {
+			calleeE164 = &n
+		}
+	}
+
 	params := queries.InsertCDRParams{
 		CallID:         cdr.CallID,
 		StartedAt:      stamp(cdr.StartedAt),
@@ -247,6 +261,7 @@ func (l *LedgerStore) InsertCDR(ctx context.Context, cdr CDR) error {
 		Tech:           tech,
 		Legs:           legs,
 		UnbackedClaims: unbackedClaims,
+		ToNumberE164:   calleeE164,
 	}
 
 	// The row and the deliveries it owes go together. A CDR that exists with

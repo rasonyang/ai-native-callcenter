@@ -112,10 +112,11 @@ func (d *DialerStore) HeldByFrequency(ctx context.Context, campaignID uuid.UUID,
 	return out, nil
 }
 
-// Defer moves contacts to a later due time. A contact that is no longer
-// waiting (claimed for a dial, finished) or whose time is already later is
-// left alone.
-func (d *DialerStore) Defer(ctx context.Context, ids []uuid.UUID, at []time.Time, isHeld bool) error {
+// Defer moves contacts to a later due time, leaving the mark of the hold that
+// moved them (campaign.HoldNone for a calling window's deferral) and clearing
+// the other. A contact that is no longer waiting (claimed for a dial,
+// finished) or whose time is already later is left alone.
+func (d *DialerStore) Defer(ctx context.Context, ids []uuid.UUID, at []time.Time, hold campaign.HoldKind) error {
 	if len(ids) == 0 {
 		return nil
 	}
@@ -123,7 +124,7 @@ func (d *DialerStore) Defer(ctx context.Context, ids []uuid.UUID, at []time.Time
 	for i, t := range at {
 		ats[i] = ts(t)
 	}
-	_, err := d.q.DeferContacts(ctx, queries.DeferContactsParams{Ids: ids, Ats: ats, IsHeld: isHeld})
+	_, err := d.q.DeferContacts(ctx, queries.DeferContactsParams{Ids: ids, Ats: ats, Hold: string(hold)})
 	return err
 }
 
@@ -164,12 +165,55 @@ func (d *DialerStore) FrequencyHold(ctx context.Context, contactID uuid.UUID, no
 	return &end, nil
 }
 
-// RearmFrequencyHeld makes the contacts of RUNNING campaigns that the frequency
-// window deferred (and only those) due at now, for a number that joined the
-// list of test numbers.
-func (d *DialerStore) RearmFrequencyHeld(ctx context.Context, now time.Time) error {
-	_, err := d.q.RearmFrequencyHeld(ctx, ts(now))
+// RearmHeld makes the contacts of RUNNING campaigns that the frequency window or
+// the daily dial cap deferred (and only those: the ones carrying a mark) due at
+// now, for a number that joined the list of test numbers.
+func (d *DialerStore) RearmHeld(ctx context.Context, now time.Time) error {
+	_, err := d.q.RearmHeldContacts(ctx, ts(now))
 	return err
+}
+
+// DialsToday counts, for each (number, day start) pair, the dials of the number
+// since the day start up to now: the campaign attempts in flight or that spent
+// a budget, from any campaign, and the ad-hoc outbound calls in the ledger. The
+// result is parallel to the input. A number on the list of test numbers is
+// never capped, so it counts as zero.
+func (d *DialerStore) DialsToday(ctx context.Context, numbers []string, dayStarts []time.Time, now time.Time) ([]int, error) {
+	if len(numbers) != len(dayStarts) {
+		return nil, fmt.Errorf("dials today: %d numbers and %d day starts", len(numbers), len(dayStarts))
+	}
+	if len(numbers) == 0 {
+		return nil, nil
+	}
+	starts := make([]pgtype.Timestamptz, len(dayStarts))
+	for i, t := range dayStarts {
+		starts[i] = ts(t)
+	}
+	var uncounted []string
+	for _, o := range campaign.AllOutcomes() {
+		if campaign.ClassOf(o) == campaign.ClassNone {
+			uncounted = append(uncounted, string(o))
+		}
+	}
+	rows, err := d.q.DialsTodayByNumber(ctx, queries.DialsTodayByNumberParams{
+		Now: ts(now), UncountedOutcomes: uncounted, Numbers: numbers, DayStarts: starts,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("dials today: %w", err)
+	}
+	type key struct {
+		number string
+		day    int64
+	}
+	counts := make(map[key]int, len(rows))
+	for _, r := range rows {
+		counts[key{r.NumberE164, r.DayStart.Time.UnixMicro()}] = int(r.Dials)
+	}
+	out := make([]int, len(numbers))
+	for i := range numbers {
+		out[i] = counts[key{numbers[i], dayStarts[i].UnixMicro()}] // absent: listed, zero
+	}
+	return out, nil
 }
 
 // EarliestPending is the ACTIVE contact that is due first, nil if none waits.

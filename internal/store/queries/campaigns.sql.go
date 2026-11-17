@@ -14,7 +14,7 @@ import (
 
 const armCampaignContacts = `-- name: ArmCampaignContacts :execrows
 UPDATE campaign_contacts
-SET next_attempt_at = now(), is_frequency_held = false, updated_at = now()
+SET next_attempt_at = now(), is_frequency_held = false, is_daily_cap_held = false, updated_at = now()
 WHERE campaign_id = $1 AND status = 'ACTIVE' AND next_attempt_at IS NULL
 `
 
@@ -522,7 +522,7 @@ func (q *Queries) InsertCampaignContacts(ctx context.Context, arg InsertCampaign
 }
 
 const listCampaignContacts = `-- name: ListCampaignContacts :many
-SELECT c.id, c.campaign_id, c.number_e164, c.number_raw, c.time_zone, c.slots, c.status, c.attempts, c.system_failures, c.next_attempt_at, c.last_outcome, c.lead_intent, c.lead_notes, c.created_at, c.updated_at, c.last_attempt_id, c.last_call_id, c.is_frequency_held, h.last_touch::timestamptz AS last_touch
+SELECT c.id, c.campaign_id, c.number_e164, c.number_raw, c.time_zone, c.slots, c.status, c.attempts, c.system_failures, c.next_attempt_at, c.last_outcome, c.lead_intent, c.lead_notes, c.created_at, c.updated_at, c.last_attempt_id, c.last_call_id, c.is_frequency_held, c.is_daily_cap_held, h.last_touch::timestamptz AS last_touch
 FROM campaign_contacts c
 LEFT JOIN LATERAL (
     SELECT max(a.started_at) AS last_touch
@@ -607,6 +607,7 @@ func (q *Queries) ListCampaignContacts(ctx context.Context, arg ListCampaignCont
 			&i.CampaignContact.LastAttemptID,
 			&i.CampaignContact.LastCallID,
 			&i.CampaignContact.IsFrequencyHeld,
+			&i.CampaignContact.IsDailyCapHeld,
 			&i.LastTouch,
 		); err != nil {
 			return nil, err

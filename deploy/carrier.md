@@ -55,13 +55,29 @@ AICC_OUTBOUND_ENDPOINT=sofia/gateway/pstn_gateway/%s
 ## Test numbers and the carrier's own limits
 
 A team that tests campaigns on its own phones can put those numbers on the list of test numbers
-(`/test-numbers`), and the cross-campaign frequency window (`AICC_CAMPAIGN_FREQUENCY_WINDOW`) then
-no longer holds them back between campaigns. That exemption is the application's alone. A carrier
+(`/test-numbers`), and neither the cross-campaign frequency window (`AICC_CAMPAIGN_FREQUENCY_WINDOW`)
+nor the daily dial cap (`AICC_OUTBOUND_MAX_DIALS_PER_NUMBER_PER_DAY`, below) then holds them back.
+That exemption is the application's alone. A carrier
 line often limits calls to one callee by itself (a number of calls to one callee per hour or per
 day), and that limit still applies to a test number unless the carrier exempts the number too: a
 test campaign that dials the same few phones many times can be refused by the trunk even though the
-application lets it through. Ask the carrier to exempt the numbers, or keep the test volume under
-its limit.
+application lets it through. In particular a test number's 4th dial of the day is sent even with the
+default cap of 3, and a line that refuses the 4th call of the day refuses it. Ask the carrier to
+exempt the numbers, or keep the test volume under its limit.
+
+## Line limits to set at bring-up
+
+Set the application's own limits to match the line's, so a campaign waits instead of being refused:
+
+- `AICC_CAMPAIGN_FREQUENCY_WINDOW` (default `24h`): how long after one campaign reached a number no
+  other campaign dials it.
+- `AICC_OUTBOUND_MAX_DIALS_PER_NUMBER_PER_DAY` (default `3`, `0` turns it off): the most dials to one
+  callee number in the contact's local day, counting every campaign, every attempt (a no-answer, a
+  retry after a system failure, an attempt in flight) and ad-hoc outbound calls. A campaign contact
+  whose number has reached it is not dialled: it waits for its calling window on the next local day
+  and spends no attempt. Set it to the lowest per-callee daily limit the carrier enforces; a
+  development setup that dials one phone repeatedly needs `0`. Ad-hoc dials made before the cap
+  existed are not counted.
 
 ## A called-number prefix
 

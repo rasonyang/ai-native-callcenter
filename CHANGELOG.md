@@ -7,6 +7,42 @@ carries the one-line installer's files.
 
 ## Unreleased
 
+### Upgrade notes
+
+- **The daily dial cap is on after upgrading.** `AICC_OUTBOUND_MAX_DIALS_PER_NUMBER_PER_DAY`
+  defaults to 3: the 4th dial of a local day to one number is not sent, whichever
+  campaign or call it would have come from. `AICC_OUTBOUND_MAX_DIALS_PER_NUMBER_PER_DAY=0`
+  turns it off; the range is 0 to 100. A development setup that dials one phone
+  repeatedly needs `0` in its `.env`, as it does for the frequency window.
+- Migration 00049 runs at startup. It adds `campaign_contacts.is_daily_cap_held`
+  (false for every existing contact), `cdrs.to_number_e164` (NULL for every
+  existing call) and two indexes. Ad-hoc dials made before the upgrade are not
+  counted toward the cap, because their canonical callee is not backfilled;
+  campaign attempts are counted from their first.
+- API contract: additive only. The new `activity` value `WAITING_DAILY_CAP`; a
+  client that switches over that enum must handle it. `make api-breaking
+  BASE=main` reports no breaking change, only `response-property-enum-value-added`
+  warnings from that value.
+
+### Added
+
+- A deployment-wide cap on dials per number per day
+  (`AICC_OUTBOUND_MAX_DIALS_PER_NUMBER_PER_DAY`, default 3, `0` off). A day is the
+  contact's local calendar day, in its own time zone or else the campaign's. What
+  counts: every campaign attempt that was placed, from any campaign and
+  including a no-answer, a retry after a system failure and an attempt still in
+  flight, and every ad-hoc outbound call to the number; a number skipped for
+  the do-not-call list or refused as invalid does not count. A campaign contact
+  whose number has reached the cap is not dialled: it waits for the start of its
+  calling window on the next local day and spends neither an attempt nor a
+  system retry. The campaign's `activity` is `WAITING_DAILY_CAP`, with
+  `nextDialAt` the time it is released. A number on the list of test numbers is
+  not held by the cap, as it is not by the frequency window, and adding a number
+  lifts a hold already in place; the carrier's own limit still applies to it, so
+  on a line that refuses the 4th call of the day a test number's 4th dial is sent
+  and refused. There is no per-campaign setting: the cap belongs to the carrier
+  line (`deploy/carrier.md`) (#577).
+
 ### Fixed
 
 - After a restart, a customer no longer answers an AI outbound call into
