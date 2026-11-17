@@ -126,7 +126,8 @@ type Event struct {
 	HasAudio bool
 
 	// IsBackchannel marks a final CUSTOMER_SAID that was only an
-	// acknowledgement ("mm-hmm", "嗯") said over the bot's audio and held, not
+	// acknowledgement ("mm-hmm", "嗯"), or a pickup greeting ("喂") over the
+	// opening line, said over the bot's audio and held, not
 	// taken as the caller's turn (docs/design/11-backchannels.md). It is
 	// recorded as the caller's words and is otherwise nothing: it does not
 	// reach the flow, the farewell watch or the dead-air accounting.
@@ -136,6 +137,12 @@ type Event struct {
 	// engine cut the bot by itself and the verdict on the words is still
 	// pending or known (openCut). Only the orchestrator in this package reads it.
 	cut *openCut
+
+	// openingCut, on a final CUSTOMER_SAID, is the cut of the bot's opening
+	// line that these words made, when they were only a greeting ("喂"): the
+	// opening is owed once more (Session.SayOpeningAgain). Only the
+	// orchestrator in this package reads it.
+	openingCut *openCut
 
 	// soFar is, on a TOOL_CALL, what the response that made the call had said
 	// and queued when the call arrived, and how many calls it had made before
@@ -189,6 +196,15 @@ type Config struct {
 	// long, whichever is first.
 	IsGreetingGated   bool
 	GreetingMediaWait time.Duration
+
+	// IsCallerFirst makes the call listen before it opens (#594): the request
+	// for the opening turn waits until the callee's greeting has ended, a
+	// fixed wait has passed or the hard cap is reached, and the uplink only
+	// listens meanwhile (nothing is sent to the model). The orchestrator sets
+	// it for a call this platform placed to a customer whose flow asks for it
+	// (global.isCallerFirst); on any other call it is false. It composes with
+	// IsGreetingGated: the opening waits for both.
+	IsCallerFirst bool
 
 	// IsEndingArmed reports whether the call's ending (a transfer or a hangup)
 	// is armed and waiting for its closing line to be heard. The orchestrator
@@ -329,6 +345,17 @@ type Session struct {
 	// isNextTurnMuted asks beginTurn to mute the next turn it starts
 	// (muteNextTurn): the turn a goodbye's hangup result brings.
 	isNextTurnMuted bool
+	// The opening said again (SayOpeningAgain, docs/design/11-backchannels.md):
+	// isOpeningReplayed is once per call, isReplayOwed says the next spoken-line
+	// turn is the replay and replayTurn is that turn, so a greeting that cuts
+	// it is judged as one over the opening. isReplayWaiting is a replay waiting
+	// for the model's own reply to the greeting to start (replayStop its
+	// backstop), so that line is not taken for that reply.
+	isOpeningReplayed bool
+	isReplayOwed      bool
+	replayTurn        int
+	isReplayWaiting   bool
+	replayStop        func() bool
 	// turnOwedUntil is when an asked-for turn that has not started yet stops
 	// counting as the bot's floor; zero is none. See askedForATurn.
 	turnOwedUntil time.Time
@@ -397,6 +424,31 @@ type Session struct {
 	// settled (hush): nothing passes between the caller and the model.
 	isHushed atomic.Bool
 
+	// isListening is set from Start until the model has been started on a
+	// call that listens first (Config.IsCallerFirst): the uplink pump judges
+	// each slot for the listener and sends nothing, fills included, because no
+	// caller audio may reach the provider ahead of its opening request. The
+	// slots still pass on the clock, so sending resumes on a slot boundary
+	// with no catch-up. listener is the pump's alone.
+	isListening atomic.Bool
+	listener    *greetingListener
+	// listenAnsweredAt is the answer the wait is counted from; zero counts it
+	// from the pump's first slot. isListenerDone is the pump's own: the
+	// listener has decided and is not fed again.
+	listenAnsweredAt time.Time
+	isListenerDone   bool
+	// graceFrom and graceQuiet are the pump's own: when the grace after the
+	// wait began (from the answer) and the unvoiced slots in a row since.
+	graceFrom   time.Duration
+	graceQuiet  int
+	listenOnce  sync.Once
+	listenBegan time.Time
+	// pumpStop ends the uplink pump that Start launched ahead of the model
+	// when the model could not be started.
+	pumpStop chan struct{}
+	// listenEnded closes when the wait to open has ended, by whichever path.
+	listenEnded chan struct{}
+
 	closeOnce sync.Once
 	done      chan struct{}
 	wg        sync.WaitGroup
@@ -453,6 +505,8 @@ func New(leg Leg, model provider.VoiceSession, profile provider.Profile,
 		playbackDone:  make(chan playbackMarker, 8),
 		rearm:         make(chan struct{}, 1),
 		done:          make(chan struct{}),
+		pumpStop:      make(chan struct{}),
+		listenEnded:   make(chan struct{}),
 	}, nil
 }
 
@@ -491,17 +545,43 @@ func (s *Session) Start(ctx context.Context) error {
 	sessionCfg.InputFormat = s.uplink.To()
 	sessionCfg.OutputFormat = s.downlink.From()
 
-	// The first-media watch always runs, for the measurement; it also opens the
-	// greeting gate when the deployment asked for one. Without a gate the
-	// model's start config carries none and nothing waits.
-	var gate chan struct{}
+	// The first-media watch always runs, for the measurement. The opening gate
+	// holds for the deployment's media (IsGreetingGated) only. A call that
+	// listens first does not hold the request for the callee's greeting: the
+	// opening is generated meanwhile and held on its way to the leg
+	// (pumpModelEvents). Without a media hold the start config carries no gate
+	// and nothing waits.
+	var gate *openingGate
+	var mediaHold *openingGate
 	if s.cfg.IsGreetingGated {
-		gate = make(chan struct{})
-		sessionCfg.OpeningGate = gate
+		gate = newOpeningGate(1)
+		sessionCfg.OpeningGate = gate.ch
+		mediaHold = gate
 	}
-	go s.watchFirstMedia(ctx, gate)
+	go s.watchFirstMedia(ctx, mediaHold)
+
+	// A call that listens first starts its uplink pump ahead of the model: the
+	// model's start blocks on the gate, and the callee's greeting is judged
+	// from the slots read meanwhile.
+	if s.cfg.IsCallerFirst {
+		s.listener = newGreetingListener(s.leg.Law())
+		s.listenBegan = time.Now()
+		s.listenAnsweredAt = s.leg.AnsweredAt()
+		s.isListening.Store(true)
+		s.wg.Add(1)
+		go s.pumpCallerAudio()
+		go s.watchListening(ctx)
+	}
 
 	if err := s.model.Start(ctx, sessionCfg); err != nil {
+		if s.cfg.IsCallerFirst {
+			// The rescue path runs with nothing reading the leg and no
+			// goroutine of this session left. The leg stays up: a transfer to
+			// a queue goes first.
+			close(s.pumpStop)
+			s.endListening("START_FAILED", time.Since(s.listenBegan), noSpeech)
+			s.wg.Wait()
+		}
 		return fmt.Errorf("aicall: start model: %w", err)
 	}
 	s.log.Info("ai call bridged",
@@ -510,12 +590,22 @@ func (s *Session) Start(ctx context.Context) error {
 		"fromProvider", sessionCfg.OutputFormat.String(),
 		"isPassthrough", s.uplink.IsPassthrough())
 
-	s.wg.Add(5)
-	go s.pumpCallerAudio()
+	if s.cfg.IsCallerFirst {
+		s.wg.Add(4)
+	} else {
+		s.wg.Add(5)
+		go s.pumpCallerAudio()
+	}
 	go s.pumpModelEvents()
 	go s.pumpDigits()
 	go s.watchLeg()
 	go s.watchPlayback()
+
+	// Ready goes out before the stream's closer exists: a call that ends while
+	// Start is still running (a callee who hangs up during the wait to open)
+	// has every publisher return at once, and a closer already waiting would
+	// close the stream under this send.
+	s.emit(Event{Type: EventTypeReady})
 
 	// Every publisher is one of those five. Once they have all returned,
 	// nothing can emit any more, which is the only point at which closing the
@@ -528,18 +618,16 @@ func (s *Session) Start(ctx context.Context) error {
 		}
 		close(s.events)
 	}()
-
-	s.emit(Event{Type: EventTypeReady})
 	return nil
 }
 
 // watchFirstMedia measures answer-to-first-media and, when gate is not nil,
-// closes it on the first of: the first inbound packet (MEDIA), the grace
-// elapsing (GRACE), the leg ending or the session closing (LEG_STOPPED), or ctx
-// ending (CTX). It logs which one opened the gate, once. It keeps watching
+// releases the media hold on it on the first of: the first inbound packet
+// (MEDIA), the grace elapsing (GRACE), the leg ending or the session closing
+// (LEG_STOPPED), or ctx ending (CTX). It logs which one released it, once. It keeps watching
 // after a grace expiry so the measurement still lands, and ends when the
 // call does.
-func (s *Session) watchFirstMedia(ctx context.Context, gate chan struct{}) {
+func (s *Session) watchFirstMedia(ctx context.Context, gate *openingGate) {
 	began := time.Now()
 	var grace <-chan time.Time
 	if gate != nil && s.cfg.GreetingMediaWait > 0 {
@@ -553,7 +641,7 @@ func (s *Session) watchFirstMedia(ctx context.Context, gate chan struct{}) {
 		}
 		s.log.Info("greeting gate opened", "reason", reason,
 			"waitedMs", time.Since(began).Milliseconds())
-		close(gate)
+		gate.release()
 		gate = nil
 	}
 	for {
@@ -836,6 +924,8 @@ func (s *Session) pumpCallerAudio() {
 		select {
 		case <-s.done:
 			return
+		case <-s.pumpStop:
+			return
 		case frame, ok := <-frames:
 			if !ok {
 				return
@@ -889,6 +979,17 @@ func (s *Session) sendDueSlots(clock *uplinkClock, probe *echoprobe.Monitor, now
 			// axis keeps the clock's. The suppressor, when on, judges the slot
 			// here too, after the measurement has seen it raw.
 			probe.FeedUplink(frame)
+		}
+		if s.isListening.Load() {
+			// The slot is the listener's to judge and nobody else's: nothing
+			// is sent, fills included, and no echo suppression is applied
+			// (there is nothing to suppress from).
+			s.listenToSlot(clock, n, frame)
+			if frame != nil {
+				media.PutBytes(frame)
+				clock.stats.DroppedListening++
+			}
+			continue
 		}
 		if s.isHushed.Load() {
 			if frame != nil {
@@ -946,6 +1047,7 @@ func (s *Session) finishUplink(clock *uplinkClock) {
 		"framesDroppedBacklog", st.DroppedBacklog,
 		"framesDroppedRx", droppedRx,
 		"framesDroppedHushed", st.DroppedHushed,
+		"framesDroppedListening", st.DroppedListening,
 		"framesQueued", queued,
 		"maxBacklogFrames", st.MaxBacklog)
 }
@@ -1026,13 +1128,61 @@ func (s *Session) pumpModelEvents() {
 		s.Close(ctx)
 	}()
 
+	// A call that listens first holds what the model sends until the wait to
+	// open has ended (callerfirst.go): the opening is generated meanwhile, and
+	// everything of it that goes toward the leg (audio, the turn's end that
+	// starts its playback marker, every event of the turn) is kept in order
+	// and handled at the release, so played-time accounting, the barge-in
+	// guard, PLAYBACK_DONE, the echo reference and the turn bookkeeping all
+	// start when the caller can hear it. Audio chunks are the provider's own
+	// allocations, kept as they arrive. A fatal error is not held.
+	var held []provider.Event
+	var heldSince time.Time
+	var released <-chan struct{}
+	if s.cfg.IsCallerFirst {
+		released = s.listenEnded
+		held = make([]provider.Event, 0, 512)
+	}
+	release := func() {
+		released = nil
+		if len(held) == 0 {
+			return
+		}
+		audioBytes := 0
+		for _, e := range held {
+			audioBytes += len(e.Audio)
+		}
+		s.log.Info("the opening was held for the callee",
+			"heldMs", time.Since(heldSince).Milliseconds(), "heldEvents", len(held),
+			"heldAudioBytes", audioBytes)
+		for i := range held {
+			s.handleModelEvent(held[i])
+			held[i] = provider.Event{}
+		}
+		held = nil
+	}
+
 	for {
 		select {
 		case <-s.done:
 			return
+		case <-released:
+			release()
 		case event, ok := <-s.model.Events():
 			if !ok {
 				return
+			}
+			if released != nil && !(event.Type == provider.EventTypeError && event.IsFatal) {
+				if len(held) == 0 {
+					heldSince = time.Now()
+				}
+				held = append(held, event)
+				if len(held) >= maxHeldEvents {
+					s.log.Warn("the held opening is too long; letting it go")
+					s.endListening("HELD_FULL", time.Since(s.listenBegan), noSpeech)
+					release()
+				}
+				continue
 			}
 			s.handleModelEvent(event)
 		}
@@ -1119,11 +1269,18 @@ func (s *Session) handleModelEvent(event provider.Event) {
 				}
 			}
 		}
+		if !hadQueued && isCurrent && event.InterruptedBy == provider.InterruptReasonSpeech {
+			// The opening cut before any of it was queued: nothing was heard
+			// to report as a barge-in, yet the words that cut it may be only a
+			// greeting, and then the opening is owed once more.
+			s.noteUnqueuedOpeningCut(turn)
+		}
 		s.emit(Event{Type: EventTypeTurnDone, Turn: turn, IsInterrupted: true, IsAside: isAside,
 			soFar: responseSoFar{text: s.turnWords()}})
 
 	case provider.EventTypeResponseStarted:
 		s.beginTurn(event.IsSpokenLine, event.IsLineAskedAgain)
+		s.onReplyStartedForReplay()
 
 	case provider.EventTypeResponseDone:
 		hasAudio := s.finishTurn(event.IsAbandoned)
@@ -1347,6 +1504,13 @@ func (s *Session) logMuted() {
 	if s.muteLog == nil {
 		return
 	}
+	if s.muteLog.tool == openingReplayMute {
+		s.log.Info("muted the model's reply to a greeting; the opening is said again",
+			"turn", s.mutedTurn, "playedMs", s.muteLog.playedMs, "flushedMs", s.muteLog.flushedMs,
+			"droppedChunks", s.cutOffChunks)
+		s.muteLog = nil
+		return
+	}
 	s.log.Info("muted the turn that called a tool into a closing phase with its own line",
 		"turn", s.mutedTurn, "tool", s.muteLog.tool, "playedMs", s.muteLog.playedMs,
 		"flushedMs", s.muteLog.flushedMs,
@@ -1451,6 +1615,10 @@ func (s *Session) beginTurn(isSpokenLine, isLineAskedAgain bool) {
 	s.turnText = s.turnText[:0]
 	s.turnTextHasDeltas = false
 	s.turnToolCalls = 0
+	if s.isReplayOwed && isSpokenLine {
+		s.isReplayOwed = false
+		s.replayTurn = s.turnSeq
+	}
 	switch {
 	case s.isAsideOwed:
 		s.isAsideOwed = false
@@ -1702,6 +1870,7 @@ func (s *Session) watchPlayback() {
 		if !drained {
 			continue
 		}
+		s.noteOpeningHeard(marker.turn, marker.hasAudio)
 		s.emit(Event{Type: EventTypePlaybackDone, Turn: marker.turn, HasAudio: marker.hasAudio,
 			IsAside: marker.isAside})
 		if s.afterPlaybackDone != nil {

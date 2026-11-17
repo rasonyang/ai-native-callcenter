@@ -290,6 +290,19 @@ func BenchmarkDecodeFrame(b *testing.B) {
 	}
 }
 
+func BenchmarkMeanSquare(b *testing.B) {
+	encoded := make([]byte, FrameSamples)
+	for i := range encoded {
+		encoded[i] = byte(i)
+	}
+	var sink int64
+	b.ReportAllocs()
+	for b.Loop() {
+		sink += LawMu.MeanSquare(encoded)
+	}
+	_ = sink
+}
+
 func BenchmarkUpsample8kTo16k(b *testing.B) {
 	src := make([]int16, FrameSamples)
 	dst := make([]int16, 0, FrameSamples*2)
@@ -308,5 +321,41 @@ func BenchmarkDownsample24kTo8k(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
 		dst = d.Process(dst, src)
+	}
+}
+
+func TestMeanSquareIsTheLevelOfAFrame(t *testing.T) {
+	t.Parallel()
+	for _, law := range []Law{LawMu, LawAlaw} {
+		if got := law.MeanSquare(nil); got != 0 {
+			t.Errorf("%s: an empty frame = %d, want 0", law, got)
+		}
+		// Silence decodes to a few quanta at most.
+		if got := law.MeanSquare(SilenceFrame(law)); got > 64 {
+			t.Errorf("%s: silence = %d, want about 0", law, got)
+		}
+		// A square wave of amplitude A has a mean square of A squared, to
+		// within the codec's own quantisation.
+		for _, amplitude := range []int16{184, 3277, 12000} {
+			samples := make([]int16, FrameSamples)
+			for i := range samples {
+				samples[i] = amplitude
+				if i%2 == 1 {
+					samples[i] = -amplitude
+				}
+			}
+			encoded := law.Encode(make([]byte, 0, FrameSamples), samples)
+			var want int64
+			for _, s := range law.Decode(nil, encoded) {
+				want += int64(s) * int64(s)
+			}
+			want /= FrameSamples
+			if got := law.MeanSquare(encoded); got != want {
+				t.Errorf("%s amplitude %d: MeanSquare = %d, want %d", law, amplitude, got, want)
+			}
+			if lo, hi := int64(amplitude)*int64(amplitude)*9/10, int64(amplitude)*int64(amplitude)*11/10; want < lo || want > hi {
+				t.Errorf("%s amplitude %d: decoded level %d is not near %d", law, amplitude, want, int64(amplitude)*int64(amplitude))
+			}
+		}
 	}
 }

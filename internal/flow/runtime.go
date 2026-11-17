@@ -535,6 +535,23 @@ func (r *Runtime) RefuseAsAcknowledgement(name string) string {
 	return Failed(reason, r.phasePreamble()+r.engine.Instruction()).asToolOutput()
 }
 
+// RefuseAsGreeting is RefuseAsAcknowledgement for a caller whose last words
+// were only a greeting ("喂", "hello?") that cut the bot's opening line: a
+// refusal as a conversation, ok=0, with the phase's instruction as the way on.
+// The opening is said again to the caller, so the model is told to wait for
+// their answer to it.
+func (r *Runtime) RefuseAsGreeting(name string) string {
+	r.log.Info("tool refused: the caller only greeted, it is not an answer",
+		"tool", name, "node", r.engine.NodeID())
+	reason := "the caller only said hello as they picked up (\"hello?\"); that is not an answer, " +
+		"so " + name + " was not carried out. The opening is said to them again; wait for their answer to it"
+	if r.engine.Lang() == LangZH {
+		reason = "来电者只是接起电话打了个招呼(如“喂”“你好”),并没有回答问题,所以没有执行 " + name +
+			"。开场白会再对他说一遍,等对方回答之后再继续"
+	}
+	return Failed(reason, r.phasePreamble()+r.engine.Instruction()).asToolOutput()
+}
+
 // RefuseWhileAnswering is the answer to a hangup made in a response that was
 // answering the caller (#484): a refusal as a conversation, with ok=0 and a
 // reason that tells the model the call goes on, not to repeat its answer, and

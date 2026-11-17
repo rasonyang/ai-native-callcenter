@@ -89,6 +89,10 @@ e2e-dailycap: ## Run the daily dial cap case (one number dialled to the cap of 3
 e2e-carrier-timeout: ## Run the carrier's 408 case (a ringing callee that answers 408 after 25 s) in a campaign of its own with the default 2 h NO_ANSWER interval
 	deploy/e2e/e2e.sh carrier-timeout
 
+.PHONY: e2e-callerfirst
+e2e-callerfirst: ## Run the caller-first case (AI outbound calls that listen to the callee's greeting before they open) in the end-to-end environment
+	deploy/e2e/e2e.sh callerfirst
+
 .PHONY: e2e-down
 e2e-down: ## Collect logs and remove the end-to-end environment, its volumes and its network
 	deploy/e2e/e2e.sh down

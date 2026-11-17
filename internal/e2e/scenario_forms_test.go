@@ -190,6 +190,9 @@ func TestScenarioKeysStayApartInEveryForm(t *testing.T) {
 		for _, rc := range K3.Direct {
 			direct[rc.DialKey(K3.Region)] = true
 		}
+		for _, cs := range CallerFirstCases {
+			direct[cs.Number] = true
+		}
 		for key := range s.Numbers {
 			if _, ok := seen[key]; !ok && !direct[key] {
 				if len(key) > 0 {

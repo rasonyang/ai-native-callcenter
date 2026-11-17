@@ -23,6 +23,9 @@ const (
 	UplinkSilence = "SILENCE"
 	UplinkTone    = "TONE"
 	UplinkWAV     = "WAV"
+	// UplinkBursts is silence with bursts of a tone at set times, counted
+	// from the moment media starts: a callee that says "hello" after a pause.
+	UplinkBursts = "BURSTS"
 )
 
 // Scenario maps a dialled number (the user part of the Request-URI, matched
@@ -57,12 +60,24 @@ type Provisional struct {
 
 // Uplink selects the callee's audio.
 type Uplink struct {
-	// Kind is SILENCE (the default), TONE or WAV.
+	// Kind is SILENCE (the default), TONE, WAV or BURSTS.
 	Kind string `json:"kind,omitempty"`
-	// FrequencyHz of the tone; 440 when zero.
+	// FrequencyHz of the tone (TONE and BURSTS); 440 when zero.
 	FrequencyHz int `json:"frequencyHz,omitempty"`
+	// Bursts are the tone's bursts for BURSTS, each timed from media start
+	// (the moment the simulator opens its RTP path, recorded as
+	// DialogRecord.UplinkStartedAfterInviteMs); everything between them is
+	// silence.
+	Bursts []Burst `json:"bursts,omitempty"`
 	// File is an 8 kHz mono 16-bit PCM WAV, played once, for WAV.
 	File string `json:"file,omitempty"`
+}
+
+// Burst is one burst of tone: it sounds from AtMs for DurationMs after media
+// starts.
+type Burst struct {
+	AtMs       int `json:"atMs"`
+	DurationMs int `json:"durationMs"`
 }
 
 // ParseScenario reads and validates a scenario.
@@ -137,8 +152,20 @@ func (b *Behaviour) validate() error {
 		if b.Uplink.File == "" {
 			return fmt.Errorf("uplink WAV needs a file")
 		}
+	case UplinkBursts:
+		if len(b.Uplink.Bursts) == 0 {
+			return fmt.Errorf("uplink BURSTS needs at least one burst")
+		}
+		for i, burst := range b.Uplink.Bursts {
+			if burst.AtMs < 0 || burst.DurationMs <= 0 {
+				return fmt.Errorf("uplink burst %d: atMs %d must not be negative and durationMs %d must be positive", i, burst.AtMs, burst.DurationMs)
+			}
+		}
 	default:
 		return fmt.Errorf("unknown uplink kind %q", b.Uplink.Kind)
+	}
+	if len(b.Uplink.Bursts) > 0 && b.Uplink.Kind != UplinkBursts {
+		return fmt.Errorf("uplink bursts need kind BURSTS, not %q", b.Uplink.Kind)
 	}
 	return nil
 }

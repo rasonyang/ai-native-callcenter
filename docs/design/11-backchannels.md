@@ -155,6 +155,9 @@ a. Flow. If the verdict is `ack`, a tool call in the response that answers the
    1000 ms, and with no verdict runs as it always did. The window is the first
    response after the cut. A "嗯" said when nothing was playing is never
    affected, because no cut is recorded for it.
+   A greeting that cut the opening line (see "Greetings over the opening") is
+   judged the same way: the tool is refused with its own reason (the caller only
+   said hello as they picked up), and the opening is said again.
 b. Closing line. A cut that landed on an armed closing line that had finished
    generating was counted as the first interruption before the verdict existed.
    When the verdict arrives as `ack` the cut becomes the second-interruption
@@ -164,6 +167,103 @@ b. Closing line. A cut that landed on an armed closing line that had finished
    acknowledgement must not reach the caller (on a live qwen call it read out a
    made-up "[系统提示] 本轮通话已结束"). A first cut of a line still being
    generated leaves the line owed (#493): it is asked for again, once.
+
+## Greetings over the opening (#594)
+
+A callee picks up and says "喂" before anything else, and the bot's opening line
+is already starting. The utterance answers nothing the bot said, so it should
+neither cut the opening for good nor be answered as if it were the reply. It
+applies to every AI call with an opening line (`SessionConfig.OpeningText`),
+inbound and outbound, and needs no flow field.
+
+The classifier (`classifyGreeting` in `backchannel.go`): an utterance made only
+of greeting words, at most three of them in any order and with any repetition,
+judged on the joined compact form the acknowledgement classifier uses. zh: 喂,
+你好, 您好. en: hello, hi. "喂，您好", "喂喂喂", "你好你好" and "hi, hello" are
+greetings; anything else in the utterance makes it words ("喂，请问你是哪位",
+"hello, who is this?"). Unlike an acknowledgement, a trailing question mark does
+not make it words: "喂？" and "hello?" are greetings. Only the call language's
+list counts. A prefix of a greeting (or of a run of them) is greeting-so-far
+for a partial transcript.
+
+A greeting counts only over the opening: the opening turn (turn 1 when the call
+has an opening line) or its replay. Over any other turn it is words, as before.
+
+openai (the client holds speech): an utterance that starts while the opening is
+being made or heard is held, also before any of its audio has been queued. The
+partials keep the hold while they are greeting-so-far or an acknowledgement; a
+final that is a greeting is declined exactly as an acknowledgement is
+(`DeclineCallerTurn`, flagged `IsBackchannel`, nothing else hears it), so the
+opening is never cut. At the cap a held utterance that is a greeting so far
+does not cut the opening: a second cap of the same length is armed and the
+final decides; words arriving in the meantime take the floor as ever. The
+provider does not report a failed transcription (`...input_audio_transcription.failed`
+is not handled), so a final may never come: at the second cap the utterance is
+declined as a greeting (the item is deleted, the opening is not cut, the hold is
+released), and a final that still arrives is recorded flagged and does nothing
+else. With no text at the cap it takes the floor.
+
+The engines that cut by themselves (qwen, grok, doubao, gateway): the cut has
+happened, so the damage is limited afterwards.
+
+- The cut is recorded when it is over the opening, also when the provider
+  cancelled the opening before any audio was queued (that path used to open a
+  cut only when something was queued). One cut is recorded once, whichever side
+  reported it.
+- A moving tool made in the response that answers the cut is refused as a
+  conversation (`Runtime.RefuseAsGreeting`, en and zh), as for an
+  acknowledgement.
+- The opening is said again once per call, from its start, with the same
+  rendered text, as a line that pre-empts (`Session.SayOpeningAgain`). If the
+  model's reply to the greeting has started it is muted (`MuteTurn`) first. If
+  it has not started yet the line waits for it to start (backstop 1000 ms),
+  because a line requested on a free floor while qwen's own reply is about to be
+  created is taken for that reply. The replay's own turn is recognised as
+  opening, so a greeting that cuts the replay is refused a moving tool but gets
+  no third telling.
+- No replay when the flow has left the entry phase, when an ending is armed or
+  under way, or when the words were not a greeting. An opening cut before it
+  played in full is always owed; there is no "counts as said" estimate for it.
+
+### The opening stays owed
+
+A cut of the opening line is not always followed by the greeting's final
+transcript on the cut that caused it. Live (qwen flash), "喂你好" was split by the
+engine: it cut the opening at the first word, created a reply, and cancelled that
+reply at the second. The final then arrived after a second cut, of the reply,
+and was judged against that one. So the opening is owed at call level:
+
+- A cut of the opening (turn 1 or its replay) marks it owed. While it is owed any
+  later cut is judged as over the opening, with or without queued audio, so a
+  cancelled reply in between is a cut of the opening's.
+- A final transcript that is a greeting while the opening is owed still replays
+  it when no cut judges those words (the cut was superseded, or another
+  utterance's final): the mark stands in for the cut. Once per call stays.
+- The mark clears when the opening has been asked for again, when a final
+  transcript has words (anything that is not a greeting, an acknowledgement
+  included), when a later turn with audio, neither muted nor cut, has played to the
+  caller in full (`PLAYBACK_DONE`), or when the flow leaves the entry phase or an
+  ending is under way.
+
+### The opening stays owed
+
+A cut of the opening line is not always followed by the greeting's final
+transcript on the cut that caused it. Live (qwen flash), "喂你好" was split by the
+engine: it cut the opening at the first word, created a reply, and cancelled that
+reply at the second. The final then arrived after a second cut, of the reply,
+and was judged against that one. So the opening is owed at call level:
+
+- A cut of the opening (turn 1 or its replay) marks it owed. While it is owed any
+  later cut is judged as over the opening, with or without queued audio, so a
+  cancelled reply in between is a cut of the opening's.
+- A final transcript that is a greeting while the opening is owed still replays
+  it when no cut judges those words (the cut was superseded, or another
+  utterance's final): the mark stands in for the cut. Once per call stays.
+- The mark clears when the opening has been asked for again, when a final
+  transcript has words (anything that is not a greeting, an acknowledgement
+  included), when a later turn with audio, neither muted nor cut, has played to the
+  caller in full (`PLAYBACK_DONE`), or when the flow leaves the entry phase or an
+  ending is under way.
 
 ## Known limits
 
@@ -187,3 +287,15 @@ b. Closing line. A cut that landed on an armed closing line that had finished
 - A declined item stays in the conversation between its commit and the final
   transcript (about a second); a response created in that window can read it.
 - The measurements have 1-2 samples per cell and the clips are synthetic.
+- A greeting is whatever the transcriber writes. A "喂" heard as 嗯 or the
+  reverse is judged as what was heard (an acknowledgement over the opening is
+  declined on openai and limited elsewhere, a greeting is replayed).
+- A greeting said over the opening is declined or replayed on a call that has
+  no wish for it: a callee who really is answering with "hello?" is greeted
+  again by the opening, by design.
+- On the cutting engines the opening is said twice at best: the first part the
+  callee heard before the cut, then the whole line. The model's own paraphrase
+  of a line sent mid-call is a risk that only a live qwen call shows
+  (`TestLiveQwenCutOpener/.../hello`).
+- A greeting that lands before the opening's response has been created at all
+  (turn 0) is an ordinary turn.

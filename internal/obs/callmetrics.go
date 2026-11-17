@@ -54,6 +54,7 @@ var (
 	botWordlessHangups metric.Int64Counter
 	botFirstMedia      metric.Int64Histogram
 	botFirstAudio      metric.Int64Histogram
+	botCallerFirstWait metric.Int64Histogram
 	botSlots           metric.Int64UpDownCounter
 	botOverflow        metric.Int64Counter
 	botOverflowHold    metric.Int64Histogram
@@ -233,6 +234,14 @@ func init() {
 			"answer; this is how long, from the real answer."),
 		metric.WithUnit("ms"),
 		metric.WithExplicitBucketBoundaries(20, 50, 100, 250, 500, 1000, 2000, 4000, 6000, 9000, 15000, 30000))
+	botCallerFirstWait, _ = meter.Int64Histogram("aicc_bot_caller_first_wait_ms",
+		metric.WithDescription("Per outbound bot call that listens before it opens "+
+			"(global.isCallerFirst): how long the opening waited for the callee, in "+
+			"milliseconds, by outcome: GREETING (the callee's greeting ended), TIMEOUT "+
+			"(nothing was said), HARD_CAP (the callee was still speaking at the cap) "+
+			"or LEG_STOPPED (the call ended or the session was cancelled first)."),
+		metric.WithUnit("ms"),
+		metric.WithExplicitBucketBoundaries(100, 250, 500, 1000, 1500, 2000, 2500, 3000, 4000, 6000))
 	botFirstAudio, _ = meter.Int64Histogram("aicc_bot_first_audio_ms",
 		metric.WithDescription("Per bot call: the answer to the first speech frame queued "+
 			"for the caller, in milliseconds, by provider. before_media=true says it was "+
@@ -403,6 +412,16 @@ func RecordBotFirstMedia(ms int64) {
 		return
 	}
 	botFirstMedia.Record(context.Background(), ms)
+}
+
+// RecordBotCallerFirstWait publishes how long an outbound call's opening
+// waited for the callee (global.isCallerFirst), and how the wait ended.
+func RecordBotCallerFirstWait(outcome string, ms int64) {
+	if botCallerFirstWait == nil {
+		return
+	}
+	botCallerFirstWait.Record(context.Background(), ms,
+		metric.WithAttributes(attribute.String("outcome", outcome)))
 }
 
 // RecordBotFirstAudio publishes how long after the answer the bot's first

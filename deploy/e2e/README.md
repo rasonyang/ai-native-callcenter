@@ -15,6 +15,7 @@ make e2e-capacity  # bot-slot overflow (K1), the DID outbound line limit (K2) an
 make e2e-frequency # the list of test numbers: two campaigns in a row on a listed number, with a 24 h frequency window
 make e2e-dailycap  # the daily dial cap: one number dialled to the cap of 3 and no further
 make e2e-carrier-timeout # a carrier that ends an unanswered call with 408: NO_ANSWER, ringSec, the retry interval (own campaign, 2 h interval)
+make e2e-callerfirst # AI outbound calls that listen to the callee's greeting before they open (global.isCallerFirst)
 make e2e-down      # collect logs, remove containers, volumes and the network
 ```
 
@@ -338,7 +339,7 @@ contact keep the canonical `+` number; only the dial string follows the form.
   three, before anything is built or started.
 - `up` fixes the form for the environment and records it in
   `bin/e2e/<project>/dial-form` (removed by `down`). Every other command
-  (`smoke`, `campaign`, `capacity`, `frequency`, `dailycap`, `carrier-timeout`, `config`) runs in the recorded form, so
+  (`smoke`, `campaign`, `capacity`, `frequency`, `dailycap`, `carrier-timeout`, `callerfirst`, `config`) runs in the recorded form, so
   `e2e-capacity`'s application restarts keep it. An explicit
   `E2E_OUTBOUND_DIAL_FORM` that differs from the recorded one is refused ("the
   environment is up with X; run: make e2e-down"); `down` ignores it, since it
@@ -646,6 +647,44 @@ is `carrier-timeout-<time>/report.json`: the timeline, every assertion, the
 campaign as created (the resolved policy), the attempt, the contact, the CDR,
 the dialog and the measurements.
 
+## The opening that listens first
+
+`make e2e-callerfirst` (issue #594, `internal/e2e/callerfirst*.go`) places four
+AI outbound calls, one after the other, through `POST /calls` on a DID that runs
+`flow.callerfirst.json`: a flow with `global.isCallerFirst: true` whose opening
+ends in a question. The application requests the opening at once and generates
+it during the wait, but holds its audio until the callee's greeting has ended
+(300 ms of silence after the voice), at 2000 ms after the answer when nothing
+was said, or at the 4000 ms cap; nothing the callee says reaches the provider
+during the wait or the grace after it (800 ms, extended while voice is heard,
+at most 1500 ms after the release).
+
+The callee is the simulator's `BURSTS` uplink: silence with bursts of a tone at
+set times (`atMs`, `durationMs`), timed from the moment it begins to send
+(recorded as `uplinkStartedAfterInviteMs`). Its record also holds the
+downlink's `audioRuns`: the stretches of frames above silence, a run going on
+while the next such frame arrives within 100 ms. The mock provider counts, per
+session, the uplink frames it received and those above silence
+(`GET /_stats?sessions=1`), so the case can prove that the greeting never
+reached the provider. Direct numbers, so every dial form uses them as they are
+(`+1 202 555 0201` to `0204` in `scenario.json` and the two generated files).
+
+| call | the callee | the case asserts |
+| --- | --- | --- |
+| F1-A | a greeting at 800-1200 ms, then silence | the first audio comes 1400-1800 ms after the callee's media start (after the greeting, not at the 2000 ms timeout), as one run of at least 3 s with no gap; the mock saw no frame above silence |
+| F1-B | silence, then 400 ms of voice at 2600 ms | the opening started at the timeout (1900-2600 ms), before the burst, as one run; the burst fell in the grace, so the mock saw no frame above silence |
+| F1-C | silence | the first audio comes 1900-3000 ms after the callee's media start, as one run; the mock saw no frame above silence |
+| F1-D | silence, then 400 ms of voice at 7000 ms (control) | the first audio as in F1-C; the mock saw at least 5 frames above silence, so a mock that was blind to voice would fail here |
+
+Every interval is read on the simulator's monotonic clock, from the callee's
+media start to the first downlink run (see "Clocks"); the mock's counters are
+counts, and its times, which are on its own clock, are only reported. The
+bounds leave a few hundred milliseconds of path latency over the application's
+constants, and the greeting's release (1500 ms) is told from the timeout
+(2000 ms) by a bound of 1800 ms. The callee hangs up 10 s after answering. The
+report is `callerfirst-<time>/report.json`: the timeline, every assertion, and
+per call the simulator's dialog, the audio runs and the mock's session.
+
 ## Reading a run
 
 `bin/e2e/<project>/run/` (git-ignored) holds, after a run:
@@ -661,6 +700,7 @@ the dialog and the measurements.
 | `capacity-<time>/K1/`, `K2/`, `K3/` | each capacity scenario's `report.json` and `capacity.md` (K3's with the switch log's lines) |
 | `dailycap-<time>/report.json` | the daily dial cap case: the zone, the timeline, every assertion, the contact and campaign at the cap and after the quiet period |
 | `frequency-<time>/report.json` | the test-number case: the timeline, every assertion and both campaigns' attempts |
+| `callerfirst-<time>/report.json` | the caller-first case: the timeline, every assertion, and per call the simulator's dialog, its audio runs and the mock provider's session |
 | `carrier-timeout-<time>/report.json` | the carrier's 408 case: the timeline, every assertion, the campaign's resolved policy, the attempt, the contact, the CDR, the dialog and the measurements |
 | `logs/<service>.log` | each container's output, written on a failed up, smoke, campaign or capacity run and by `e2e-down` |
 | `logs/freeswitch-file.log` | the switch's log file, each call's lines prefixed with its leg id |

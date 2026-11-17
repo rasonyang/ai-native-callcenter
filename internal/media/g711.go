@@ -100,6 +100,26 @@ func (l Law) Decode(dst []int16, encoded []byte) []int16 {
 	return dst
 }
 
+// MeanSquare is the mean of the squared linear samples of one G.711 frame,
+// read straight from the decode table: the level of the frame without a
+// buffer. An empty frame is 0. A frame of full-scale samples stays well inside
+// int64 (32768 squared per sample).
+func (l Law) MeanSquare(frame []byte) int64 {
+	if len(frame) == 0 {
+		return 0
+	}
+	table := &muDecode
+	if l == LawAlaw {
+		table = &alawDecode
+	}
+	var sum int64
+	for _, b := range frame {
+		v := int64(table[b])
+		sum += v * v
+	}
+	return sum / int64(len(frame))
+}
+
 // Transcode converts encoded audio between the two laws without going through
 // linear PCM in the caller.
 func Transcode(dst []byte, encoded []byte, from, to Law) []byte {

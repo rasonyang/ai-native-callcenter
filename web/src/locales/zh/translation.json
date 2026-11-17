@@ -780,7 +780,9 @@
     "closingTarget": "收尾阶段",
     "maxTurnsWithoutTool": "每个阶段无工具回复上限",
     "maxDurationSec": "通话时长上限（秒）",
+    "isCallerFirst": "先听后说（外呼）",
     "off": "关闭",
+    "on": "开启",
     "alwaysAllowed": "始终可用",
     "builtinTool": "内置 — 由平台实现，没有 HTTP 调用",
     "builtin": {

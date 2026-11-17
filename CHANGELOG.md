@@ -26,6 +26,37 @@ carries the one-line installer's files.
 
 ### Added
 
+- A callee's pickup greeting ("喂", "你好", "hello?") no longer derails the
+  opening line, on every AI call that has one (outbound and inbound, no flow
+  field needed). Where the engine lets the client hold speech over the bot's
+  audio (openai), a greeting over the opening is declined like a one-word
+  acknowledgement and the opening plays on. Where the engine cuts by itself
+  (qwen, grok, doubao, gateway), a tool call the model makes in answer to the
+  greeting is refused as a conversation instead of moving the flow, the model's
+  reply to the greeting is not played, and the opening is said again once from
+  its start. It is not said again when the flow has left its entry phase or an
+  ending is under way. The opening stays owed after a cut until it has been said
+  again or the caller has been answered, so a greeting that arrives after the model
+  already replied to its first word is still recognised. Said anywhere else, a
+  greeting is still words (#594).
+- `global.isCallerFirst` in a flow: on a call the platform places to a customer,
+  the bot listens before it speaks. The opening line is generated while the
+  callee greets and is played once their own greeting ("hello?") has ended, or a
+  fixed wait after the answer has passed with nothing said, so the bot no longer
+  starts its line over the callee's first word and does not make them wait for
+  it to be generated. Nothing the callee says reaches the model until a short
+  grace after the line is released, so the second word of "hello... who is
+  this?" does not cut it. Inbound and internal calls ignore the field, and a
+  flow without it opens as before. The flow editor shows it in the runtime
+  panel. New metric
+  `aicc_bot_caller_first_wait_ms` (by `outcome`) and a `caller-first wait ended`
+  log line, a `caller-first grace ended` line and a line saying how long the
+  opening was held; the call's `aicc_bot_first_audio_ms` is measured when the
+  caller can hear the line, so it includes the wait on a flow that sets it (#594).
+  The seeded `campaign_lead_followup` flow sets it, so a campaign call from the
+  demo seed waits for the callee's greeting, and for up to two seconds when
+  nothing is said, before its opening line. The
+  end-to-end suite has a case for it (`make e2e-callerfirst`).
 - A deployment-wide cap on dials per number per day
   (`AICC_OUTBOUND_MAX_DIALS_PER_NUMBER_PER_DAY`, default 3, `0` off). A day is the
   contact's local calendar day, in its own time zone or else the campaign's. What

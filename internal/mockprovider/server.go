@@ -109,6 +109,10 @@ type Server struct {
 	// resultsWithoutCreate counts awaited results with no response.create
 	// after them inside the grace period.
 	resultsWithoutCreate atomic.Int64
+
+	// meters are the uplink meters of the most recent sessions, oldest first.
+	metersMu sync.Mutex
+	meters   []*uplinkMeter
 }
 
 // New prepares a server. The audio it speaks is built once here and shared:
@@ -143,6 +147,33 @@ type Stats struct {
 	// ResultsWithoutCreate counts tool results the script continued past
 	// after the grace period, with no response.create following.
 	ResultsWithoutCreate int64 `json:"resultsWithoutCreate"`
+
+	// Sessions is what each of the most recent sessions heard of the
+	// application's uplink; served only by GET StatsPath?sessions=1, never by
+	// Stats, which a load run polls.
+	Sessions []SessionStat `json:"sessions,omitempty"`
+}
+
+// SessionStats is the uplink record of the most recent sessions (at most
+// maxSessionStats), oldest first.
+func (s *Server) SessionStats() []SessionStat {
+	s.metersMu.Lock()
+	meters := append([]*uplinkMeter(nil), s.meters...)
+	s.metersMu.Unlock()
+	out := make([]SessionStat, 0, len(meters))
+	for _, m := range meters {
+		out = append(out, m.snapshot())
+	}
+	return out
+}
+
+func (s *Server) addMeter(m *uplinkMeter) {
+	s.metersMu.Lock()
+	defer s.metersMu.Unlock()
+	if len(s.meters) >= maxSessionStats {
+		s.meters = append(s.meters[:0], s.meters[1:]...)
+	}
+	s.meters = append(s.meters, m)
 }
 
 func (s *Server) Stats() Stats {
@@ -173,9 +204,13 @@ const StatsPath = "/_stats"
 // ask how many sessions were ever opened.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET "+StatsPath, func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc("GET "+StatsPath, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(s.Stats())
+		stats := s.Stats()
+		if r.URL.Query().Get("sessions") == "1" {
+			stats.Sessions = s.SessionStats()
+		}
+		_ = json.NewEncoder(w).Encode(stats)
 	})
 	mux.Handle("/", s)
 	return mux
@@ -190,7 +225,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	live := s.sessions.Add(1)
-	s.total.Add(1)
+	seq := s.total.Add(1)
 	for {
 		peak := s.peak.Load()
 		if live <= peak || s.peak.CompareAndSwap(peak, live) {
@@ -199,7 +234,11 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	defer s.sessions.Add(-1)
 
-	newSession(s, conn).run()
+	sess := newSession(s, conn)
+	sess.meter = newUplinkMeter(seq)
+	s.addMeter(sess.meter)
+	defer sess.meter.close()
+	sess.run()
 }
 
 // session is one conversation.
@@ -219,6 +258,9 @@ type session struct {
 
 	// scn is set in scenario mode only.
 	scn *scenarioState
+
+	// meter measures the application's uplink.
+	meter *uplinkMeter
 }
 
 func newSession(server *Server, conn *websocket.Conn) *session {
@@ -256,6 +298,14 @@ func (s *session) run() {
 		}
 		if json.Unmarshal(data, &event) != nil {
 			continue
+		}
+		switch event.Type {
+		case "input_audio_buffer.append":
+			s.meter.noteAppend(data)
+		case "session.update":
+			s.meter.noteSessionUpdate(data)
+		case "response.create":
+			s.meter.noteResponseCreate()
 		}
 		if s.scn != nil && s.observe(event.Type, data) {
 			continue
