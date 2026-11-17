@@ -132,6 +132,12 @@ jobs:
         if: ${{ !cancelled() && steps.up.outcome == 'success' }}
         run: make e2e-capacity
 
+      # Four AI outbound calls on a flow that listens first (#594), about a
+      # minute: a greeting at 800 ms, at 2.6 s, none, and a late one.
+      - name: Caller-first tests
+        if: ${{ !cancelled() && steps.up.outcome == 'success' }}
+        run: make e2e-callerfirst
+
       # The run directory holds the simulator's record, the CDRs, the smoke
       # summary, the campaign report with its failure bundles, the capacity
       # reports and every container's log; a failed up, smoke, campaign or

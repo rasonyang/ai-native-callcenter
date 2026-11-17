@@ -53,6 +53,10 @@ carries the one-line installer's files.
   log line, a `caller-first grace ended` line and a line saying how long the
   opening was held; the call's `aicc_bot_first_audio_ms` is measured when the
   caller can hear the line, so it includes the wait on a flow that sets it (#594).
+  The seeded `campaign_lead_followup` flow sets it, so a campaign call from the
+  demo seed waits for the callee's greeting, and for up to two seconds when
+  nothing is said, before its opening line. The
+  end-to-end suite has a case for it (`make e2e-callerfirst`).
 - A deployment-wide cap on dials per number per day
   (`AICC_OUTBOUND_MAX_DIALS_PER_NUMBER_PER_DAY`, default 3, `0` off). A day is the
   contact's local calendar day, in its own time zone or else the campaign's. What

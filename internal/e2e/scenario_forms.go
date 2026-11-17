@@ -117,6 +117,9 @@ func scenarioKeyClasses() (campaign map[string]campaignKeyOwner, direct map[stri
 	for _, rc := range K3.Direct {
 		direct[rc.DialKey(K3.Region)] = "K3 direct call " + rc.ID
 	}
+	for _, cs := range CallerFirstCases {
+		direct[cs.Number] = CallerFirstScenarioID + " direct call " + cs.ID
+	}
 	for n, o := range campaign {
 		if what, both := direct[n]; both {
 			return nil, nil, fmt.Errorf("%s is dialled as %s and as a direct call (%s): a number is one or the other", n, o.label, what)

@@ -77,8 +77,12 @@ type DialogRecord struct {
 	End          *EndRecord          `json:"end,omitempty"`
 
 	// Codec is the negotiated law (PCMU or PCMA); empty when none was.
-	Codec    string   `json:"codec,omitempty"`
-	Downlink Downlink `json:"downlink"`
+	Codec string `json:"codec,omitempty"`
+	// UplinkStartedAfterInviteMs is when the simulator began sending its
+	// uplink (the zero of a BURSTS uplink's timings), on the monotonic clock;
+	// absent when media never started.
+	UplinkStartedAfterInviteMs *float64 `json:"uplinkStartedAfterInviteMs,omitempty"`
+	Downlink                   Downlink `json:"downlink"`
 }
 
 // ProvisionalRecord is a 1xx the simulator sent.
@@ -128,6 +132,26 @@ type Downlink struct {
 	// FirstAudioAfterAnswerMs runs from the 200 OK to the first frame above
 	// silence that arrived after it; absent when there was none.
 	FirstAudioAfterAnswerMs *float64 `json:"firstAudioAfterAnswerMs,omitempty"`
+	// AudioRuns are the stretches of frames above silence, in order, on the
+	// monotonic clock counted from the INVITE: a run goes on while the next
+	// such frame arrives within audioRunGapMs of the last one. One continuous
+	// line of speech is one run.
+	AudioRuns []AudioRun `json:"audioRuns"`
+}
+
+// audioRunGapMs is the longest pause between two frames above silence that
+// still belongs to one run: five frames, more than the jitter of a bridged
+// path and less than any pause in speech a test would look for.
+const audioRunGapMs = 100
+
+// AudioRun is one stretch of audio above silence.
+type AudioRun struct {
+	// StartAfterInviteMs is when the run's first frame arrived and
+	// EndAfterInviteMs when its last did, both on the simulator's monotonic
+	// clock counted from the INVITE.
+	StartAfterInviteMs float64 `json:"startAfterInviteMs"`
+	EndAfterInviteMs   float64 `json:"endAfterInviteMs"`
+	Frames             int     `json:"frames"`
 }
 
 // EnergyBucket is the level of the frames received in one window.
@@ -148,6 +172,11 @@ func (r *DialogRecord) snapshot() DialogRecord {
 	}
 	out.Provisionals = append([]ProvisionalRecord{}, r.Provisionals...)
 	out.Downlink.Energy = append([]EnergyBucket{}, r.Downlink.Energy...)
+	out.Downlink.AudioRuns = append([]AudioRun{}, r.Downlink.AudioRuns...)
+	if r.UplinkStartedAfterInviteMs != nil {
+		v := *r.UplinkStartedAfterInviteMs
+		out.UplinkStartedAfterInviteMs = &v
+	}
 	if r.Final != nil {
 		f := *r.Final
 		out.Final = &f
@@ -181,4 +210,15 @@ func (d *Downlink) addFrame(sinceInvite time.Duration, rms float64) {
 	if rms > b.PeakRMS {
 		b.PeakRMS = rms
 	}
+}
+
+// addAudio folds one frame above silence, which arrived at afterInviteMs, into
+// the runs.
+func (d *Downlink) addAudio(afterInviteMs float64) {
+	if n := len(d.AudioRuns); n > 0 && afterInviteMs-d.AudioRuns[n-1].EndAfterInviteMs <= audioRunGapMs {
+		d.AudioRuns[n-1].EndAfterInviteMs = afterInviteMs
+		d.AudioRuns[n-1].Frames++
+		return
+	}
+	d.AudioRuns = append(d.AudioRuns, AudioRun{StartAfterInviteMs: afterInviteMs, EndAfterInviteMs: afterInviteMs, Frames: 1})
 }

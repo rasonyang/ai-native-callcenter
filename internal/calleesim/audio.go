@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"time"
 
 	"github.com/rasonyang/ai-native-callcenter/internal/media"
 )
@@ -57,6 +58,28 @@ func (t *toneSource) next() []byte {
 	frame := t.pcm[t.pos : t.pos+media.FrameSamples]
 	t.pos = (t.pos + media.FrameSamples) % len(t.pcm)
 	return frame
+}
+
+// burstSource is silence with bursts of a tone at set times.
+type burstSource struct {
+	tone   *toneSource
+	bursts []Burst
+}
+
+func newBurstSource(law media.Law, frequencyHz int, bursts []Burst) *burstSource {
+	return &burstSource{tone: newToneSource(law, frequencyHz), bursts: bursts}
+}
+
+// frameAt is the frame to send when elapsed has passed since media started:
+// the tone inside a burst, nil (nothing queued; the session fills with
+// silence itself) outside every burst.
+func (b *burstSource) frameAt(elapsed time.Duration) []byte {
+	for _, burst := range b.bursts {
+		if elapsed >= ms(burst.AtMs) && elapsed < ms(burst.AtMs+burst.DurationMs) {
+			return b.tone.next()
+		}
+	}
+	return nil
 }
 
 // pcmSource plays linear samples once, then goes quiet.

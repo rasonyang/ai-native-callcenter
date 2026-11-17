@@ -75,6 +75,9 @@ func (d *dialog) receive(session *voice.RTPSession) {
 
 			d.mu.Lock()
 			d.rec.Downlink.addFrame(at.Sub(d.rec.InviteAt), rms)
+			if rms > silenceRMS {
+				d.rec.Downlink.addAudio(monotonicMs(at, d.inviteAt))
+			}
 			if rms > silenceRMS && !d.answeredAt.IsZero() && d.rec.Downlink.FirstAudioAfterAnswerMs == nil {
 				first := float64(at.Sub(d.answeredAt).Microseconds()) / 1000
 				d.rec.Downlink.FirstAudioAfterAnswerMs = &first
@@ -88,7 +91,28 @@ func (d *dialog) receive(session *voice.RTPSession) {
 // the session sends silent frames by itself when it has none.
 func (d *dialog) feed(session *voice.RTPSession) {
 	var source audioSource
+	started := time.Now()
+	d.mu.Lock()
+	startMs := monotonicMs(started, d.inviteAt)
+	d.rec.UplinkStartedAfterInviteMs = &startMs
+	d.mu.Unlock()
 	switch d.behaviour.Uplink.Kind {
+	case UplinkBursts:
+		// Timed on the clock, not by counting ticks: a tick the runtime
+		// dropped must not move a burst.
+		bursts := newBurstSource(d.law, d.behaviour.Uplink.FrequencyHz, d.behaviour.Uplink.Bursts)
+		ticker := time.NewTicker(voice.FrameDuration)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-d.ctx.Done():
+				return
+			case <-ticker.C:
+				if frame := bursts.frameAt(time.Since(started)); frame != nil {
+					session.Send(frame)
+				}
+			}
+		}
 	case UplinkTone:
 		source = newToneSource(d.law, d.behaviour.Uplink.FrequencyHz)
 	case UplinkWAV:

@@ -149,6 +149,7 @@ services:
       E2E_CALLED_PREFIX: ${E2E_CALLED_PREFIX:?}
     volumes:
       - ./e2e/flow.json:/etc/e2e/flow.json:ro
+      - ./e2e/flow.callerfirst.json:/etc/e2e/flow.callerfirst.json:ro
       # The campaign driver checks its cases against the simulator's scenario
       # and the mock provider's.
       - ./e2e/${E2E_SCENARIO_FILE:-scenario.json}:/etc/e2e/scenario.json:ro

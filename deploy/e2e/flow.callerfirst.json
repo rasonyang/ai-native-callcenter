@@ -1,0 +1,40 @@
+{
+  "id": "e2e_callerfirst",
+  "specVersion": "v2",
+  "initialNode": "greet",
+  "global": {
+    "persona": {
+      "en": "You are a short, polite voice assistant used by an automated test.",
+      "zh": "你是自动化测试使用的简短、礼貌的语音助手。"
+    },
+    "isCallerFirst": true,
+    "closingTarget": "farewell",
+    "maxTurns": 10
+  },
+  "nodes": {
+    "greet": {
+      "announce": {
+        "en": "Hello, this is an automated test call. Can you hear me?",
+        "zh": "你好，这是一通自动化测试电话。你能听到我吗？"
+      },
+      "instruction": {
+        "en": "Greet the caller and answer briefly.",
+        "zh": "问候对方并简短回答。"
+      },
+      "tools": []
+    },
+    "farewell": {
+      "isTerminal": true,
+      "announce": {
+        "en": "Goodbye.",
+        "zh": "再见。"
+      },
+      "instruction": {
+        "en": "Say goodbye.",
+        "zh": "道别。"
+      },
+      "tools": []
+    }
+  },
+  "tools": {}
+}
