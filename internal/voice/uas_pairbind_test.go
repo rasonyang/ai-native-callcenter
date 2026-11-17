@@ -4,6 +4,7 @@ package voice
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -525,53 +526,66 @@ func TestConcurrentInvitesNeverAnswerWithAForeignPort(t *testing.T) {
 
 	var mu sync.Mutex
 	ports := map[int]bool{}
-	var wg sync.WaitGroup
-	errs := make(chan error, calls)
-	for i := range calls {
-		p := newPeer(t, uas.LocalPort())
-		p.callID = fmt.Sprintf("conc-%d", i)
+	var problems []error
+	report := func(err error) {
+		mu.Lock()
+		problems = append(problems, err)
+		mu.Unlock()
+	}
+	// Every first 200 OK is checked: a port the UAS holds, named once.
+	check := func(callID string, port int) error {
+		mu.Lock()
+		dup := ports[port]
+		ports[port] = true
+		mu.Unlock()
+		if dup || held[port] || canBind(port) || canBind(port+1) {
+			return fmt.Errorf("%s: answered %d, duplicate=%v held=%v", callID, port, dup, held[port])
+		}
+		return nil
+	}
+
+	// The peers are created first, so the cleanup below, registered after
+	// theirs, runs before their sockets close and joins every peer goroutine.
+	peers := make([]*peer, calls)
+	for i := range peers {
+		peers[i] = newPeer(t, uas.LocalPort())
+		peers[i].callID = fmt.Sprintf("conc-%d", i)
+	}
+	done := make(chan struct{})
+	var wg, answered sync.WaitGroup
+	var stopOnce sync.Once
+	stop := func() {
+		stopOnce.Do(func() { close(done) })
+		wg.Wait()
+	}
+	t.Cleanup(stop)
+	for _, p := range peers {
 		wg.Add(1)
+		answered.Add(1)
 		go func() {
 			defer wg.Done()
-			p.request("INVITE", p.offer())
-			for {
-				msg, err := p.read(10 * time.Second)
-				if err != nil {
-					errs <- fmt.Errorf("%s: %w", p.callID, err)
-					return
-				}
-				if msg.statusCode < 200 {
-					continue
-				}
-				if msg.statusCode != 200 {
-					errs <- fmt.Errorf("%s: status %d", p.callID, msg.statusCode)
-					return
-				}
-				port := parseSDP(msg.body).Port
-				mu.Lock()
-				dup := ports[port]
-				ports[port] = true
-				mu.Unlock()
-				if dup || held[port] || canBind(port) || canBind(port+1) {
-					errs <- fmt.Errorf("%s: answered %d, duplicate=%v held=%v", p.callID, port, dup, held[port])
-				}
-				p.request("ACK", "")
-				return
-			}
+			p.callLikeASwitch(done, answered.Done,
+				func(port int) error { return check(p.callID, port) }, report)
 		}()
 	}
-	wg.Wait()
-	close(errs)
-	for err := range errs {
-		t.Error(err)
+	answered.Wait()
+	// The peers keep acknowledging 200 OK retransmissions until the calls
+	// have started, so a lost ACK costs a retransmission, not the call.
+	finish := func() {
+		stop()
+		for _, err := range problems {
+			t.Error(err)
+		}
 	}
 	// 200 media starts on a loaded runner outlast waitFor's two seconds.
 	for deadline := time.Now().Add(30 * time.Second); started.Load() != calls; {
 		if time.Now().After(deadline) {
+			finish()
 			t.Fatalf("%d of %d calls started", started.Load(), calls)
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
+	finish()
 	if failed.Load() != 0 {
 		t.Errorf("%d calls failed after their ACK", failed.Load())
 	}
@@ -582,6 +596,103 @@ func TestConcurrentInvitesNeverAnswerWithAForeignPort(t *testing.T) {
 	}
 	if len(ports) != calls {
 		t.Errorf("%d distinct ports for %d calls", len(ports), calls)
+	}
+}
+
+// callLikeASwitch places one call the way a switch does over UDP, which the
+// plain peer does not: a burst of INVITEs larger than the UAS socket's
+// receive buffer loses datagrams, and a peer that never retransmits turns
+// each one into a lost call.
+//
+// The INVITE is resent unchanged on RFC 3261 Timer A (500 ms, doubling) until
+// any response arrives, and the wait for a final response stays 10 s from the
+// first send. Every 200 OK is acknowledged, retransmissions included, until
+// done is closed. check judges the port of the first 200 OK; a later one must
+// name the same port. answered is called once, when the call is answered or
+// has failed.
+func (p *peer) callLikeASwitch(done <-chan struct{}, answered func(), check func(port int) error, report func(error)) {
+	var once sync.Once
+	defer once.Do(answered)
+
+	buf := make([]byte, 65536)
+	read := func(timeout time.Duration) (*sipMessage, error) {
+		_ = p.sip.SetReadDeadline(time.Now().Add(max(timeout, time.Millisecond)))
+		n, _, err := p.sip.ReadFromUDP(buf)
+		if err != nil {
+			return nil, err
+		}
+		return parseSIP(append([]byte(nil), buf[:n]...))
+	}
+
+	p.request("INVITE", p.offer())
+	final := time.Now().Add(10 * time.Second)
+	interval := 500 * time.Millisecond
+	next := time.Now().Add(interval)
+	isProceeding := false
+	port := 0
+	for port == 0 {
+		select {
+		case <-done:
+			return
+		default:
+		}
+		wait := time.Until(final)
+		if !isProceeding {
+			wait = min(wait, time.Until(next))
+		}
+		msg, err := read(wait)
+		if err != nil {
+			if !errors.Is(err, os.ErrDeadlineExceeded) {
+				report(fmt.Errorf("%s: %w", p.callID, err))
+				return
+			}
+			if !time.Now().Before(final) {
+				report(fmt.Errorf("%s: %w", p.callID, err))
+				return
+			}
+			if !isProceeding && !time.Now().Before(next) {
+				p.request("INVITE", p.offer())
+				interval *= 2
+				next = time.Now().Add(interval)
+			}
+			continue
+		}
+		switch {
+		case msg.statusCode == 0:
+		case msg.statusCode < 200:
+			isProceeding = true // a response ends Timer A (§17.1.1.2)
+		case msg.statusCode != 200:
+			report(fmt.Errorf("%s: status %d", p.callID, msg.statusCode))
+			return
+		default:
+			port = parseSDP(msg.body).Port
+			if err := check(port); err != nil {
+				report(err)
+			}
+			p.request("ACK", "")
+			once.Do(answered)
+		}
+	}
+	for {
+		select {
+		case <-done:
+			return
+		default:
+		}
+		msg, err := read(250 * time.Millisecond)
+		if err != nil {
+			if errors.Is(err, os.ErrDeadlineExceeded) {
+				continue
+			}
+			return
+		}
+		if msg.statusCode != 200 {
+			continue
+		}
+		if got := parseSDP(msg.body).Port; got != port {
+			report(fmt.Errorf("%s: a retransmitted 200 OK names %d, the first named %d", p.callID, got, port))
+		}
+		p.request("ACK", "")
 	}
 }
 
