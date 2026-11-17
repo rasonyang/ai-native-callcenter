@@ -478,6 +478,10 @@ func (o *Orchestrator) runCall(ctx context.Context, dialog *voice.Dialog) error 
 
 	sessionCfg := o.sessionConfig(sessionConfigFor(spec, runtime, language), actions.isArmed, log)
 	sessionCfg.OnCutAcknowledged = actions.onCutAcknowledged
+	// Listen before opening only on a call this platform placed to a customer:
+	// on an inbound or internal call the caller expects to be greeted, and a
+	// flow that serves both keeps its field (#594).
+	sessionCfg.IsCallerFirst = listensFirst(spec, facts)
 	session, err := New(FromDialog(dialog), model, profile, sessionCfg)
 	if err != nil {
 		return err
@@ -659,6 +663,9 @@ func (o *Orchestrator) drive(ctx context.Context, session *Session,
 					runtime.OnCallerSpoke(event.Text)
 					fw.onCallerSpoke()
 					guard.onCallerWords(event.Text)
+					if event.openingCut != nil {
+						o.sayOpeningAgain(event.openingCut, session, runtime, actions, log)
+					}
 				}
 
 			case EventTypeCallerSpeech:
@@ -1013,11 +1020,17 @@ func (o *Orchestrator) answerToolCall(ctx context.Context, event Event, batch *t
 		// is sent quietly with its other text (closeToolBatch).
 		output = runtime.RefuseWhileAnswering(event.ToolName, true)
 		isGuardRefusal = true
-	case event.cut != nil && runtime.CanMoveOnTool(event.ToolName) && session.cutWasAcknowledgement(event.cut):
-		// The engine cut the bot for a bare acknowledgement and this response
-		// answers it: a tool that would move the call is refused as a
-		// conversation, and a tool that only reads is not (docs/design/11).
-		output = runtime.RefuseAsAcknowledgement(event.ToolName)
+	case event.cut != nil && runtime.CanMoveOnTool(event.ToolName) && session.cutVerdictOf(event.cut).refusesMove():
+		// The engine cut the bot for a bare acknowledgement, or the opening
+		// for a greeting, and this response answers it: a tool that would move
+		// the call is refused as a conversation, and a tool that only reads is
+		// not (docs/design/11). The verdict is known here (the case matched),
+		// so the second read does not wait.
+		if session.cutVerdictOf(event.cut) == cutVerdictGreeting {
+			output = runtime.RefuseAsGreeting(event.ToolName)
+		} else {
+			output = runtime.RefuseAsAcknowledgement(event.ToolName)
+		}
 	default:
 		output, moved = o.dispatch(ctx, event, batch, session, runtime, actions, log)
 		if isWordless && flow.IsToolOutputOK(output) {
@@ -1450,6 +1463,8 @@ func (o *Orchestrator) closeToolBatch(batch *toolBatch, spoke bool, words string
 func (o *Orchestrator) enterPhase(moved string, session *Session,
 	runtime *flow.Runtime, actions *callActions, log *slog.Logger) {
 
+	// The call has left the entry phase: the opening is not owed any more.
+	session.clearOpeningOwed()
 	if err := session.Reinstruct(runtime.Instructions()); err != nil {
 		log.Warn("could not update instructions", "error", err)
 	}
@@ -1936,4 +1951,19 @@ func (o *Orchestrator) sessionConfig(session provider.SessionConfig, isEndingArm
 		IsEndingArmed:            isEndingArmed,
 		Logger:                   log,
 	}
+}
+
+// sayOpeningAgain says the opening line once more after a greeting cut it
+// (docs/design/11-backchannels.md): only while the call is still in its entry
+// phase and no ending is armed or under way, and only once per call.
+func (o *Orchestrator) sayOpeningAgain(cut *openCut, session *Session, runtime *flow.Runtime,
+	actions *callActions, log *slog.Logger) {
+
+	if runtime.Engine().NodeID() != runtime.Engine().Spec().InitialNode || actions.IsEndingUnderway() {
+		log.Info("a greeting cut the opening, but the call has moved on; not said again",
+			"node", runtime.Engine().NodeID())
+		session.clearOpeningOwed()
+		return
+	}
+	session.SayOpeningAgain(cut)
 }

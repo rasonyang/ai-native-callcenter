@@ -41,6 +41,10 @@ const (
 	// utteranceFloor: the utterance has the floor (it was not held, or the
 	// hold ended).
 	utteranceFloor
+	// utteranceDeclined: a greeting over the opening that no final transcript
+	// decided in time; it was declined at the second cap (onHoldCap). A final
+	// that still arrives is recorded flagged and nothing more.
+	utteranceDeclined
 )
 
 // utterance is one stretch of caller speech the session is tracking.
@@ -55,6 +59,13 @@ type utterance struct {
 	isStopActed bool
 	stopCap     func() bool
 	startedAt   time.Time
+	// isOverOpening says the utterance was held over the call's opening line
+	// (or its replay): a greeting is then declined like an acknowledgement.
+	// Anywhere else a greeting is words.
+	isOverOpening bool
+	// isCapExtended says the first cap found a greeting so far over the opening
+	// and armed a second one.
+	isCapExtended bool
 }
 
 // cutVerdict is the verdict on the utterance that cut the bot on an engine
@@ -65,6 +76,8 @@ const (
 	cutVerdictUnknown cutVerdict = iota
 	cutVerdictAck
 	cutVerdictContent
+	// cutVerdictGreeting: a greeting ("喂") that cut the call's opening line.
+	cutVerdictGreeting
 )
 
 // openCut is a cut the engine made over audible playback (trait off), kept
@@ -78,8 +91,11 @@ type openCut struct {
 	isAdopting bool
 	// answerTurn is the first turn that began after the cut (zero before one).
 	answerTurn int
-	verdict    cutVerdict
-	done       chan struct{}
+	// isOpening says the cut was over the call's opening line or its replay,
+	// so a greeting is judged as such (classifyGreeting).
+	isOpening bool
+	verdict   cutVerdict
+	done      chan struct{}
 }
 
 // backchannelState is everything the session keeps for backchannels. mu is
@@ -93,6 +109,14 @@ type backchannelState struct {
 	// its final transcript has arrived.
 	lastItem        string
 	isLastItemFinal bool
+	// isOpeningOwed says the opening line was cut before it played in full and
+	// has not been said again or answered by words since: any cut opened now
+	// is judged as over the opening (a reply to the greeting that was itself
+	// cancelled is a cut of the opening's, #594). owedAfterTurn is the latest
+	// turn that cut it; a turn after it heard in full clears the mark
+	// (noteOpeningHeard).
+	isOpeningOwed bool
+	owedAfterTurn int
 }
 
 // isHolding reports whether this session holds backchannels: the provider's
@@ -163,7 +187,12 @@ func (s *Session) onSpeechStarted(itemID string) {
 	}
 
 	u := &utterance{itemID: itemID, startedAt: time.Now()}
-	isHeld := s.isAudible()
+	// The opening is held over even before any of it is audible: a greeting
+	// that lands while it is still being made must not cancel it.
+	isHeld := s.isAudible() || s.isOpeningLive()
+	if isHeld {
+		u.isOverOpening = s.isOpeningLive()
+	}
 	s.bc.mu.Lock()
 	s.bc.lastItem, s.bc.isLastItemFinal = itemID, false
 	if isHeld {
@@ -193,8 +222,14 @@ func (s *Session) onHoldCap(u *utterance) {
 	}
 	s.bc.mu.Lock()
 	isHeld := u.state == utteranceHeld
+	isGreeting := u.isOverOpening && classifyGreeting(s.cfg.Session.Language, strings.TrimSpace(u.text)) != verdictContent &&
+		strings.TrimSpace(u.text) != ""
 	s.bc.mu.Unlock()
 	if !isHeld {
+		return
+	}
+	if isGreeting {
+		s.onGreetingCap(u)
 		return
 	}
 	s.log.Info("a held utterance reached the cap with no verdict; it takes the floor",
@@ -298,10 +333,11 @@ func (s *Session) onInputTranscript(event provider.Event) {
 	}
 
 	isBackchannel := false
+	var openingCut *openCut
 	if s.isHolding() {
 		isBackchannel = s.holdFinal(event)
 	} else {
-		s.noteCutVerdict(event)
+		openingCut = s.noteCutVerdict(event)
 	}
 	if isBackchannel {
 		// Recorded as the caller's words, flagged; nothing else hears it: not
@@ -312,7 +348,7 @@ func (s *Session) onInputTranscript(event provider.Event) {
 	s.mu.Lock()
 	s.timer.onCallerWords(event.Text)
 	s.mu.Unlock()
-	s.emit(Event{Type: EventTypeCustomerSaid, Text: event.Text, IsFinal: true})
+	s.emit(Event{Type: EventTypeCustomerSaid, Text: event.Text, IsFinal: true, openingCut: openingCut})
 }
 
 // holdPartial accumulates a partial transcript on its held utterance; words
@@ -330,7 +366,15 @@ func (s *Session) holdPartial(event provider.Event) {
 	if text == "" {
 		return
 	}
-	if classifyBackchannel(s.cfg.Session.Language, text) == verdictContent {
+	isOpening := false
+	s.bc.mu.Lock()
+	isOpening = u.isOverOpening
+	s.bc.mu.Unlock()
+	isWords := classifyBackchannel(s.cfg.Session.Language, text) == verdictContent
+	if isWords && isOpening {
+		isWords = classifyGreeting(s.cfg.Session.Language, text) == verdictContent
+	}
+	if isWords {
 		s.log.Info("a held utterance is words, not an acknowledgement; it takes the floor",
 			"itemId", u.itemID, "text", text)
 		s.takeFloor(u, false)
@@ -342,6 +386,7 @@ func (s *Session) holdPartial(event provider.Event) {
 func (s *Session) holdFinal(event provider.Event) (isBackchannel bool) {
 	text := strings.TrimSpace(event.Text)
 	isAck := text != "" && classifyBackchannel(s.cfg.Session.Language, text) == verdictAck
+	isGreeting := text != "" && classifyGreeting(s.cfg.Session.Language, text) == verdictGreeting
 
 	s.bc.mu.Lock()
 	u := s.bc.find(event.ItemID)
@@ -352,11 +397,20 @@ func (s *Session) holdFinal(event provider.Event) (isBackchannel bool) {
 		s.bc.mu.Unlock()
 		return false
 	}
+	if u.state == utteranceDeclined {
+		// Declined at the second cap: the late final is recorded flagged.
+		s.bc.remove(u)
+		s.bc.mu.Unlock()
+		return true
+	}
 	if u.state != utteranceHeld {
 		s.bc.remove(u)
 		s.bc.mu.Unlock()
 		return false
 	}
+	// A greeting is declined only over the opening; said anywhere else it is
+	// words, as it always was.
+	isAck = isAck || (isGreeting && u.isOverOpening)
 	if isAck {
 		// Settled under the lock: the cap's timer may be firing right now, and
 		// it must find the utterance no longer held, or the bot would be cut
@@ -404,9 +458,17 @@ func (s *Session) openCut(cut Event) {
 	if s.isHolding() {
 		return
 	}
+	isOpening := s.isOpeningTurn(cut.Turn)
 	s.bc.mu.Lock()
 	defer s.bc.mu.Unlock()
-	next := &openCut{event: cut, done: make(chan struct{})}
+	if s.bc.isOpeningOwed {
+		isOpening = true
+	}
+	if isOpening {
+		s.bc.isOpeningOwed = true
+		s.bc.owedAfterTurn = max(s.bc.owedAfterTurn, cut.Turn)
+	}
+	next := &openCut{event: cut, isOpening: isOpening, done: make(chan struct{})}
 	// The utterance that cut is the latest one the provider named, unless its
 	// transcript is already in (then it was an earlier utterance, and the next
 	// speech start is this one).
@@ -441,8 +503,46 @@ func (s *Session) cutFor(turn int) *openCut {
 // noteCutVerdict classifies the final transcript that follows a cut. An
 // acknowledgement is reported to the call's OnCutAcknowledged; words close the
 // window for the next utterances' sake (a later non-backchannel utterance
-// replaces the cut).
-func (s *Session) noteCutVerdict(event provider.Event) {
+// replaces the cut). A greeting over the opening is not an acknowledgement and
+// is not reported there: it returns the cut, so the transcript's event carries
+// it and the orchestrator, which knows the phase and the ending, can say the
+// opening again (Session.SayOpeningAgain).
+func (s *Session) noteCutVerdict(event provider.Event) (greetingCut *openCut) {
+	greetingCut = s.judgeCut(event)
+	text := strings.TrimSpace(event.Text)
+	if text == "" {
+		return greetingCut
+	}
+	isGreeting := classifyGreeting(s.cfg.Session.Language, text) == verdictGreeting
+	isStandIn := false
+	s.bc.mu.Lock()
+	switch {
+	case !isGreeting:
+		// Words answer what the opening was owed to; so does an
+		// acknowledgement. A greeting leaves it owed until it is replayed.
+		s.bc.isOpeningOwed = false
+	case greetingCut == nil && s.bc.isOpeningOwed:
+		// The opening is owed and no cut of its own judged these words (the
+		// cut was superseded, or this is another utterance's final): they
+		// still owe it. The mark stands in for the cut.
+		greetingCut = &openCut{isOpening: true, verdict: cutVerdictGreeting}
+		isStandIn = true
+	}
+	s.bc.mu.Unlock()
+	if isStandIn {
+		// A turn that began since is the reply, to be muted if it is live.
+		s.mu.Lock()
+		if !s.isOpeningTurnLocked(s.turnSeq) {
+			greetingCut.answerTurn = s.turnSeq
+		}
+		s.mu.Unlock()
+	}
+	return greetingCut
+}
+
+// judgeCut is the verdict on the open cut for a final transcript
+// (noteCutVerdict).
+func (s *Session) judgeCut(event provider.Event) (greetingCut *openCut) {
 	s.bc.mu.Lock()
 	if event.ItemID == s.bc.lastItem {
 		s.bc.isLastItemFinal = true
@@ -454,31 +554,44 @@ func (s *Session) noteCutVerdict(event provider.Event) {
 		(cut.isAdopting && event.ItemID != "") ||
 		(cut.itemID != "" && event.ItemID != "" && cut.itemID != event.ItemID) {
 		s.bc.mu.Unlock()
-		return
+		return nil
 	}
 	text := strings.TrimSpace(event.Text)
 	isAck := text != "" && classifyBackchannel(s.cfg.Session.Language, text) == verdictAck
-	if isAck {
+	isGreeting := !isAck && cut.isOpening && text != "" &&
+		classifyGreeting(s.cfg.Session.Language, text) == verdictGreeting
+	switch {
+	case isAck:
 		cut.verdict = cutVerdictAck
-	} else {
+	case isGreeting:
+		cut.verdict = cutVerdictGreeting
+	default:
 		cut.verdict = cutVerdictContent
 	}
 	close(cut.done)
 	s.bc.mu.Unlock()
+	if isGreeting {
+		s.log.Info("the engine cut the opening for a greeting; limiting the damage",
+			"text", text, "turn", cut.event.Turn)
+		return cut
+	}
 	if !isAck {
-		return
+		return nil
 	}
 	s.log.Info("the engine cut the bot for an acknowledgement; limiting the damage",
 		"text", text, "turn", cut.event.Turn)
 	if s.cfg.OnCutAcknowledged != nil {
 		s.cfg.OnCutAcknowledged(cut.event)
 	}
+	return nil
 }
 
-// cutWasAcknowledgement reports whether the cut was an acknowledgement, waiting up
-// to cutVerdictWait for the verdict. No verdict in time is false: the call runs
-// as it always did.
-func (s *Session) cutWasAcknowledgement(cut *openCut) bool {
+// refusesMove says a tool that could move the call is refused for this verdict.
+func (v cutVerdict) refusesMove() bool { return v == cutVerdictAck || v == cutVerdictGreeting }
+
+// cutVerdictOf is the verdict on the cut, waiting up to cutVerdictWait for it.
+// No verdict in time is cutVerdictUnknown: the call runs as it always did.
+func (s *Session) cutVerdictOf(cut *openCut) cutVerdict {
 	select {
 	case <-cut.done:
 	default:
@@ -486,12 +599,42 @@ func (s *Session) cutWasAcknowledgement(cut *openCut) bool {
 		case <-cut.done:
 		case <-s.cutWaitChan(cutVerdictWait):
 			s.log.Info("no verdict on the cut within the wait; the tool call runs as it always did")
-			return false
+			return cutVerdictUnknown
 		case <-s.done:
-			return false
+			return cutVerdictUnknown
 		}
 	}
 	s.bc.mu.Lock()
 	defer s.bc.mu.Unlock()
-	return cut.verdict == cutVerdictAck
+	return cut.verdict
+}
+
+// onGreetingCap handles the cap of a held utterance that is a greeting so far
+// over the opening. The first cap does not cut the opening: it arms one more
+// cap and the final transcript decides, words arriving in the meantime take the
+// floor as ever. The provider does not report a failed transcription, so a
+// final may never come; the second cap declines the utterance as a greeting
+// (the opening is not cut, the item is deleted) rather than hold it for good.
+func (s *Session) onGreetingCap(u *utterance) {
+	s.bc.mu.Lock()
+	if u.state != utteranceHeld {
+		s.bc.mu.Unlock()
+		return
+	}
+	if !u.isCapExtended {
+		u.isCapExtended = true
+		u.stopCap = s.holdTimer(holdCap, func() { s.onHoldCap(u) })
+		s.bc.mu.Unlock()
+		s.log.Info("a held utterance over the opening is a greeting so far at the cap; the opening goes on",
+			"itemId", u.itemID, "capMs", holdCap.Milliseconds())
+		return
+	}
+	u.state = utteranceDeclined
+	u.stopCap = nil
+	s.bc.mu.Unlock()
+	s.log.Info("a greeting over the opening had no final transcript by the second cap; declined, the opening goes on",
+		"itemId", u.itemID, "capMs", holdCap.Milliseconds())
+	if err := s.turns.DeclineCallerTurn(u.itemID); err != nil {
+		s.log.Warn("could not decline a greeting", "itemId", u.itemID, "error", err)
+	}
 }

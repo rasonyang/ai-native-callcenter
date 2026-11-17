@@ -62,7 +62,13 @@ import (
 // calling."), bye (a stance and a goodbye in one breath), drive (a plain
 // reply that does not ask who is calling), who ("Who is this?": repeating the
 // opener is acceptable there, losing who is calling is not), control (the
-// caller waits for the opener to be heard whole; offset ignored).
+// caller waits for the opener to be heard whole; offset ignored), hello (the
+// callee's pickup greeting, "喂？" / "Hello?", over the opener: the first turn
+// after the cut is the model's own reply, and when it starts the session
+// says the opening line again as aicall.Session.SayOpeningAgain does, one line
+// asked for on the free floor of a reply already begun. The class is "repeat"
+// when that line carries the opener, and its coverage says how word for word.
+// The reply is not muted here: only the line's own turn is compared).
 //
 // Every run also records whether the opener was said in turn 1 (the
 // coverage) and whether the provider echoed the deletion of the opening
@@ -107,6 +113,9 @@ func TestLiveQwenCutOpener(t *testing.T) {
 		}
 		// The control: the caller waits for the opener to be heard whole.
 		cells = append(cells, cell{"main", "control", 0}, cell{"shipped", "control", 0})
+		// The pickup greeting over the opener (#594): does the line come back as
+		// written once the model's own reply to the greeting has begun?
+		cells = append(cells, cell{"shipped", "hello", 2700})
 		for _, c := range cells {
 			name := fmt.Sprintf("%s/%s/%s@%d", language, c.treatment, c.shape, c.offsetMs)
 			t.Run(name, func(t *testing.T) {
@@ -192,7 +201,7 @@ func runCutOpener(t *testing.T, profile Profile, language string, fx cutOpenerSe
 	profile.Endpoint = proxy.endpoint()
 
 	clip := map[string]string{"stop": "q_stop_", "control": "q_stop_", "stop2": "q_stop2_",
-		"bye": "q_bye_", "drive": "q_driving_", "who": "q_who_"}[shape] + language
+		"bye": "q_bye_", "drive": "q_driving_", "who": "q_who_", "hello": "q_hello_"}[shape] + language
 	var caller []byte
 	{
 		caller = readMidClip(t, input, clip)
@@ -217,6 +226,7 @@ func runCutOpener(t *testing.T, profile Profile, language string, fx cutOpenerSe
 		quietAt        <-chan time.Time
 		isSpoke, isCut bool
 		isResultSent   bool
+		isReplayed     bool
 		turn           *cutTurn
 		bytesPerMs     = output.RateHz * 2 / 1000
 		deadline       = time.After(75 * time.Second)
@@ -242,6 +252,14 @@ loop:
 				quietAt = nil
 				r.turns = append(r.turns, cutTurn{isAfterCut: isCut, isAfterRes: isResultSent})
 				turn = &r.turns[len(r.turns)-1]
+				if shape == "hello" && isCut && !isReplayed {
+					// The model's reply to the greeting has begun: say the
+					// opening again, as the session does.
+					isReplayed = true
+					if err := c.session.SpeakText(fx.Opening, false); err != nil {
+						t.Fatalf("speak the opening again: %v", err)
+					}
+				}
 			case EventTypeAudioDelta:
 				if turn == nil {
 					break
@@ -281,10 +299,13 @@ loop:
 					turn.tools = append(turn.tools, ev.ToolName)
 				}
 				var result string
-				switch ev.ToolName {
-				case "record_lead":
+				switch {
+				case shape == "hello":
+					// The refusal of a moving tool over a greeting (flow.Runtime.RefuseAsGreeting).
+					result = `{"ok":"0","reason":"the caller only said hello as they picked up; the opening is said to them again"}`
+				case ev.ToolName == "record_lead":
 					result = fx.RecordOutput
-				case "hangup":
+				case ev.ToolName == "hangup":
 					if err := c.session.UpdateInstructions(fx.FinishInstructions); err != nil {
 						t.Fatalf("update instructions: %v", err)
 					}

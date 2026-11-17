@@ -22,6 +22,12 @@ const (
 	verdictAckSoFar
 	// verdictAck is a complete acknowledgement: "mm-hmm", "嗯", "好的好的".
 	verdictAck
+	// verdictGreeting is a complete pickup greeting: "喂", "喂，您好", "hello?"
+	// (classifyGreeting).
+	verdictGreeting
+	// verdictGreetingSoFar is a partial transcript that is, or is a prefix of,
+	// a greeting. It may still turn into words, so the hold goes on.
+	verdictGreetingSoFar
 )
 
 // String names a verdict for logs and test failures.
@@ -31,6 +37,10 @@ func (v backchannelVerdict) String() string {
 		return "ack"
 	case verdictAckSoFar:
 		return "ackSoFar"
+	case verdictGreeting:
+		return "greeting"
+	case verdictGreetingSoFar:
+		return "greetingSoFar"
 	default:
 		return "content"
 	}
@@ -184,4 +194,89 @@ func segmentsAreAckPrefixes(list []string, segments []string) bool {
 		}
 	}
 	return true
+}
+
+// greetingMaxWords is how many greeting words one utterance may be made of and
+// still be a greeting ("喂，您好", "喂喂喂", "hi, hello").
+const greetingMaxWords = 3
+
+// greetings is the built-in list of pickup greetings, fixed per language like
+// the acknowledgements and in compact form. A callee who picks up says one of
+// these before anything else; it answers nothing the bot said.
+var greetings = map[string][]string{
+	"zh": {"喂", "你好", "您好"},
+	"en": {"hello", "hi"},
+}
+
+// classifyGreeting judges a caller's transcript against the call language's
+// greetings: an utterance made only of greeting words, at most greetingMaxWords
+// of them, in any order and with any repetition, on the joined compact form the
+// acknowledgement classifier uses (so "喂，您好", "喂喂喂", "你好你好" and "hi,
+// hello" all count). Anything else in it makes it words, and so does another
+// language's greeting. Unlike an acknowledgement, a question mark does not:
+// "喂？" and "hello?" are greetings, which is how they are written when said
+// into a ringing phone.
+//
+// A proper prefix of a greeting, or of a run of them, is verdictGreetingSoFar
+// (a partial transcript still growing), and so is no text at all. The result is
+// verdictGreeting, verdictGreetingSoFar or verdictContent. Pure; it runs off
+// the frame path.
+func classifyGreeting(language, text string) backchannelVerdict {
+	list := greetings[flow.Lang(language)]
+	if list == nil {
+		return verdictContent
+	}
+	joined := strings.Join(ackSegments(text), "")
+	if joined == "" {
+		return verdictGreetingSoFar
+	}
+	if isGreetingRun(list, joined, greetingMaxWords) {
+		return verdictGreeting
+	}
+	if isGreetingRunPrefix(list, joined, greetingMaxWords) {
+		return verdictGreetingSoFar
+	}
+	return verdictContent
+}
+
+// isGreetingRun reports whether s is one to max greeting words, nothing else.
+func isGreetingRun(list []string, s string, max int) bool {
+	if s == "" {
+		return true
+	}
+	if max == 0 {
+		return false
+	}
+	for _, word := range list {
+		if strings.HasPrefix(s, word) && isGreetingRun(list, s[len(word):], max-1) {
+			return true
+		}
+	}
+	return false
+}
+
+// isGreetingRunPrefix reports whether s is a proper prefix of a run of at most
+// max greeting words: whole words, then the beginning of one more.
+func isGreetingRunPrefix(list []string, s string, max int) bool {
+	if max == 0 {
+		return false
+	}
+	for _, word := range list {
+		if len(s) < len(word) && strings.HasPrefix(word, s) {
+			return true
+		}
+		if strings.HasPrefix(s, word) && len(s) > len(word) &&
+			isGreetingRunPrefix(list, s[len(word):], max-1) {
+			return true
+		}
+	}
+	return false
+}
+
+// isOpeningHoldWords reports whether the words of an utterance held over the
+// opening keep the hold going: an acknowledgement, a greeting, or the start of
+// either. Only over the opening does a greeting count; elsewhere it is words.
+func isOpeningHoldWords(language, text string) bool {
+	return classifyBackchannel(language, text) != verdictContent ||
+		classifyGreeting(language, text) != verdictContent
 }

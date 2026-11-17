@@ -33,6 +33,9 @@ type uplinkStats struct {
 	DroppedBacklog int64
 	// DroppedHushed is frames discarded because a transfer had hushed the call.
 	DroppedHushed int64
+	// DroppedListening is frames the call listened to while it waited to open
+	// (Config.IsCallerFirst) and did not send.
+	DroppedListening int64
 	// MaxBacklog is the deepest the queue got.
 	MaxBacklog int
 }

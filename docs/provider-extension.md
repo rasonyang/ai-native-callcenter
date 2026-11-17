@@ -282,8 +282,10 @@ setting does. Rules a new client keeps:
 - A client that has no first turn to ask for (doubao without an opening line)
   has nothing to hold and does not wait.
 
-The gate is built by `aicall.Session` from `AICC_BOT_GREETING_MEDIA_WAIT`; a
-client never builds one.
+The gate is built by `aicall.Session` from `AICC_BOT_GREETING_MEDIA_WAIT` only;
+a client never builds one. A call that listens first (`global.isCallerFirst`)
+does not hold the request for the callee's greeting: the session holds what the
+client sends toward the leg instead (`docs/design/02-ai-voice.md` section 4). No audio is sent to a client until its `Start` has returned.
 
 ## What never happens
 
