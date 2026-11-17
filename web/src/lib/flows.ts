@@ -189,6 +189,12 @@ export interface FlowGlobal {
    */
   maxDurationSec?: number
   /**
+   * Makes a call the platform placed to a customer listen first: the opening
+   * line waits until the callee's own greeting has ended, or a fixed wait has
+   * passed. Ignored on inbound and internal calls. Unset is off.
+   */
+  isCallerFirst?: boolean
+  /**
    * The words of the wait line a caller hears when an HTTP tool has not
    * returned a second after it started and nothing else is playing. Said as
    * written; must be a statement, never a question. A language left empty

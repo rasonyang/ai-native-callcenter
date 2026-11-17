@@ -785,6 +785,8 @@
     "maxTurnsWithoutTool": "Max tool-less replies per phase",
     "maxDurationSec": "Time limit (seconds)",
     "off": "Off",
+    "on": "On",
+    "isCallerFirst": "Listen before opening (outbound)",
     "alwaysAllowed": "Always allowed",
     "builtinTool": "Built in — implemented by the platform, no HTTP call",
     "builtin": {

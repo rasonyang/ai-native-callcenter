@@ -545,6 +545,15 @@ type Global struct {
 	// anything else must lie between MinDurationLimitSec and MaxDurationLimitSec.
 	// A pointer, because absent and 0 mean different things.
 	MaxDurationSec *int `json:"maxDurationSec,omitempty"`
+	// IsCallerFirst makes a call this platform placed to a customer listen
+	// before it speaks (#594): the opening line waits until the callee's own
+	// greeting ("hello?") has ended, or a fixed wait has passed, so the bot
+	// never talks over it. It is the call-level counterpart of a phase's
+	// isCallerNext. It applies only to a call placed to a customer; on an
+	// inbound or internal call it is ignored, so a flow that also serves an
+	// inbound DID stays valid. The wait itself is a platform constant, not a
+	// flow setting.
+	IsCallerFirst bool `json:"isCallerFirst,omitempty"`
 	// ToolWaitLine replaces the words of the wait line: what the caller hears
 	// when an HTTP tool has not returned ToolWaitLineAfter after it started
 	// and nothing else is playing (#286). It is said as written, like a

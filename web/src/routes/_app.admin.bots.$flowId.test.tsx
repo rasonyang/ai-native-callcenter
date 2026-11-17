@@ -837,3 +837,21 @@ describe('rolling back to a revision', () => {
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   })
 })
+
+describe('the runtime panel', () => {
+  it('says whether the bot listens before it opens an outbound call', async () => {
+    historyServer({ ...SPEC, global: { ...SPEC.global, isCallerFirst: true } })
+    const { user } = renderEditor()
+    await openTab(user, 'Persona & rules')
+    const label = await screen.findByText('Listen before opening (outbound)')
+    expect(label.nextElementSibling).toHaveTextContent('On')
+  })
+
+  it('shows it off when the flow does not declare it', async () => {
+    historyServer(SPEC)
+    const { user } = renderEditor()
+    await openTab(user, 'Persona & rules')
+    const label = await screen.findByText('Listen before opening (outbound)')
+    expect(label.nextElementSibling).toHaveTextContent('Off')
+  })
+})
