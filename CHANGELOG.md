@@ -5,7 +5,7 @@ under one tag, `rasonyang/ai-native-callcenter` and `rasonyang/freeswitch-aicc`;
 run them together. From v0.2.0 on, the GitHub release of the same tag also
 carries the one-line installer's files.
 
-## Unreleased
+## v0.8.7 - 2026-11-17
 
 ### Upgrade notes
 
@@ -20,9 +20,17 @@ carries the one-line installer's files.
   counted toward the cap, because their canonical callee is not backfilled;
   campaign attempts are counted from their first.
 - API contract: additive only. The new `activity` value `WAITING_DAILY_CAP`; a
-  client that switches over that enum must handle it. `make api-breaking
-  BASE=main` reports no breaking change, only `response-property-enum-value-added`
-  warnings from that value.
+  client that switches over that enum must handle it. `ringSec` on a call placed
+  to an outside number changes meaning (see Changed), and the CDR `tech` of such
+  a call gains `sipStatus` and `ringStartedAt`.
+  `make api-breaking BASE=v0.8.6` reports no breaking change, only 8
+  `response-property-enum-value-added` warnings from that value.
+- A flow can set the new `global.isCallerFirst`; a flow that does not is
+  unchanged. The seeded `campaign_lead_followup` flow sets it.
+- Upgrade both images together, as always: they are published under one tag
+  and the deploy stack names both. The switch image has no change in this
+  release (unchanged since v0.8.2); its tag moves so that the pair still
+  matches.
 
 ### Added
 
