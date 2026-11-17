@@ -41,7 +41,7 @@
     "quality:review": "Read and write quality reviews of recorded calls.",
     "reports:read": "Read the floor's aggregates: overview, per-queue and daily.",
     "testnumbers:read": "Read the list of test numbers.",
-    "testnumbers:write": "Add numbers to the list of test numbers and take them off it. Separate from campaigns:write because every entry gives up the cross-campaign frequency protection for that number, which exists for customers: a compliance decision rather than a campaign setting.",
+    "testnumbers:write": "Add numbers to the list of test numbers and take them off it. Separate from campaigns:write because every entry gives up two protections for that number, the cross-campaign frequency window and the daily dial cap, which exist for customers: a compliance decision rather than a campaign setting.",
     "users:write": "Create and edit accounts, set roles and reset passwords. Separate from config:write because it is the one path to privilege."
   },
   "tags": [
@@ -107,7 +107,7 @@
     },
     {
       "name": "testnumbers",
-      "description": "The list of test numbers: a few numbers a team tests its campaigns on, which the cross-campaign frequency window does not hold back. Nothing else about a call to them changes: the do-not-call list, calling windows and a number already being dialled apply as ever."
+      "description": "The list of test numbers: a few numbers a team tests its campaigns on, which neither the cross-campaign frequency window nor the daily dial cap (AICC_OUTBOUND_MAX_DIALS_PER_NUMBER_PER_DAY) holds back. Nothing else about a call to them changes: the do-not-call list, calling windows and a number already being dialled apply as ever, and a carrier line's own limits on calls to one callee still apply."
     },
     {
       "name": "campaigns",
@@ -5218,7 +5218,7 @@
           "testnumbers"
         ],
         "summary": "Add a number to the list of test numbers",
-        "description": "The cross-campaign frequency window (AICC_CAMPAIGN_FREQUENCY_WINDOW) does not hold back a number on this list: a campaign may dial it although another campaign reached it lately. Nothing else changes: a number on the do-not-call list is still never dialled, a number being dialled is still skipped, calling windows and AICC_OUTBOUND_HOURS still apply, and a campaign's own maxAttempts and retry policy are unchanged. Contacts of running campaigns that were waiting out the frequency window for this number are due again at once. The exemption is this platform's alone: a carrier line's own limits on calls to one callee still apply.\n\nThe number may be written in any common form: it is canonicalised to E.164 with the deployment's default country code (AICC_DEFAULT_COUNTRY_CODE) before it is stored, so \"+86 138-0013-8000\", \"0086 138 0013 8000\" and, with country code 86, \"13800138000\" are one entry. A number that cannot be canonicalised is refused with 422 VALIDATION_FAILED, params {field: \"number\", rule: NUMBER_EMPTY | NUMBER_INVALID}.\n\nThe list holds at most 100 numbers: every entry gives up a protection that exists for customers. Adding a new number to a full list is refused with 409 TEST_NUMBER_LIMIT_REACHED, params {limit: 100}. Idempotent: adding a number that is already listed changes nothing and answers 200 with the existing entry (its original note, time and author), full list or not; a new entry answers 201. Needs testnumbers:write.",
+        "description": "Neither the cross-campaign frequency window (AICC_CAMPAIGN_FREQUENCY_WINDOW) nor the daily dial cap (AICC_OUTBOUND_MAX_DIALS_PER_NUMBER_PER_DAY) holds back a number on this list: a campaign may dial it although another campaign reached it lately, and for a 4th or later time in a local day. Nothing else changes: a number on the do-not-call list is still never dialled, a number being dialled is still skipped, calling windows and AICC_OUTBOUND_HOURS still apply, and a campaign's own maxAttempts and retry policy are unchanged. Contacts of running campaigns that were waiting out the frequency window or the daily dial cap for this number are due again at once. The exemption is this platform's alone: a carrier line's own limits on calls to one callee still apply, so on a line that refuses the 4th call of the day a test number's 4th dial is sent and refused.\n\nThe number may be written in any common form: it is canonicalised to E.164 with the deployment's default country code (AICC_DEFAULT_COUNTRY_CODE) before it is stored, so \"+86 138-0013-8000\", \"0086 138 0013 8000\" and, with country code 86, \"13800138000\" are one entry. A number that cannot be canonicalised is refused with 422 VALIDATION_FAILED, params {field: \"number\", rule: NUMBER_EMPTY | NUMBER_INVALID}.\n\nThe list holds at most 100 numbers: every entry gives up a protection that exists for customers. Adding a new number to a full list is refused with 409 TEST_NUMBER_LIMIT_REACHED, params {limit: 100}. Idempotent: adding a number that is already listed changes nothing and answers 200 with the existing entry (its original note, time and author), full list or not; a new entry answers 201. Needs testnumbers:write.",
         "security": [
           {
             "cookieSession": [
@@ -5291,7 +5291,7 @@
           "testnumbers"
         ],
         "summary": "Take a number off the list of test numbers",
-        "description": "The path carries the canonical E.164 number with its + URL-encoded as %2B (an unencoded + also works). Anything that is not canonical is 422 VALIDATION_FAILED; a canonical number that is not listed is 404. From then on the frequency window holds the number back like any other. Needs testnumbers:write.",
+        "description": "The path carries the canonical E.164 number with its + URL-encoded as %2B (an unencoded + also works). Anything that is not canonical is 422 VALIDATION_FAILED; a canonical number that is not listed is 404. From then on the frequency window and the daily dial cap hold the number back like any other. Needs testnumbers:write.",
         "security": [
           {
             "cookieSession": [
@@ -12436,9 +12436,10 @@
           "WAITING_WINDOW",
           "WAITING_RETRY",
           "WAITING_FREQUENCY",
+          "WAITING_DAILY_CAP",
           "AT_CAPACITY"
         ],
-        "description": "What a RUNNING campaign is doing right now, computed by the dialer and never stored. DIALING: calls are in flight. WAITING_WINDOW: every pending contact is outside its calling window (the campaign stays RUNNING; the window reopens by itself). WAITING_RETRY: no pending contact is due yet. WAITING_FREQUENCY: nothing is in flight and the earliest pending contact is held by the cross-campaign frequency window: another campaign reached its number lately, so this one waits until that touch plus AICC_CAMPAIGN_FREQUENCY_WINDOW (nextDialAt). The campaign has made no attempt for those contacts. Adding the number to the list of test numbers lifts the hold. When a closed calling window opens later than the hold ends, the activity is WAITING_WINDOW; when both end at the same time, WAITING_FREQUENCY. AT_CAPACITY: due contacts are held back by a limit (the campaign's maxConcurrent, the deployment's ringing cap, or bot capacity)."
+        "description": "What a RUNNING campaign is doing right now, computed by the dialer and never stored. DIALING: calls are in flight. WAITING_WINDOW: every pending contact is outside its calling window (the campaign stays RUNNING; the window reopens by itself). WAITING_RETRY: no pending contact is due yet. WAITING_FREQUENCY: nothing is in flight and the earliest pending contact is held by the cross-campaign frequency window: another campaign reached its number lately, so this one waits until that touch plus AICC_CAMPAIGN_FREQUENCY_WINDOW (nextDialAt). The campaign has made no attempt for those contacts. Adding the number to the list of test numbers lifts the hold. When a closed calling window opens later than the hold ends, the activity is WAITING_WINDOW; when both end at the same time, WAITING_FREQUENCY. WAITING_DAILY_CAP: nothing is in flight and the earliest pending contact is held by the daily dial cap: its number has been dialled the deployment's maximum of times (AICC_OUTBOUND_MAX_DIALS_PER_NUMBER_PER_DAY) in the contact's local day, counting every campaign and ad-hoc calls, so this one waits for the start of the contact's calling window on the next local day (nextDialAt). The campaign has made no attempt for those contacts and spent no attempt or system-retry budget on them. Adding the number to the list of test numbers lifts the hold. The hold that ends latest names the activity: when a closed calling window or the frequency window ends later than the cap's hold, the activity is WAITING_WINDOW or WAITING_FREQUENCY; when the cap ends at the same time as either, WAITING_DAILY_CAP. AT_CAPACITY: due contacts are held back by a limit (the campaign's maxConcurrent, the deployment's ringing cap, or bot capacity)."
       },
       "CampaignAttemptState": {
         "type": "string",

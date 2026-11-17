@@ -164,6 +164,7 @@ type CampaignContact struct {
 	LastAttemptID   *uuid.UUID         `json:"lastAttemptId"`
 	LastCallID      *uuid.UUID         `json:"lastCallId"`
 	IsFrequencyHeld bool               `json:"isFrequencyHeld"`
+	IsDailyCapHeld  bool               `json:"isDailyCapHeld"`
 }
 
 type Cdr struct {
@@ -197,6 +198,7 @@ type Cdr struct {
 	BillSec        int32              `json:"billSec"`
 	UnbackedClaims []string           `json:"unbackedClaims"`
 	CampaignID     *uuid.UUID         `json:"campaignId"`
+	ToNumberE164   *string            `json:"toNumberE164"`
 }
 
 type Contact struct {

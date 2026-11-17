@@ -8,7 +8,7 @@
 -- in the same transaction, says whether its number was free.
 -- name: ClaimContactForDial :one
 UPDATE campaign_contacts
-SET next_attempt_at = NULL, is_frequency_held = false, updated_at = now()
+SET next_attempt_at = NULL, is_frequency_held = false, is_daily_cap_held = false, updated_at = now()
 WHERE id = $1 AND status = 'ACTIVE'
 RETURNING campaign_id, number_e164;
 
@@ -75,7 +75,7 @@ WHERE id = $1;
 -- recorded no lead they name a later call than the lead's.
 -- name: SettleCampaignContact :exec
 UPDATE campaign_contacts
-SET attempts = $2, system_failures = $3, status = $4, next_attempt_at = $5, is_frequency_held = false,
+SET attempts = $2, system_failures = $3, status = $4, next_attempt_at = $5, is_frequency_held = false, is_daily_cap_held = false,
     last_outcome = $6, last_attempt_id = sqlc.arg('last_attempt_id')::uuid,
     last_call_id = sqlc.arg('last_call_id')::uuid,
     lead_intent = coalesce(sqlc.narg('lead_intent')::text, lead_intent),
@@ -107,7 +107,7 @@ RETURNING campaign_contact_id;
 
 -- name: MakeContactDue :execrows
 UPDATE campaign_contacts
-SET next_attempt_at = $2, is_frequency_held = false, updated_at = now()
+SET next_attempt_at = $2, is_frequency_held = false, is_daily_cap_held = false, updated_at = now()
 WHERE id = $1 AND status = 'ACTIVE' AND next_attempt_at IS NULL;
 
 -- A campaign's finished attempts, newest first: what the breakers read.

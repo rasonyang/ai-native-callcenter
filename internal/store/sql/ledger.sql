@@ -29,7 +29,8 @@ INSERT INTO cdrs (
     agent_ids, primary_agent_id,
     ring_sec, bot_sec, queue_wait_sec, talk_sec, bill_sec, total_sec,
     status, hangup_cause, missed_reason, disposition,
-    is_contained, has_recording, user_data, tech, legs, unbacked_claims, campaign_id
+    is_contained, has_recording, user_data, tech, legs, unbacked_claims, campaign_id,
+    to_number_e164
 ) VALUES (
     $1, $2, $3, $4, $5, $6,
     $7, $8, $9, $10, $11,
@@ -38,7 +39,9 @@ INSERT INTO cdrs (
     $20, $21, $22, $23,
     $24, $25, $26, $27, $28, $29,
     -- The campaign whose attempt carries this call, else NULL (migration 00039).
-    (SELECT a.campaign_id FROM campaign_attempts a WHERE a.call_id = $1)
+    (SELECT a.campaign_id FROM campaign_attempts a WHERE a.call_id = $1),
+    -- The callee in canonical form, for OUTBOUND rows that canonicalise (migration 00049).
+    sqlc.narg('to_number_e164')::text
 ) ON CONFLICT (call_id) DO UPDATE SET
     started_at = EXCLUDED.started_at,
     answered_at = EXCLUDED.answered_at,
@@ -69,7 +72,8 @@ INSERT INTO cdrs (
     tech = EXCLUDED.tech,
     legs = EXCLUDED.legs,
     unbacked_claims = EXCLUDED.unbacked_claims,
-    campaign_id = EXCLUDED.campaign_id
+    campaign_id = EXCLUDED.campaign_id,
+    to_number_e164 = EXCLUDED.to_number_e164
 WHERE CASE
     -- A placement failure (an originate that never made a channel, tech
     -- isPlacementFailure) knows the least about a call. It never replaces a

@@ -46,12 +46,13 @@ type Store interface {
 	Cancel(ctx context.Context, id uuid.UUID) (campaign.Campaign, error)
 	Due(ctx context.Context, campaignID uuid.UUID, now time.Time, frequency time.Duration, limit int) ([]campaign.Contact, error)
 	HeldByFrequency(ctx context.Context, campaignID uuid.UUID, now time.Time, frequency time.Duration, limit int) ([]campaign.Held, error)
-	Defer(ctx context.Context, ids []uuid.UUID, at []time.Time, isHeld bool) error
+	Defer(ctx context.Context, ids []uuid.UUID, at []time.Time, hold campaign.HoldKind) error
 	RearmUntried(ctx context.Context, campaignID uuid.UUID, now time.Time) error
 	Pending(ctx context.Context, campaignID uuid.UUID, now time.Time) (campaign.Pending, error)
 	EarliestPending(ctx context.Context, campaignID uuid.UUID) (*campaign.Contact, error)
 	FrequencyHold(ctx context.Context, contactID uuid.UUID, now time.Time, frequency time.Duration) (*time.Time, error)
-	RearmFrequencyHeld(ctx context.Context, now time.Time) error
+	RearmHeld(ctx context.Context, now time.Time) error
+	DialsToday(ctx context.Context, numbers []string, dayStarts []time.Time, now time.Time) ([]int, error)
 	Complete(ctx context.Context, campaignID uuid.UUID, at time.Time) (bool, error)
 	PauseFor(ctx context.Context, campaignID uuid.UUID, reason campaign.PauseReason) (bool, error)
 	DNCContacts(ctx context.Context, limit int) ([]uuid.UUID, error)
@@ -117,6 +118,11 @@ type Config struct {
 	// Frequency is the cross-campaign frequency window
 	// (AICC_CAMPAIGN_FREQUENCY_WINDOW); zero is off.
 	Frequency time.Duration
+	// MaxDialsPerNumberPerDay is the daily dial cap
+	// (AICC_OUTBOUND_MAX_DIALS_PER_NUMBER_PER_DAY): a number dialled this many
+	// times in the contact's local day is not admitted again until the next
+	// day's window. Zero is off.
+	MaxDialsPerNumberPerDay int
 	// OutboundHours are the outer calling hours (AICC_OUTBOUND_HOURS).
 	OutboundHours dayrange.Range
 	// TrunkBreakerCount and ProviderBreakerCount are the breakers' thresholds.

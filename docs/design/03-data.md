@@ -288,6 +288,9 @@ webhook_subscriptions(…) / webhook_deliveries(…)                  -- 00026; 
 --                                           AI outbound campaigns (10 §3)
 --   test_numbers (00048), campaign_attempts.is_test_number,
 --   campaign_contacts.is_frequency_held     numbers exempt from the campaign frequency window (10 §3.4a, §5.2)
+--   campaign_contacts.is_daily_cap_held,    the daily dial cap's mark (at most one of the two marks) and the
+--   cdrs.to_number_e164 (00049)             canonical callee of an OUTBOUND call, which the cap counts ad-hoc
+--                                          calls by; not backfilled (10 §3.2, §3.5, §5.2)
 --   cdrs.campaign_id (00039), dids.max_outbound_channels (00040)   (10 §3.5, §6.6)
 --   campaign_contacts.last_attempt_id / last_call_id (00042)        (10 §3.2, §14)
 ```

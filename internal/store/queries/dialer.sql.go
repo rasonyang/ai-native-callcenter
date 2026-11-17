@@ -128,32 +128,98 @@ func (q *Queries) CountCampaignAttempts(ctx context.Context, arg CountCampaignAt
 
 const deferContacts = `-- name: DeferContacts :execrows
 UPDATE campaign_contacts c
-SET next_attempt_at = v.at, is_frequency_held = $1::boolean, updated_at = now()
+SET next_attempt_at = v.at,
+    is_frequency_held = ($1::text = 'FREQUENCY'),
+    is_daily_cap_held = ($1::text = 'DAILY_CAP'),
+    updated_at = now()
 FROM (SELECT unnest($2::uuid[]) AS id, unnest($3::timestamptz[]) AS at) AS v
 WHERE c.id = v.id AND c.status = 'ACTIVE'
   AND c.next_attempt_at IS NOT NULL AND c.next_attempt_at < v.at
 `
 
 type DeferContactsParams struct {
-	IsHeld bool                 `json:"isHeld"`
-	Ids    []uuid.UUID          `json:"ids"`
-	Ats    []pgtype.Timestamptz `json:"ats"`
+	Hold string               `json:"hold"`
+	Ids  []uuid.UUID          `json:"ids"`
+	Ats  []pgtype.Timestamptz `json:"ats"`
 }
 
-// Moves contacts to a later due time (outside their calling window, or held by
-// the frequency window; is_held marks the latter, so that listing a number can
-// tell a hold from the campaign's own retry time). Never earlier, and never a contact that was claimed
-// for a dial in the meantime.
+// Moves contacts to a later due time (outside their calling window, held by the
+// frequency window, or held by the daily dial cap). hold names the mark the move
+// leaves: 'FREQUENCY' sets is_frequency_held, 'DAILY_CAP' sets is_daily_cap_held,
+// ” sets neither; the other mark is always cleared, so a contact carries at most
+// one and listing a number can tell a hold from the campaign's own retry time.
+// Never earlier, and never a contact that was claimed for a dial in the
+// meantime.
 func (q *Queries) DeferContacts(ctx context.Context, arg DeferContactsParams) (int64, error) {
-	result, err := q.db.Exec(ctx, deferContacts, arg.IsHeld, arg.Ids, arg.Ats)
+	result, err := q.db.Exec(ctx, deferContacts, arg.Hold, arg.Ids, arg.Ats)
 	if err != nil {
 		return 0, err
 	}
 	return result.RowsAffected(), nil
 }
 
+const dialsTodayByNumber = `-- name: DialsTodayByNumber :many
+SELECT v.number_e164::text AS number_e164, v.day_start::timestamptz AS day_start,
+       ((SELECT count(*) FROM campaign_attempts a
+         WHERE a.number_e164 = v.number_e164
+           AND a.started_at >= v.day_start AND a.started_at <= $1::timestamptz
+           AND (a.state = 'DIALING' OR a.outcome <> ALL($2::text[])))
+        + (SELECT count(*) FROM cdrs d
+           WHERE d.to_number_e164 = v.number_e164
+             AND d.call_type = 'OUTBOUND' AND d.campaign_id IS NULL
+             AND d.started_at >= v.day_start AND d.started_at <= $1::timestamptz))::bigint AS dials
+FROM (SELECT unnest($3::text[]) AS number_e164,
+             unnest($4::timestamptz[]) AS day_start) v
+WHERE NOT EXISTS (SELECT 1 FROM test_numbers t WHERE t.number_e164 = v.number_e164)
+`
+
+type DialsTodayByNumberParams struct {
+	Now               pgtype.Timestamptz   `json:"now"`
+	UncountedOutcomes []string             `json:"uncountedOutcomes"`
+	Numbers           []string             `json:"numbers"`
+	DayStarts         []pgtype.Timestamptz `json:"dayStarts"`
+}
+
+type DialsTodayByNumberRow struct {
+	NumberE164 string             `json:"numberE164"`
+	DayStart   pgtype.Timestamptz `json:"dayStart"`
+	Dials      int64              `json:"dials"`
+}
+
+// How many times each number was dialled in its local day, for the daily dial
+// cap: the numbers and the start of each one's day (its contact's zone) come as
+// two parallel arrays. A dial is a campaign attempt in flight or whose outcome
+// spent a budget (uncounted_outcomes lists the ones that did not: a DNC skip, a
+// bad number), from any campaign, plus an ad-hoc outbound call (a CDR with no
+// campaign) whose canonical callee is the number. A number on the list of test
+// numbers has no row: it is never capped.
+func (q *Queries) DialsTodayByNumber(ctx context.Context, arg DialsTodayByNumberParams) ([]DialsTodayByNumberRow, error) {
+	rows, err := q.db.Query(ctx, dialsTodayByNumber,
+		arg.Now,
+		arg.UncountedOutcomes,
+		arg.Numbers,
+		arg.DayStarts,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []DialsTodayByNumberRow{}
+	for rows.Next() {
+		var i DialsTodayByNumberRow
+		if err := rows.Scan(&i.NumberE164, &i.DayStart, &i.Dials); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const dueCampaignContacts = `-- name: DueCampaignContacts :many
-SELECT c.id, c.campaign_id, c.number_e164, c.number_raw, c.time_zone, c.slots, c.status, c.attempts, c.system_failures, c.next_attempt_at, c.last_outcome, c.lead_intent, c.lead_notes, c.created_at, c.updated_at, c.last_attempt_id, c.last_call_id, c.is_frequency_held FROM campaign_contacts c
+SELECT c.id, c.campaign_id, c.number_e164, c.number_raw, c.time_zone, c.slots, c.status, c.attempts, c.system_failures, c.next_attempt_at, c.last_outcome, c.lead_intent, c.lead_notes, c.created_at, c.updated_at, c.last_attempt_id, c.last_call_id, c.is_frequency_held, c.is_daily_cap_held FROM campaign_contacts c
 WHERE c.campaign_id = $1
   AND c.status = 'ACTIVE'
   AND c.next_attempt_at <= $2::timestamptz
@@ -218,6 +284,7 @@ func (q *Queries) DueCampaignContacts(ctx context.Context, arg DueCampaignContac
 			&i.LastAttemptID,
 			&i.LastCallID,
 			&i.IsFrequencyHeld,
+			&i.IsDailyCapHeld,
 		); err != nil {
 			return nil, err
 		}
@@ -260,7 +327,7 @@ func (q *Queries) DueDNCContacts(ctx context.Context, rowLimit int32) ([]uuid.UU
 }
 
 const earliestPendingContact = `-- name: EarliestPendingContact :one
-SELECT id, campaign_id, number_e164, number_raw, time_zone, slots, status, attempts, system_failures, next_attempt_at, last_outcome, lead_intent, lead_notes, created_at, updated_at, last_attempt_id, last_call_id, is_frequency_held FROM campaign_contacts
+SELECT id, campaign_id, number_e164, number_raw, time_zone, slots, status, attempts, system_failures, next_attempt_at, last_outcome, lead_intent, lead_notes, created_at, updated_at, last_attempt_id, last_call_id, is_frequency_held, is_daily_cap_held FROM campaign_contacts
 WHERE campaign_id = $1 AND status = 'ACTIVE' AND next_attempt_at IS NOT NULL
 ORDER BY next_attempt_at, id
 LIMIT 1
@@ -288,6 +355,7 @@ func (q *Queries) EarliestPendingContact(ctx context.Context, campaignID uuid.UU
 		&i.LastAttemptID,
 		&i.LastCallID,
 		&i.IsFrequencyHeld,
+		&i.IsDailyCapHeld,
 	)
 	return i, err
 }
@@ -533,7 +601,7 @@ func (q *Queries) ListRunningCampaigns(ctx context.Context) ([]ListRunningCampai
 
 const markDialingContactsDNC = `-- name: MarkDialingContactsDNC :execrows
 UPDATE campaign_contacts c
-SET status = 'DNC', next_attempt_at = NULL, is_frequency_held = false, updated_at = now()
+SET status = 'DNC', next_attempt_at = NULL, is_frequency_held = false, is_daily_cap_held = false, updated_at = now()
 WHERE c.status = 'ACTIVE' AND c.next_attempt_at IS NULL
   AND EXISTS (SELECT 1 FROM dnc_numbers d WHERE d.number_e164 = c.number_e164)
   AND EXISTS (SELECT 1 FROM campaign_attempts a
@@ -570,12 +638,12 @@ func (q *Queries) PauseCampaignFor(ctx context.Context, arg PauseCampaignForPara
 	return result.RowsAffected(), nil
 }
 
-const rearmFrequencyHeld = `-- name: RearmFrequencyHeld :execrows
+const rearmHeldContacts = `-- name: RearmHeldContacts :execrows
 UPDATE campaign_contacts c
-SET next_attempt_at = $1::timestamptz, is_frequency_held = false, updated_at = now()
+SET next_attempt_at = $1::timestamptz, is_frequency_held = false, is_daily_cap_held = false, updated_at = now()
 FROM campaigns ca
 WHERE ca.id = c.campaign_id AND ca.status = 'RUNNING'
-  AND c.status = 'ACTIVE' AND c.is_frequency_held
+  AND c.status = 'ACTIVE' AND (c.is_frequency_held OR c.is_daily_cap_held)
   AND c.next_attempt_at > $1::timestamptz
   AND EXISTS (SELECT 1 FROM test_numbers t WHERE t.number_e164 = c.number_e164)
   AND NOT EXISTS (SELECT 1 FROM campaign_attempts d
@@ -583,11 +651,12 @@ WHERE ca.id = c.campaign_id AND ca.status = 'RUNNING'
 `
 
 // A number was put on the list of test numbers: the contacts of RUNNING
-// campaigns that the frequency window deferred (is_frequency_held, set only by
-// the hold's own deferral) are due again. A contact waiting on its campaign's
-// retry policy carries no mark and keeps its time, as does one being dialled.
-func (q *Queries) RearmFrequencyHeld(ctx context.Context, now pgtype.Timestamptz) (int64, error) {
-	result, err := q.db.Exec(ctx, rearmFrequencyHeld, now)
+// campaigns that the frequency window or the daily dial cap deferred
+// (is_frequency_held and is_daily_cap_held, set only by those holds' own
+// deferral) are due again. A contact waiting on its campaign's retry policy
+// carries no mark and keeps its time, as does one being dialled.
+func (q *Queries) RearmHeldContacts(ctx context.Context, now pgtype.Timestamptz) (int64, error) {
+	result, err := q.db.Exec(ctx, rearmHeldContacts, now)
 	if err != nil {
 		return 0, err
 	}
@@ -596,7 +665,7 @@ func (q *Queries) RearmFrequencyHeld(ctx context.Context, now pgtype.Timestamptz
 
 const rearmUntriedContacts = `-- name: RearmUntriedContacts :execrows
 UPDATE campaign_contacts
-SET next_attempt_at = $1::timestamptz, is_frequency_held = false, updated_at = now()
+SET next_attempt_at = $1::timestamptz, is_frequency_held = false, is_daily_cap_held = false, updated_at = now()
 WHERE campaign_id = $2 AND status = 'ACTIVE'
   AND last_outcome IS NULL AND next_attempt_at > $1::timestamptz
 `

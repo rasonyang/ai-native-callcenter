@@ -907,8 +907,8 @@
     }
   },
   "testNumbers": {
-    "hint": "Numbers exempt from the cross-campaign frequency window, for testing campaigns on your own phones. Every entry gives up a protection that exists for customers.",
-    "scope": "A listed number can be dialled by consecutive campaigns without waiting. The do-not-call list still applies, calling hours still apply, and a carrier's own per-callee limits are not affected. The list holds at most {{limit}} numbers.",
+    "hint": "Numbers exempt from the cross-campaign frequency window and the daily dial cap, for testing campaigns on your own phones. Every entry gives up two protections that exist for customers.",
+    "scope": "A listed number can be dialled by consecutive campaigns without waiting, and more than the daily cap allows in one day. The do-not-call list still applies, calling hours still apply, and a carrier's own per-callee limits are not affected: a line that refuses the 4th call of the day still refuses it. The list holds at most {{limit}} numbers.",
     "numberToAdd": "Number to add",
     "numberPlaceholder": "Any format, for example +86 138-0013-8000",
     "noteToAdd": "Note",
@@ -921,7 +921,7 @@
     "note": "Note",
     "addedAt": "Added",
     "none": "No test numbers.",
-    "removeConfirm": "Remove {{number}}? Campaigns will wait for the frequency window before dialling it again."
+    "removeConfirm": "Remove {{number}}? Campaigns will wait for the frequency window and the daily dial cap before dialling it again."
   },
   "campaign": {
     "hint": "AI outbound lists. Each answered call talks to the number's flow; follow-up is by callback.",
@@ -949,6 +949,7 @@
       "WAITING_WINDOW": "waiting for calling hours",
       "WAITING_RETRY": "waiting to retry",
       "WAITING_FREQUENCY": "held by another campaign's call",
+      "WAITING_DAILY_CAP": "held by the daily dial cap",
       "AT_CAPACITY": "held back at capacity"
     },
     "activitiesWhen": {
@@ -956,6 +957,7 @@
       "WAITING_WINDOW": "waiting for calling hours ({{when}})",
       "WAITING_RETRY": "waiting to retry ({{when}})",
       "WAITING_FREQUENCY": "held by another campaign's call until {{when}}",
+      "WAITING_DAILY_CAP": "held by the daily dial cap until {{when}}",
       "AT_CAPACITY": "held back at capacity"
     },
     "when": {

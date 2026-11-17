@@ -218,7 +218,7 @@ func (q *Queries) ExpiredRecordings(ctx context.Context, arg ExpiredRecordingsPa
 }
 
 const getCDR = `-- name: GetCDR :one
-SELECT call_id, started_at, answered_at, ended_at, call_type, language, from_number, to_number, did, flow_id, queue_id, agent_ids, primary_agent_id, ring_sec, bot_sec, queue_wait_sec, talk_sec, total_sec, status, hangup_cause, missed_reason, disposition, is_contained, has_recording, user_data, tech, legs, bill_sec, unbacked_claims, campaign_id FROM cdrs WHERE call_id = $1
+SELECT call_id, started_at, answered_at, ended_at, call_type, language, from_number, to_number, did, flow_id, queue_id, agent_ids, primary_agent_id, ring_sec, bot_sec, queue_wait_sec, talk_sec, total_sec, status, hangup_cause, missed_reason, disposition, is_contained, has_recording, user_data, tech, legs, bill_sec, unbacked_claims, campaign_id, to_number_e164 FROM cdrs WHERE call_id = $1
 `
 
 func (q *Queries) GetCDR(ctx context.Context, callID uuid.UUID) (Cdr, error) {
@@ -255,6 +255,7 @@ func (q *Queries) GetCDR(ctx context.Context, callID uuid.UUID) (Cdr, error) {
 		&i.BillSec,
 		&i.UnbackedClaims,
 		&i.CampaignID,
+		&i.ToNumberE164,
 	)
 	return i, err
 }
@@ -400,7 +401,8 @@ INSERT INTO cdrs (
     agent_ids, primary_agent_id,
     ring_sec, bot_sec, queue_wait_sec, talk_sec, bill_sec, total_sec,
     status, hangup_cause, missed_reason, disposition,
-    is_contained, has_recording, user_data, tech, legs, unbacked_claims, campaign_id
+    is_contained, has_recording, user_data, tech, legs, unbacked_claims, campaign_id,
+    to_number_e164
 ) VALUES (
     $1, $2, $3, $4, $5, $6,
     $7, $8, $9, $10, $11,
@@ -409,7 +411,9 @@ INSERT INTO cdrs (
     $20, $21, $22, $23,
     $24, $25, $26, $27, $28, $29,
     -- The campaign whose attempt carries this call, else NULL (migration 00039).
-    (SELECT a.campaign_id FROM campaign_attempts a WHERE a.call_id = $1)
+    (SELECT a.campaign_id FROM campaign_attempts a WHERE a.call_id = $1),
+    -- The callee in canonical form, for OUTBOUND rows that canonicalise (migration 00049).
+    $30::text
 ) ON CONFLICT (call_id) DO UPDATE SET
     started_at = EXCLUDED.started_at,
     answered_at = EXCLUDED.answered_at,
@@ -440,7 +444,8 @@ INSERT INTO cdrs (
     tech = EXCLUDED.tech,
     legs = EXCLUDED.legs,
     unbacked_claims = EXCLUDED.unbacked_claims,
-    campaign_id = EXCLUDED.campaign_id
+    campaign_id = EXCLUDED.campaign_id,
+    to_number_e164 = EXCLUDED.to_number_e164
 WHERE CASE
     -- A placement failure (an originate that never made a channel, tech
     -- isPlacementFailure) knows the least about a call. It never replaces a
@@ -483,6 +488,7 @@ type InsertCDRParams struct {
 	Tech           []byte             `json:"tech"`
 	Legs           []byte             `json:"legs"`
 	UnbackedClaims []string           `json:"unbackedClaims"`
+	ToNumberE164   *string            `json:"toNumberE164"`
 }
 
 // SPDX-License-Identifier: Apache-2.0
@@ -539,6 +545,7 @@ func (q *Queries) InsertCDR(ctx context.Context, arg InsertCDRParams) (int64, er
 		arg.Tech,
 		arg.Legs,
 		arg.UnbackedClaims,
+		arg.ToNumberE164,
 	)
 	if err != nil {
 		return 0, err
@@ -855,7 +862,7 @@ func (q *Queries) ListAuditLogs(ctx context.Context, arg ListAuditLogsParams) ([
 }
 
 const listCDRs = `-- name: ListCDRs :many
-SELECT call_id, started_at, answered_at, ended_at, call_type, language, from_number, to_number, did, flow_id, queue_id, agent_ids, primary_agent_id, ring_sec, bot_sec, queue_wait_sec, talk_sec, total_sec, status, hangup_cause, missed_reason, disposition, is_contained, has_recording, user_data, tech, legs, bill_sec, unbacked_claims, campaign_id FROM cdrs
+SELECT call_id, started_at, answered_at, ended_at, call_type, language, from_number, to_number, did, flow_id, queue_id, agent_ids, primary_agent_id, ring_sec, bot_sec, queue_wait_sec, talk_sec, total_sec, status, hangup_cause, missed_reason, disposition, is_contained, has_recording, user_data, tech, legs, bill_sec, unbacked_claims, campaign_id, to_number_e164 FROM cdrs
 WHERE started_at >= coalesce($1::timestamptz, '-infinity'::timestamptz)
   AND started_at <  coalesce($2::timestamptz,   'infinity'::timestamptz)
   AND ($3::uuid IS NULL OR queue_id = $3)
@@ -940,6 +947,7 @@ func (q *Queries) ListCDRs(ctx context.Context, arg ListCDRsParams) ([]Cdr, erro
 			&i.BillSec,
 			&i.UnbackedClaims,
 			&i.CampaignID,
+			&i.ToNumberE164,
 		); err != nil {
 			return nil, err
 		}

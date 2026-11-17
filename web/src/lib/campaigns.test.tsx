@@ -86,6 +86,20 @@ describe('the sentence a campaign state reads as', () => {
     )
   })
 
+  it('says a campaign is held by the daily dial cap, until the next day’s window', () => {
+    const campaign = campaignFixture({
+      status: 'RUNNING', activity: 'WAITING_DAILY_CAP', nextDialAt: '2026-10-13T09:00:00+08:00',
+    })
+    expect(describeState(campaign, tEn, { locale: 'en', ...here }).line).toBe(
+      'Running · held by the daily dial cap until tomorrow 09:00',
+    )
+    expect(describeState(campaign, tZh, { locale: 'zh', ...here }).line).toBe(
+      '运行中 · 受每日呼叫上限限制，至 明天 09:00',
+    )
+    const bare = { ...campaign, nextDialAt: undefined }
+    expect(describeState(bare, tEn, { locale: 'en', ...here }).line).toBe('Running · held by the daily dial cap')
+  })
+
   it('reads the day in the campaign’s zone, not the browser’s', () => {
     // 22:30 in New York is already tomorrow in Shanghai's morning, but the
     // campaign lives in New York: it is still tonight there.

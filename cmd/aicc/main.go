@@ -135,6 +135,9 @@ func run() error {
 	}
 	st.FlowPublishRules = flowPublishRules(cfg, profile)
 	st.FlowDraftChecks = flowDraftChecks(cfg)
+	// The ledger writes an outbound call's callee in canonical form (the daily
+	// dial cap counts ad-hoc calls by it), including the seed's.
+	st.DefaultCountryCode = cfg.DefaultCountryCode
 
 	switch cfg.Seed {
 	case "demo":
@@ -393,16 +396,17 @@ func run() error {
 	var campaignObserver campaign.Observer
 	if cfg.IsBotEnabled {
 		dlr := dialer.New(dialer.Config{
-			MaxRinging:           cfg.OutboundMaxRinging,
-			Frequency:            cfg.CampaignFrequencyWindow,
-			OutboundHours:        cfg.OutboundHours,
-			DialForm:             cfg.OutboundDialForm,
-			DefaultCountryCode:   cfg.DefaultCountryCode,
-			TrunkBreakerCount:    cfg.TrunkBreakerCount,
-			ProviderBreakerCount: cfg.ProviderBreakerCount,
-			InboundReserve:       cfg.CampaignInboundReserve(),
-			OverflowTightenRate:  cfg.OverflowTightenRate,
-			OverflowStopRate:     cfg.OverflowStopRate,
+			MaxRinging:              cfg.OutboundMaxRinging,
+			Frequency:               cfg.CampaignFrequencyWindow,
+			MaxDialsPerNumberPerDay: cfg.OutboundMaxDialsPerNumberPerDay,
+			OutboundHours:           cfg.OutboundHours,
+			DialForm:                cfg.OutboundDialForm,
+			DefaultCountryCode:      cfg.DefaultCountryCode,
+			TrunkBreakerCount:       cfg.TrunkBreakerCount,
+			ProviderBreakerCount:    cfg.ProviderBreakerCount,
+			InboundReserve:          cfg.CampaignInboundReserve(),
+			OverflowTightenRate:     cfg.OverflowTightenRate,
+			OverflowStopRate:        cfg.OverflowStopRate,
 		}, dialer.Deps{
 			Store:  st.Dialer(),
 			Placer: outboundSvc,

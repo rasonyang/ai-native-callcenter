@@ -8,6 +8,39 @@ import (
 	"time"
 )
 
+func TestTheDailyDialCapSetting(t *testing.T) {
+	tests := []struct {
+		name, value string
+		want        int
+		wantErr     bool
+	}{
+		{name: "default is three", want: 3},
+		{name: "set", value: "5", want: 5},
+		{name: "off", value: "0", want: 0},
+		{name: "largest", value: "100", want: 100},
+		{name: "negative", value: "-1", wantErr: true},
+		{name: "too large", value: "101", wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("AICC_OUTBOUND_MAX_DIALS_PER_NUMBER_PER_DAY", tt.value)
+			c, err := Load()
+			if tt.wantErr {
+				if err == nil || !strings.Contains(err.Error(), "AICC_OUTBOUND_MAX_DIALS_PER_NUMBER_PER_DAY must be between 0 (off) and 100") {
+					t.Fatalf("err = %v, want one stating the range", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if c.OutboundMaxDialsPerNumberPerDay != tt.want {
+				t.Errorf("got %d, want %d", c.OutboundMaxDialsPerNumberPerDay, tt.want)
+			}
+		})
+	}
+}
+
 func TestDialerSettings(t *testing.T) {
 	tests := []struct {
 		name, ringing, freq string

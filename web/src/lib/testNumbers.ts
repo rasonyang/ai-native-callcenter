@@ -6,7 +6,7 @@ import { request } from './api'
 
 /**
  * The list of test numbers: numbers exempt from the cross-campaign frequency
- * window, so a team can test campaigns on its own phones.
+ * window and the daily dial cap, so a team can test campaigns on its own phones.
  */
 
 export type TestNumber = components['schemas']['TestNumber']

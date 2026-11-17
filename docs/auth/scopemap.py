@@ -36,7 +36,7 @@ VOCAB = {
     "dnc:read":         "Read the do-not-call list.",
     "dnc:write":        "Add numbers to the do-not-call list and take them off it. Separate from config:write because removing a number is what makes it dialable again, a compliance decision rather than a setting.",
     "testnumbers:read": "Read the list of test numbers.",
-    "testnumbers:write": "Add numbers to the list of test numbers and take them off it. Separate from campaigns:write because every entry gives up the cross-campaign frequency protection for that number, which exists for customers: a compliance decision rather than a campaign setting.",
+    "testnumbers:write": "Add numbers to the list of test numbers and take them off it. Separate from campaigns:write because every entry gives up two protections for that number, the cross-campaign frequency window and the daily dial cap, which exist for customers: a compliance decision rather than a campaign setting.",
     "campaigns:read":   "Read AI outbound campaigns and their contact lists.",
     "campaigns:write":  "Create and change campaigns, start, pause, resume and cancel them, and import contacts. Separate from config:write because starting a campaign places calls to customers.",
     "history:read:all": "Read what happened on every call, whoever took it. Widens history:read:own rather than replacing it.",

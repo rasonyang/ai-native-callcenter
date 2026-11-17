@@ -247,3 +247,77 @@ func TestAWindowAcrossMidnightOnTheChangeoverNight(t *testing.T) {
 		t.Error("04:00 EDT is the end")
 	}
 }
+
+func TestTheDayStartIsTheLocalMidnight(t *testing.T) {
+	s := sched(t, "Asia/Shanghai", allDays, "", "09:00", "18:00")
+	// 2026-11-17 20:00 UTC is 04:00 on the 18th in Shanghai.
+	got := s.DayStart(time.Date(2026, 11, 17, 20, 0, 0, 0, time.UTC))
+	if want := at(t, "Asia/Shanghai", "2026-11-18 00:00"); !got.Equal(want) {
+		t.Fatalf("DayStart = %s, want %s", got, want)
+	}
+	// A schedule with no zone counts UTC days.
+	got = Schedule{}.DayStart(time.Date(2026, 11, 17, 23, 59, 0, 0, time.UTC))
+	if want := time.Date(2026, 11, 17, 0, 0, 0, 0, time.UTC); !got.Equal(want) {
+		t.Fatalf("zoneless DayStart = %s, want %s", got, want)
+	}
+}
+
+func TestADailyCapHoldEndsWhenTheNextDaysWindowOpens(t *testing.T) {
+	s := sched(t, "America/New_York", allDays, "", "09:00", "17:00")
+	got := s.DailyCapRelease(at(t, "America/New_York", "2026-11-17 14:30"))
+	if want := at(t, "America/New_York", "2026-11-18 09:00"); !got.Equal(want) {
+		t.Fatalf("release = %s, want %s", got, want)
+	}
+	// Skips a closed day: Friday evening releases on Monday's opening.
+	weekdays := sched(t, "America/New_York", []string{"MON", "TUE", "WED", "THU", "FRI"}, "", "09:00", "17:00")
+	got = weekdays.DailyCapRelease(at(t, "America/New_York", "2026-11-20 18:00")) // a Friday
+	if want := at(t, "America/New_York", "2026-11-23 09:00"); !got.Equal(want) {
+		t.Fatalf("Friday release = %s, want %s", got, want)
+	}
+}
+
+func TestADailyCapReleaseWithNoWindowIsTheNextMidnight(t *testing.T) {
+	got := Schedule{}.DailyCapRelease(time.Date(2026, 11, 17, 10, 0, 0, 0, time.UTC))
+	if want := time.Date(2026, 11, 18, 0, 0, 0, 0, time.UTC); !got.Equal(want) {
+		t.Fatalf("release = %s, want %s", got, want)
+	}
+}
+
+func TestADailyCapReleaseAcrossADaylightSavingChange(t *testing.T) {
+	s := sched(t, "America/New_York", allDays, "", "09:00", "17:00")
+	// The clocks go back on 2026-11-01: that day is 25 hours long, and the
+	// release is still the wall-clock 09:00 of the next day.
+	got := s.DailyCapRelease(at(t, "America/New_York", "2026-10-31 20:00"))
+	if want := at(t, "America/New_York", "2026-11-01 09:00"); !got.Equal(want) {
+		t.Fatalf("release before the change = %s, want %s", got, want)
+	}
+	got = s.DailyCapRelease(at(t, "America/New_York", "2026-11-01 20:00"))
+	if want := at(t, "America/New_York", "2026-11-02 09:00"); !got.Equal(want) {
+		t.Fatalf("release after the change = %s, want %s", got, want)
+	}
+	// The day start of the 25-hour day is the midnight before the change.
+	start := s.DayStart(at(t, "America/New_York", "2026-11-01 20:00"))
+	if want := at(t, "America/New_York", "2026-11-01 00:00"); !start.Equal(want) {
+		t.Fatalf("DayStart = %s, want %s", start, want)
+	}
+	if next := s.DailyCapRelease(at(t, "America/New_York", "2026-11-01 00:30")); !next.After(start.Add(24 * time.Hour)) {
+		t.Fatalf("release %s should be past 24h after the day start %s", next, start)
+	}
+}
+
+func TestAContactZoneAheadOfTheCampaignZoneHasItsOwnDay(t *testing.T) {
+	// The contact is in Shanghai, the campaign in New York: 2026-11-17 22:00 in
+	// New York is 11:00 on the 18th in Shanghai.
+	w := CallingWindow{Days: allDays, Ranges: []TimeRange{{Start: "09:00", End: "17:00"}}}
+	s, err := NewSchedule("America/New_York", "Asia/Shanghai", w, dayrange.Range{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := at(t, "America/New_York", "2026-11-17 22:00")
+	if got, want := s.DayStart(now), at(t, "Asia/Shanghai", "2026-11-18 00:00"); !got.Equal(want) {
+		t.Fatalf("DayStart = %s, want %s", got, want)
+	}
+	if got, want := s.DailyCapRelease(now), at(t, "Asia/Shanghai", "2026-11-19 09:00"); !got.Equal(want) {
+		t.Fatalf("release = %s, want %s", got, want)
+	}
+}

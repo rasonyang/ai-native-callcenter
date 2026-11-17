@@ -25,14 +25,21 @@ const (
 	// reached its number lately, and this one waits until that touch plus the
 	// window (NextDialAt). A number on the list of test numbers is never held.
 	ActivityWaitingFrequency Activity = "WAITING_FREQUENCY"
+	// ActivityWaitingDailyCap: nothing is in flight and the earliest pending
+	// contact is held by the daily dial cap: its number was dialled the
+	// deployment's maximum of times today (AICC_OUTBOUND_MAX_DIALS_PER_NUMBER_PER_DAY),
+	// and this campaign waits for the start of the contact's calling window on
+	// the next local day (NextDialAt). A number on the list of test numbers is
+	// never held.
+	ActivityWaitingDailyCap Activity = "WAITING_DAILY_CAP"
 	// ActivityAtCapacity: due contacts wait on one of the dialer's limits.
 	ActivityAtCapacity Activity = "AT_CAPACITY"
 )
 
-// IsValid reports whether a is one of the five activities.
+// IsValid reports whether a is one of the six activities.
 func (a Activity) IsValid() bool {
 	switch a {
-	case ActivityDialing, ActivityWaitingWindow, ActivityWaitingRetry, ActivityWaitingFrequency, ActivityAtCapacity:
+	case ActivityDialing, ActivityWaitingWindow, ActivityWaitingRetry, ActivityWaitingFrequency, ActivityWaitingDailyCap, ActivityAtCapacity:
 		return true
 	}
 	return false
@@ -60,6 +67,19 @@ type Observer interface {
 	// Imported: contacts were added.
 	Imported(id uuid.UUID)
 }
+
+// HoldKind is the mark a deferral leaves on the contacts it moves: which limit,
+// if any, made their due time later. A contact carries at most one.
+type HoldKind string
+
+const (
+	// HoldNone: the deferral is a calling window's or a retry's, no mark.
+	HoldNone HoldKind = ""
+	// HoldFrequency: the cross-campaign frequency window (is_frequency_held).
+	HoldFrequency HoldKind = "FREQUENCY"
+	// HoldDailyCap: the daily dial cap (is_daily_cap_held).
+	HoldDailyCap HoldKind = "DAILY_CAP"
+)
 
 // Held is a due contact another campaign reached lately.
 type Held struct {

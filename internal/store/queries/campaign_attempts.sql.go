@@ -85,7 +85,7 @@ const claimContactForDial = `-- name: ClaimContactForDial :one
 
 
 UPDATE campaign_contacts
-SET next_attempt_at = NULL, is_frequency_held = false, updated_at = now()
+SET next_attempt_at = NULL, is_frequency_held = false, is_daily_cap_held = false, updated_at = now()
 WHERE id = $1 AND status = 'ACTIVE'
 RETURNING campaign_id, number_e164
 `
@@ -294,7 +294,7 @@ func (q *Queries) LockAttemptByCall(ctx context.Context, callID uuid.UUID) (Camp
 }
 
 const lockCampaignContact = `-- name: LockCampaignContact :one
-SELECT id, campaign_id, number_e164, number_raw, time_zone, slots, status, attempts, system_failures, next_attempt_at, last_outcome, lead_intent, lead_notes, created_at, updated_at, last_attempt_id, last_call_id, is_frequency_held FROM campaign_contacts WHERE id = $1 FOR UPDATE
+SELECT id, campaign_id, number_e164, number_raw, time_zone, slots, status, attempts, system_failures, next_attempt_at, last_outcome, lead_intent, lead_notes, created_at, updated_at, last_attempt_id, last_call_id, is_frequency_held, is_daily_cap_held FROM campaign_contacts WHERE id = $1 FOR UPDATE
 `
 
 func (q *Queries) LockCampaignContact(ctx context.Context, id uuid.UUID) (CampaignContact, error) {
@@ -319,13 +319,14 @@ func (q *Queries) LockCampaignContact(ctx context.Context, id uuid.UUID) (Campai
 		&i.LastAttemptID,
 		&i.LastCallID,
 		&i.IsFrequencyHeld,
+		&i.IsDailyCapHeld,
 	)
 	return i, err
 }
 
 const makeContactDue = `-- name: MakeContactDue :execrows
 UPDATE campaign_contacts
-SET next_attempt_at = $2, is_frequency_held = false, updated_at = now()
+SET next_attempt_at = $2, is_frequency_held = false, is_daily_cap_held = false, updated_at = now()
 WHERE id = $1 AND status = 'ACTIVE' AND next_attempt_at IS NULL
 `
 
@@ -417,7 +418,7 @@ func (q *Queries) SetAttemptLead(ctx context.Context, arg SetAttemptLeadParams) 
 
 const settleCampaignContact = `-- name: SettleCampaignContact :exec
 UPDATE campaign_contacts
-SET attempts = $2, system_failures = $3, status = $4, next_attempt_at = $5, is_frequency_held = false,
+SET attempts = $2, system_failures = $3, status = $4, next_attempt_at = $5, is_frequency_held = false, is_daily_cap_held = false,
     last_outcome = $6, last_attempt_id = $7::uuid,
     last_call_id = $8::uuid,
     lead_intent = coalesce($9::text, lead_intent),

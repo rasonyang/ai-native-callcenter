@@ -63,7 +63,7 @@ WHERE id = $1 AND status = 'DRAFT';
 -- the start on, an ACTIVE contact is due now.
 -- name: ArmCampaignContacts :execrows
 UPDATE campaign_contacts
-SET next_attempt_at = now(), is_frequency_held = false, updated_at = now()
+SET next_attempt_at = now(), is_frequency_held = false, is_daily_cap_held = false, updated_at = now()
 WHERE campaign_id = $1 AND status = 'ACTIVE' AND next_attempt_at IS NULL;
 
 -- name: PauseCampaign :execrows

@@ -89,6 +89,6 @@ export const SCOPE_DESCRIPTIONS: Record<Scope, string> = {
     'quality:review': "Read and write quality reviews of recorded calls.",
     'reports:read': "Read the floor's aggregates: overview, per-queue and daily.",
     'testnumbers:read': "Read the list of test numbers.",
-    'testnumbers:write': "Add numbers to the list of test numbers and take them off it. Separate from campaigns:write because every entry gives up the cross-campaign frequency protection for that number, which exists for customers: a compliance decision rather than a campaign setting.",
+    'testnumbers:write': "Add numbers to the list of test numbers and take them off it. Separate from campaigns:write because every entry gives up two protections for that number, the cross-campaign frequency window and the daily dial cap, which exist for customers: a compliance decision rather than a campaign setting.",
     'users:write': "Create and edit accounts, set roles and reset passwords. Separate from config:write because it is the one path to privilege.",
 }

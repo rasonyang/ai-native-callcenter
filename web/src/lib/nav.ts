@@ -81,7 +81,7 @@ export const NAV: NavGroup[] = [
       { to: '/admin/campaigns', labelKey: 'nav.campaigns', icon: Megaphone, roles: ['ADMIN', 'SUPERVISOR'], isReady: true },
       { to: '/admin/callbacks', labelKey: 'nav.callbacks', icon: PhoneForwarded, roles: ['ADMIN', 'SUPERVISOR'], isReady: true },
       { to: '/admin/dnc', labelKey: 'nav.dnc', icon: PhoneOff, roles: ['ADMIN', 'SUPERVISOR'], isReady: true },
-      // Numbers exempt from the cross-campaign frequency window; testnumbers:read and :write go to supervisors and administrators.
+      // Numbers exempt from the cross-campaign frequency window and the daily dial cap; testnumbers:read and :write go to supervisors and administrators.
       { to: '/admin/test-numbers', labelKey: 'nav.testNumbers', icon: FlaskConical, roles: ['ADMIN', 'SUPERVISOR'], isReady: true },
     ],
   },

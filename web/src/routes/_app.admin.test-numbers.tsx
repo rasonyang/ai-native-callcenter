@@ -14,7 +14,7 @@ import { TEST_NUMBER_LIMIT, useTestNumberMutations, useTestNumbers } from '@/lib
 import { ConfirmDelete } from '@/routes/_app.admin.extensions'
 
 /**
- * The list of test numbers: exempt from the cross-campaign frequency window.
+ * The list of test numbers: exempt from the cross-campaign frequency window and the daily dial cap.
  * A number may be typed in any common form; the server answers with the
  * canonical one, which is what the list shows.
  */

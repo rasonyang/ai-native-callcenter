@@ -83,7 +83,7 @@ const (
 	// ScopeTestnumbersRead — Read the list of test numbers.
 	ScopeTestnumbersRead = "testnumbers:read"
 
-	// ScopeTestnumbersWrite — Add numbers to the list of test numbers and take them off it. Separate from campaigns:write because every entry gives up the cross-campaign frequency protection for that number, which exists for customers: a compliance decision rather than a campaign setting.
+	// ScopeTestnumbersWrite — Add numbers to the list of test numbers and take them off it. Separate from campaigns:write because every entry gives up two protections for that number, the cross-campaign frequency window and the daily dial cap, which exist for customers: a compliance decision rather than a campaign setting.
 	ScopeTestnumbersWrite = "testnumbers:write"
 
 	// ScopeUsersWrite — Create and edit accounts, set roles and reset passwords. Separate from config:write because it is the one path to privilege.
@@ -146,7 +146,7 @@ var ScopeDescriptions = map[string]string{
 	ScopeQualityReview:    "Read and write quality reviews of recorded calls.",
 	ScopeReportsRead:      "Read the floor's aggregates: overview, per-queue and daily.",
 	ScopeTestnumbersRead:  "Read the list of test numbers.",
-	ScopeTestnumbersWrite: "Add numbers to the list of test numbers and take them off it. Separate from campaigns:write because every entry gives up the cross-campaign frequency protection for that number, which exists for customers: a compliance decision rather than a campaign setting.",
+	ScopeTestnumbersWrite: "Add numbers to the list of test numbers and take them off it. Separate from campaigns:write because every entry gives up two protections for that number, the cross-campaign frequency window and the daily dial cap, which exist for customers: a compliance decision rather than a campaign setting.",
 	ScopeUsersWrite:       "Create and edit accounts, set roles and reset passwords. Separate from config:write because it is the one path to privilege.",
 }
 
