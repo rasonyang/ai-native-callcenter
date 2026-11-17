@@ -392,3 +392,136 @@ func TestTheDailyCapOutranksTheWindowAndTheFrequencyWindowOnATie(t *testing.T) {
 		}
 	})
 }
+
+// setNextAttempt rewrites a contact's retry time, as an operator's or an
+// older version's data might hold it, without touching its marks.
+func (r *rig) setNextAttempt(c campaign.Campaign, number string, at time.Time) {
+	r.t.Helper()
+	if _, err := r.st.Pool.Exec(context.Background(),
+		`UPDATE campaign_contacts SET next_attempt_at = $2 WHERE id = $1`, r.contactOf(c, number).ID, at); err != nil {
+		r.t.Fatal(err)
+	}
+}
+
+// The first report after the cap is reached already names the release: the
+// dialer defers the capped contact from its retry time to the release as soon
+// as it sees it, and does not wait for the retry time to come.
+func TestTheFirstReportAfterTheCapNamesTheRelease(t *testing.T) {
+	r := capRig(t, opts{})
+	specs := numbers("72", 1)
+	n := specs[0].number
+	b := r.newCampaign("B", func(s *camSpec) {
+		p := campaign.DefaultRetryPolicy()
+		p.MaxAttempts = 6
+		p.IntervalSec[campaign.OutcomeNoAnswer] = 60
+		s.policy = &p
+	})
+	r.importContacts(b, specs)
+	r.start(b)
+	for i := 1; i <= 3; i++ {
+		if got := r.placer.placedTo(n); got != i {
+			t.Fatalf("dial %d: placed %d times", i, got)
+		}
+		r.end(r.placer.liveCalls()[0], endNoAnswer)
+		r.settle()
+		if i < 3 {
+			// The retry time, a minute on: the contact is due and dialled.
+			if ct := r.contactOf(b, n); ct.NextAttemptAt == nil || !ct.NextAttemptAt.After(r.clock.Now()) {
+				t.Fatalf("after dial %d the contact is due %v, want a retry time after %v", i, ct.NextAttemptAt, r.clock.Now())
+			}
+			r.tick(61 * time.Second)
+		}
+	}
+	// No tick since the third settle: this is the first report.
+	release := ny(t, "2026-06-02 09:00")
+	p := r.progress(b)
+	if p.Activity != campaign.ActivityWaitingDailyCap || p.NextDialAt == nil || !p.NextDialAt.Equal(release) {
+		t.Fatalf("progress = %+v, want WAITING_DAILY_CAP until %v", p, release)
+	}
+	ct := r.contactOf(b, n)
+	if ct.NextAttemptAt == nil || !ct.NextAttemptAt.Equal(release) {
+		t.Errorf("the contact is due %v, want the release %v", ct.NextAttemptAt, release)
+	}
+	if capHeld, _ := r.marks(b, n); !capHeld {
+		t.Error("the deferred contact carries no daily cap mark")
+	}
+	if ct.Attempts != 3 || ct.SystemFailures != 0 {
+		t.Errorf("attempts %d, system failures %d, want 3 and 0 as the three settles left them", ct.Attempts, ct.SystemFailures)
+	}
+	if got := r.placer.placedTo(n); got != 3 {
+		t.Errorf("placed %d times, want 3", got)
+	}
+	// Listing the number still lifts the hold.
+	r.listTestNumber(n)
+	if got := r.placer.placedTo(n); got != 4 {
+		t.Errorf("placed %d times after listing, want the 4th", got)
+	}
+	r.noViolations()
+}
+
+// armCapped places and ends each of the numbers once, leaving every contact on
+// the default 2 h retry, then gives the first number two more dials today (the
+// cap is 3) without moving its retry time, so the dialer finds it capped.
+func (r *rig) armCapped(c campaign.Campaign, capped string) {
+	r.t.Helper()
+	r.endAll(func(string) string { return endNoAnswer })
+	for i := 0; i < 2; i++ {
+		r.dialed(c, capped, campaign.OutcomeNoAnswer, r.clock.Now())
+	}
+}
+
+func TestACappedContactIsDeferredAheadOfAnUncappedOneWithALaterRetry(t *testing.T) {
+	r := capRig(t, opts{})
+	specs := numbers("73", 2)
+	first, second := specs[0].number, specs[1].number
+	b := r.newCampaign("B", nil)
+	r.importContacts(b, specs)
+	r.start(b)
+	r.armCapped(b, first)
+	now := r.clock.Now()
+	release := ny(t, "2026-06-02 09:00")
+	secondAt := now.Add(time.Hour)
+	r.setNextAttempt(b, first, now.Add(time.Minute))
+	r.setNextAttempt(b, second, secondAt)
+	r.dialer().Wake()
+	r.tick(time.Second)
+
+	if ct := r.contactOf(b, first); ct.NextAttemptAt == nil || !ct.NextAttemptAt.Equal(release) {
+		t.Errorf("the capped contact is due %v, want the release %v", ct.NextAttemptAt, release)
+	}
+	if capHeld, _ := r.marks(b, first); !capHeld {
+		t.Error("the capped contact carries no mark")
+	}
+	if ct := r.contactOf(b, second); ct.NextAttemptAt == nil || !ct.NextAttemptAt.Equal(secondAt) {
+		t.Errorf("the uncapped contact moved to %v, want it kept at %v", ct.NextAttemptAt, secondAt)
+	}
+	p := r.progress(b)
+	if p.Activity != campaign.ActivityWaitingRetry || p.NextDialAt == nil || !p.NextDialAt.Equal(secondAt) {
+		t.Fatalf("progress = %+v, want WAITING_RETRY until the uncapped contact's %v", p, secondAt)
+	}
+}
+
+func TestACappedContactWhoseRetryComesAfterTheReleaseIsNotMoved(t *testing.T) {
+	r := capRig(t, opts{})
+	specs := numbers("74", 1)
+	n := specs[0].number
+	b := r.newCampaign("B", nil)
+	r.importContacts(b, specs)
+	r.start(b)
+	r.armCapped(b, n)
+	later := ny(t, "2026-06-02 11:00")
+	r.setNextAttempt(b, n, later)
+	r.dialer().Wake()
+	r.tick(time.Second)
+
+	if ct := r.contactOf(b, n); ct.NextAttemptAt == nil || !ct.NextAttemptAt.Equal(later) {
+		t.Errorf("the contact is due %v, want its own retry time %v kept", ct.NextAttemptAt, later)
+	}
+	if capHeld, _ := r.marks(b, n); capHeld {
+		t.Error("a contact whose retry is after the release was marked")
+	}
+	p := r.progress(b)
+	if p.Activity != campaign.ActivityWaitingRetry || p.NextDialAt == nil || !p.NextDialAt.Equal(later) {
+		t.Errorf("progress = %+v, want WAITING_RETRY until %v", p, later)
+	}
+}

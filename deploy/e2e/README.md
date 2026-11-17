@@ -586,17 +586,15 @@ report records it.
 
 1. The contact is dialled three times, each attempt `NO_ANSWER`. The activity
    becomes `WAITING_DAILY_CAP`.
+   The first read already has `nextDialAt` and the contact's `nextAttemptAt`
+   at the next local midnight in the zone (2 s of slack): the dialer defers a
+   capped contact as soon as it sees it, not when its retry time comes.
 2. A quiet period of 90 s (one retry interval and a dialer pass). The simulator
    has seen exactly three INVITEs for the number, none after the activity
    turned; the contact is `ACTIVE` with `attempts` 3 and `systemFailures` 0,
    unchanged across the period; its `nextAttemptAt` and the campaign's
    `nextDialAt` are the next local midnight in the zone (2 s of slack). The
    three CDRs carry the campaign id.
-
-The assertions read the settled state: the first read of `WAITING_DAILY_CAP`
-can come one retry interval before the dialer's next pass defers the contact,
-and in that read `nextDialAt` is still the retry time; the report keeps it as
-`firstCapped`.
 
 The report is `dailycap-<time>/report.json` (the assertions, a timeline, the
 zone, the expected release time, the attempts, the contact and campaign as read

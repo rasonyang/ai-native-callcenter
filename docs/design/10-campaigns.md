@@ -421,7 +421,11 @@ not sent. It is the deployment's, never a campaign's: the cap belongs to the car
   own limit still applies to a test number's 4th dial.
 - *Activity.* `WAITING_DAILY_CAP` with `nextDialAt` the release time, as §4.1 says. Like the
   frequency hold it binds only when the contact's own `next_attempt_at` is not later than the
-  release time (one second of slack).
+  release time (one second of slack). A contact whose own retry time falls before the release is
+  deferred to the release (with the cap's mark) by the dialer as soon as it sees it capped, in
+  the pass that reports the activity and not when the retry time comes, so `nextDialAt` is the
+  release time from the first report (at most 20 contacts per pass; the rest follow on the next
+  pass). A retry time after the release is never moved.
 - Dials made before migration 00049 as ad-hoc calls are not counted; campaign attempts always
   were.
 

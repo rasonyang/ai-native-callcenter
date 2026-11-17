@@ -78,10 +78,6 @@ const (
 	// WAITING_DAILY_CAP: one retry interval plus a dialer pass margin. In it a
 	// fourth dial would have gone out if the cap were not holding.
 	dailyCapQuiet = (DailyCapRetryIntervalSec + 30) * time.Second
-	// dailyCapSettleBound is how long the dialer may take, after the activity
-	// first reads WAITING_DAILY_CAP, to defer the contact: the retry interval
-	// and its passes.
-	dailyCapSettleBound = (DailyCapRetryIntervalSec + 60) * time.Second
 	// dailyCapSlack bounds how far nextAttemptAt and nextDialAt may lie from
 	// the next local midnight.
 	dailyCapSlack = 2 * time.Second
@@ -121,11 +117,6 @@ func ChooseDailyCapZone(now time.Time, zones []string) (string, time.Duration, e
 	return best, bestDist, nil
 }
 
-type dailyCapFirstRead struct {
-	Campaign api.Campaign        `json:"campaign"`
-	Contact  api.CampaignContact `json:"contact"`
-}
-
 // DailyCapReport is what a run writes to report.json.
 type DailyCapReport struct {
 	Scenario    string    `json:"scenario"`
@@ -139,17 +130,14 @@ type DailyCapReport struct {
 	Cap         int       `json:"cap"`
 	// TimeZone is the campaign's zone, and ZoneDistanceFromMidnightSec how far
 	// its local time was from a midnight when the run chose it.
-	TimeZone                    string  `json:"timeZone"`
-	ZoneDistanceFromMidnightSec float64 `json:"zoneDistanceFromMidnightSec"`
-	RingTimeoutSec              int     `json:"ringTimeoutSec"`
-	RetryIntervalSec            int     `json:"retryIntervalSec"`
-	QuietSec                    float64 `json:"quietSec"`
-	ExpectedReleaseAt           string  `json:"expectedReleaseAt,omitempty"`
-	CappedObservedAt            string  `json:"cappedObservedAt,omitempty"`
-	// FirstCapped is the campaign and contact as first read with activity
-	// WAITING_DAILY_CAP; not asserted.
-	FirstCapped *dailyCapFirstRead `json:"firstCapped,omitempty"`
-	Timeline    []string           `json:"timeline"`
+	TimeZone                    string   `json:"timeZone"`
+	ZoneDistanceFromMidnightSec float64  `json:"zoneDistanceFromMidnightSec"`
+	RingTimeoutSec              int      `json:"ringTimeoutSec"`
+	RetryIntervalSec            int      `json:"retryIntervalSec"`
+	QuietSec                    float64  `json:"quietSec"`
+	ExpectedReleaseAt           string   `json:"expectedReleaseAt,omitempty"`
+	CappedObservedAt            string   `json:"cappedObservedAt,omitempty"`
+	Timeline                    []string `json:"timeline"`
 
 	Campaign      api.Campaign             `json:"campaign"`
 	CampaignAtCap api.Campaign             `json:"campaignAtCap"`
@@ -454,46 +442,11 @@ func (r *dailyCapRun) run(ctx context.Context, zone string, loc *time.Location) 
 	if err != nil {
 		return obs, err
 	}
+	obs.ContactAtCap = &ct
 	r.rep.CappedObservedAt = obs.CappedObservedAt.UTC().Format(time.RFC3339Nano)
-	r.rep.FirstCapped = &dailyCapFirstRead{Campaign: obs.CampaignAtCap, Contact: ct}
+	r.rep.CampaignAtCap, r.rep.ContactAtCap = obs.CampaignAtCap, obs.ContactAtCap
 	r.note("activity first read WAITING_DAILY_CAP, nextDialAt %s; contact %s, attempts %d, systemFailures %d, nextAttemptAt %s",
 		timeStr(obs.CampaignAtCap.NextDialAt), ct.Status, ct.Attempts, ct.SystemFailures, timeStr(ct.NextAttemptAt))
-
-	// The activity can read WAITING_DAILY_CAP before the dialer has deferred
-	// the contact: until its next pass after the retry interval, nextDialAt
-	// and nextAttemptAt are still the retry time. The assertions read the
-	// settled state, the first one in which the contact has been deferred;
-	// the first read stays in the report.
-	atts, err := r.attempts(ctx, id)
-	if err != nil {
-		return obs, err
-	}
-	if len(atts) == 0 {
-		return obs, fmt.Errorf("the campaign was capped before its first attempt: the number was already dialled %d times today, so the environment is not fresh; run make e2e-down, then make e2e-up", DailyCapMax)
-	}
-	release := NextLocalMidnight(atts[len(atts)-1].StartedAt, loc)
-	settle := time.Now().Add(dailyCapSettleBound)
-	for {
-		if err := r.c.do(ctx, http.MethodGet, "/campaigns/"+id, nil, &obs.CampaignAtCap, http.StatusOK); err != nil {
-			return obs, fmt.Errorf("read the campaign: %w", err)
-		}
-		if ct, err = r.contact(ctx, id); err != nil {
-			return obs, err
-		}
-		if timeNear(ct.NextAttemptAt, release, dailyCapSlack) {
-			break
-		}
-		if time.Now().After(settle) {
-			break // the assertions report what is there
-		}
-		if err := sleep(ctx, time.Second); err != nil {
-			return obs, err
-		}
-	}
-	obs.ContactAtCap = &ct
-	r.rep.CampaignAtCap, r.rep.ContactAtCap = obs.CampaignAtCap, obs.ContactAtCap
-	r.note("settled: activity %s, nextDialAt %s; contact %s, attempts %d, systemFailures %d, nextAttemptAt %s",
-		actStr(obs.CampaignAtCap.Activity), timeStr(obs.CampaignAtCap.NextDialAt), ct.Status, ct.Attempts, ct.SystemFailures, timeStr(ct.NextAttemptAt))
 
 	// The quiet period: a retry interval and a dialer pass in which a fourth
 	// dial would go out if the cap did not hold it.
