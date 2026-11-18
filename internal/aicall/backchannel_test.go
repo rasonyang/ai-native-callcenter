@@ -93,10 +93,77 @@ func TestTheClassifierSeparatesAcknowledgementsFromWords(t *testing.T) {
 		{"en", "got", verdictAckSoFar},
 		{"en", "ye", verdictAckSoFar},
 		{"en", "I", verdictAckSoFar},
+		// A run of different acknowledgements is words to the classifier, so
+		// the hold releases it and it is answered; only the verdict on a cut
+		// takes it for one (isAckRun, #600).
+		{"zh", "嗯，可以。", verdictContent},
+		{"zh", "嗯，好的。", verdictContent},
+		{"zh", "对，是的。", verdictContent},
+		{"zh", "嗯，是。", verdictContent},
+		{"zh", "嗯好的", verdictContent},
+		{"en", "yeah, okay.", verdictContent},
+		{"en", "oh right", verdictContent},
 	}
 	for _, tt := range tests {
 		if got := classifyBackchannel(tt.language, tt.text); got != tt.want {
 			t.Errorf("classifyBackchannel(%q, %q) = %s, want %s", tt.language, tt.text, got, tt.want)
+		}
+	}
+}
+
+// A cut's verdict takes a run of acknowledgements for one: up to four phrases
+// of the call language's list, different ones allowed, with or without
+// punctuation between them. Anything else in it, a question mark, a fifth
+// phrase or another language's words make it words (#600).
+func TestARunOfAcknowledgementsIsOneAcknowledgement(t *testing.T) {
+	tests := []struct {
+		language string
+		text     string
+		want     bool
+	}{
+		{"zh", "嗯，可以。", true},
+		{"zh", "嗯，好的。", true},
+		{"zh", "对，是的。", true},
+		{"zh", "嗯，是。", true},
+		{"zh", "嗯，嗯。", true},
+		{"zh", "嗯好的", true},
+		{"zh", "好的好的", true},
+		{"zh", "对对对", true},
+		{"zh", "嗯，好的，对，可以。", true},
+		{"zh-CN", "嗯，可以", true},
+		{"en", "yeah, okay.", true},
+		{"en", "oh right", true},
+		{"en", "Mm-hmm, got it.", true},
+		{"en-US", "okay sure", true},
+
+		// Words after an acknowledgement, cut off or not (layer 2 of #600 is
+		// not built: "嗯，你。" is words).
+		{"zh", "嗯，你。", false},
+		{"zh", "嗯，你说。", false},
+		{"zh", "嗯，需要。", false},
+		{"zh", "嗯，要的。", false},
+		{"zh", "好的，我考虑一下。", false},
+		{"zh", "不是", false},
+		{"en", "yeah no", false},
+		{"en", "okay, but", false},
+		// A question asks something.
+		{"zh", "嗯？", false},
+		{"zh", "嗯，好的?", false},
+		{"en", "oh, right?", false},
+		// No text, or nothing a transcript keeps.
+		{"zh", "", false},
+		{"zh", " ", false},
+		{"en", "…", false},
+		// A fifth phrase is a caller insisting.
+		{"zh", "嗯，好的，对，是的，可以。", false},
+		{"en", "yeah okay right sure yep", false},
+		// Another language's words.
+		{"zh", "yeah, okay.", false},
+		{"en", "嗯，好的。", false},
+	}
+	for _, tt := range tests {
+		if got := isAckRun(tt.language, tt.text); got != tt.want {
+			t.Errorf("isAckRun(%q, %q) = %v, want %v", tt.language, tt.text, got, tt.want)
 		}
 	}
 }

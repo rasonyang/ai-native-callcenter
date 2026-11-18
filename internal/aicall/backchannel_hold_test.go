@@ -317,6 +317,48 @@ func TestWordsInAFinalTakeTheFloorAndAreAnsweredAtOnce(t *testing.T) {
 	}
 }
 
+// A run of different acknowledgements is words on the hold: the classifier's
+// single phrase stands there, so "嗯，可以" takes the floor and is answered,
+// whether a partial or the final shows it. Only a cut's verdict takes a run for
+// an acknowledgement (#600).
+func TestARunOfAcknowledgementsIsStillWordsOnTheHold(t *testing.T) {
+	for _, tt := range []struct {
+		name, language string
+		deltas         []string
+		final          string
+	}{
+		{"zh final", "zh", nil, "嗯，可以。"},
+		{"zh partials", "zh", []string{"嗯", "，可以"}, "嗯，可以。"},
+		{"en final", "en", nil, "Yeah, okay."},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			r := startHold(t, tt.language, Config{BargeGuard: -1, NoInput: -1})
+			r.botSpeaks()
+			r.started("item-1")
+			for _, d := range tt.deltas {
+				r.partial("item-1", d)
+			}
+			r.stopped("item-1")
+			r.final("item-1", tt.final)
+			events := eventsUntil(t, r.session, EventTypeCustomerSaid, isFinalWords)
+
+			if !slices.Contains(typesOf(events), EventTypeBargeIn) {
+				t.Errorf("events = %v, want the bot cut for the words", typesOf(events))
+			}
+			if events[len(events)-1].IsBackchannel {
+				t.Error("a run of acknowledgements was flagged as a backchannel on the hold")
+			}
+			if got := r.model.declines(); len(got) != 0 {
+				t.Errorf("declined %v, want none", got)
+			}
+			waitFor(t, "the caller's turn to be asked for", func() bool { return len(r.model.answers()) == 1 })
+			if got := r.model.answers(); !slices.Equal(got, []string{"item-1"}) {
+				t.Errorf("answers = %v, want item-1 once", got)
+			}
+		})
+	}
+}
+
 // Utterances overlap: the first is an acknowledgement, the second is words.
 func TestOverlappingUtterancesAreJudgedEachOnItsOwn(t *testing.T) {
 	r := startHold(t, "en", Config{BargeGuard: -1, NoInput: -1})
