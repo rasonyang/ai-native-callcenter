@@ -35,13 +35,64 @@ import { formatDuration } from '@/lib/ledger'
  */
 export const Route = createFileRoute('/_app/admin/campaigns/$campaignId')({
   beforeLoad: ({ context }) => requireRole(context.user, 'ADMIN', 'SUPERVISOR'),
+  validateSearch: campaignDetailSearch,
   component: CampaignDetail,
 })
 
 const PAGE_SIZE = 50
 
+const CAMPAIGN_TABS = ['contacts', 'leads', 'attempts', 'outcomes', 'settings'] as const
+type CampaignTab = (typeof CAMPAIGN_TABS)[number]
+
+/**
+ * The open tab, its filter and its page, kept in the address so that Back from
+ * a call record, a reload and a shared link all land where the reader was.
+ * Every default is left out: no tab means Contacts, no page the first page,
+ * no filter every row (on Leads, HIGH). `page` counts from 1.
+ */
+interface CampaignDetailSearch {
+  tab?: Exclude<CampaignTab, 'contacts'>
+  status?: CampaignContactStatus
+  intent?: CampaignLeadIntent
+  outcome?: CampaignOutcome
+  page?: number
+}
+
+const oneOf = <T extends string>(values: readonly T[], raw: unknown): T | undefined =>
+  values.find((value) => value === raw)
+
+/**
+ * Reads the address. Whatever it does not understand is dropped, never an
+ * error, and a filter the open tab does not have is dropped with it. Every
+ * key is returned, set or undefined: the router lays this over the raw query,
+ * so a key left out would let the raw value through.
+ */
+export function campaignDetailSearch(raw: Record<string, unknown>): CampaignDetailSearch {
+  const tab = oneOf(CAMPAIGN_TABS, raw.tab) ?? 'contacts'
+  const intent = oneOf(LEAD_INTENTS, raw.intent)
+  const isPaged = tab === 'contacts' || tab === 'leads' || tab === 'attempts'
+  return {
+    tab: tab === 'contacts' ? undefined : tab,
+    status: tab === 'contacts' ? oneOf(CONTACT_STATUSES, raw.status) : undefined,
+    intent: tab === 'contacts' || (tab === 'leads' && intent !== 'HIGH') ? intent : undefined,
+    outcome: tab === 'attempts' ? oneOf(CAMPAIGN_OUTCOMES, raw.outcome) : undefined,
+    page: isPaged && typeof raw.page === 'number' && Number.isSafeInteger(raw.page) && raw.page > 1
+      ? raw.page
+      : undefined,
+  }
+}
+
+/** What a table tab shows: its filter and its page, counted from 0 as the tables count. */
+interface TabView {
+  status?: CampaignContactStatus
+  intent?: CampaignLeadIntent
+  outcome?: CampaignOutcome
+  page: number
+}
+
 function CampaignDetail() {
   const { campaignId } = Route.useParams()
+  const search = Route.useSearch()
   const { t } = useTranslation()
   const navigate = useNavigate()
   const { data, isPending, isError, error } = useCampaign(campaignId)
@@ -63,6 +114,21 @@ function CampaignDetail() {
   const clearFailures = () => {
     for (const m of [mutations.start, mutations.pause, mutations.resume, mutations.cancel, mutations.remove]) m.reset()
   }
+
+  const view: TabView = {
+    status: search.status, intent: search.intent, outcome: search.outcome, page: (search.page ?? 1) - 1,
+  }
+  // A move inside the page replaces the entry, so one Back still leaves the
+  // campaign. Switching tab passes no view: the new tab opens unfiltered on
+  // its first page.
+  const show = (tab: string, next: Partial<TabView> = {}) =>
+    void navigate({
+      to: '/admin/campaigns/$campaignId',
+      params: { campaignId },
+      search: campaignDetailSearch({ ...next, tab, page: (next.page ?? 0) + 1 }),
+      replace: true,
+      resetScroll: false,
+    })
 
   return (
     <>
@@ -173,7 +239,7 @@ function CampaignDetail() {
         />
       </div>
 
-      <Tabs defaultValue="contacts">
+      <Tabs value={search.tab ?? 'contacts'} onValueChange={(tab) => show(tab)}>
         <TabsList className="px-0">
           <TabsTrigger value="contacts">{t('campaign.tabs.contacts')}</TabsTrigger>
           <TabsTrigger value="leads">{t('campaign.tabs.leads')}</TabsTrigger>
@@ -182,13 +248,18 @@ function CampaignDetail() {
           <TabsTrigger value="settings">{t('campaign.tabs.settings')}</TabsTrigger>
         </TabsList>
         <TabsContent value="contacts" className="pt-4">
-          <ContactsTab campaign={data} />
+          <ContactsTab campaign={data} view={view} onView={(next) => show('contacts', next)} />
         </TabsContent>
         <TabsContent value="leads" className="pt-4">
-          <CampaignLeads campaign={data} />
+          <CampaignLeads
+            campaign={data}
+            intent={view.intent ?? 'HIGH'}
+            page={view.page}
+            onChange={(next) => show('leads', next)}
+          />
         </TabsContent>
         <TabsContent value="attempts" className="pt-4">
-          <AttemptsTab campaign={data} />
+          <AttemptsTab campaign={data} view={view} onView={(next) => show('attempts', next)} />
         </TabsContent>
         <TabsContent value="outcomes" className="pt-4">
           <CampaignOutcomes campaign={data} />
@@ -286,14 +357,16 @@ function SettingsTab({ campaign }: { campaign: Campaign }) {
   )
 }
 
-export function ContactsTab({ campaign }: { campaign: Campaign }) {
+export function ContactsTab({ campaign, view, onView }: {
+  campaign: Campaign
+  view: TabView
+  onView: (next: TabView) => void
+}) {
   const { t, i18n } = useTranslation()
-  const [status, setStatus] = useState<CampaignContactStatus | ''>('')
-  const [intent, setIntent] = useState<CampaignLeadIntent | ''>('')
-  const [page, setPage] = useState(0)
+  const { status, intent, page } = view
   const { data, isPending, isError, error } = useCampaignContacts(campaign.id, {
-    status: status || undefined,
-    leadIntent: intent || undefined,
+    status,
+    leadIntent: intent,
     limit: PAGE_SIZE,
     offset: page * PAGE_SIZE,
   })
@@ -307,11 +380,8 @@ export function ContactsTab({ campaign }: { campaign: Campaign }) {
       <div className="mb-3 flex gap-2">
         <Select
           ariaLabel={t('campaign.contactStatus')}
-          value={status}
-          onChange={(next) => {
-            setStatus(next as CampaignContactStatus | '')
-            setPage(0)
-          }}
+          value={status ?? ''}
+          onChange={(next) => onView({ ...view, status: oneOf(CONTACT_STATUSES, next), page: 0 })}
           options={[
             { value: '', label: t('campaign.allContactStatuses') },
             ...CONTACT_STATUSES.map((s) => ({ value: s, label: t(`campaign.contactStatuses.${s}`) })),
@@ -319,11 +389,8 @@ export function ContactsTab({ campaign }: { campaign: Campaign }) {
         />
         <Select
           ariaLabel={t('campaign.leadIntent')}
-          value={intent}
-          onChange={(next) => {
-            setIntent(next as CampaignLeadIntent | '')
-            setPage(0)
-          }}
+          value={intent ?? ''}
+          onChange={(next) => onView({ ...view, intent: oneOf(LEAD_INTENTS, next), page: 0 })}
           options={[
             { value: '', label: t('campaign.allIntents') },
             ...LEAD_INTENTS.map((s) => ({ value: s, label: t(`campaign.intents.${s}`) })),
@@ -378,17 +445,25 @@ export function ContactsTab({ campaign }: { campaign: Campaign }) {
           ))}
         </TBody>
       </DataTable>
-      <Pager page={page} pageSize={PAGE_SIZE} total={data?.total ?? 0} onPage={setPage} />
+      <Pager
+        page={page}
+        pageSize={PAGE_SIZE}
+        total={data?.total ?? 0}
+        onPage={(next) => onView({ ...view, page: next })}
+      />
     </>
   )
 }
 
-export function AttemptsTab({ campaign }: { campaign: Campaign }) {
+export function AttemptsTab({ campaign, view, onView }: {
+  campaign: Campaign
+  view: TabView
+  onView: (next: TabView) => void
+}) {
   const { t, i18n } = useTranslation()
-  const [outcome, setOutcome] = useState<CampaignOutcome | ''>('')
-  const [page, setPage] = useState(0)
+  const { outcome, page } = view
   const { data, isPending, isError, error } = useCampaignAttempts(campaign.id, {
-    outcome: outcome || undefined,
+    outcome,
     limit: PAGE_SIZE,
     offset: page * PAGE_SIZE,
   })
@@ -402,11 +477,8 @@ export function AttemptsTab({ campaign }: { campaign: Campaign }) {
       <div className="mb-3 flex gap-2">
         <Select
           ariaLabel={t('campaign.outcome')}
-          value={outcome}
-          onChange={(next) => {
-            setOutcome(next as CampaignOutcome | '')
-            setPage(0)
-          }}
+          value={outcome ?? ''}
+          onChange={(next) => onView({ ...view, outcome: oneOf(CAMPAIGN_OUTCOMES, next), page: 0 })}
           options={[
             { value: '', label: t('campaign.allOutcomes') },
             ...CAMPAIGN_OUTCOMES.map((o) => ({ value: o, label: t(`campaign.outcomes.${o}`) })),
@@ -463,7 +535,12 @@ export function AttemptsTab({ campaign }: { campaign: Campaign }) {
           ))}
         </TBody>
       </DataTable>
-      <Pager page={page} pageSize={PAGE_SIZE} total={data?.total ?? 0} onPage={setPage} />
+      <Pager
+        page={page}
+        pageSize={PAGE_SIZE}
+        total={data?.total ?? 0}
+        onPage={(next) => onView({ ...view, page: next })}
+      />
     </>
   )
 }

@@ -47,7 +47,7 @@ function render() {
           }
         : undefined,
   })
-  return renderWithProviders(<ContactsTab campaign={campaign} />)
+  return renderWithProviders(<ContactsTab campaign={campaign} view={{ page: 0 }} onView={() => {}} />)
 }
 
 afterEach(async () => {

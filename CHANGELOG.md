@@ -16,6 +16,11 @@ carries the one-line installer's files.
   names the language, with no model, since the vendor's default transcriber
   varies per session (#602). The language makes such a transcript less likely,
   not impossible.
+- A campaign's page keeps its open tab, the tab's filter and its page in the
+  address. Going back from a call opened on Leads or Attempts landed on
+  Contacts with the filter and page reset; Back, a reload and a shared link
+  now return to the same tab, filter and page. Moving between tabs adds no
+  history entries, so one Back still leaves the campaign (#606).
 
 ## v0.8.7 - 2026-11-17
 
