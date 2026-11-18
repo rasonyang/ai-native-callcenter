@@ -114,6 +114,10 @@ type AttemptFilter struct {
 	// IsTestNumber: nil every attempt, else only those whose IsTestNumber is
 	// equal.
 	IsTestNumber *bool
-	Limit        int
-	Offset       int
+	// PhoneNumber keeps the attempts that dialled this number, as
+	// ContactFilter.PhoneNumber: the client's value into the service, the
+	// canonical E.164 form into the repository.
+	PhoneNumber string
+	Limit       int
+	Offset      int
 }

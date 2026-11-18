@@ -1,3 +1,4 @@
+import { QueryClient } from '@tanstack/react-query'
 import {
   Outlet, RouterProvider, createMemoryHistory, createRootRoute, createRoute, createRouter, type RouterHistory,
 } from '@tanstack/react-router'
@@ -246,21 +247,49 @@ const leadFixture: CampaignContact = {
 const CampaignDetail = CampaignDetailRoute.options.component as () => ReactElement
 
 /**
+ * What the server makes of a searched number, for the one country these tests
+ * dial in (86): the lead's number, no number, or a refusal (anything that is
+ * not "+", digits, spaces and dashes with seven digits or more).
+ */
+function searchedFor(raw: string): 'lead' | 'none' | 'refused' {
+  if (!/^\+?[\d -]+$/.test(raw) || raw.replace(/\D/g, '').length < 7) return 'refused'
+  const digits = raw.replace(/\D/g, '')
+  const e164 = raw.startsWith('+') ? `+${digits}` : `+86${digits.replace(/^0/, '')}`
+  return e164 === leadFixture.number ? 'lead' : 'none'
+}
+
+const refusedNumber = () =>
+  json({
+    error: {
+      code: 'VALIDATION_FAILED',
+      message: 'phoneNumber is not a phone number',
+      params: { field: 'phoneNumber', rule: 'NUMBER_INVALID' },
+    },
+  }, 400)
+
+/**
  * The campaign page under a memory router that starts at the last of
  * `entries`, with the route's own search validation. Every list answers 120
- * rows in total, three pages.
+ * rows in total, three pages; a list searched by number answers the lead when
+ * it is the lead's number, nothing else, and refuses what is not a number.
  */
-function renderCampaignAt(entries: string[]) {
+function renderCampaignAt(entries: string[], options: { queryClient?: QueryClient } = {}) {
   const backend = installBackend({
     handle: ({ path, method }) => {
       if (method !== 'GET') return undefined
       const [route, params] = path.split('?')
+      const query = new URLSearchParams(params)
+      const number = query.get('phoneNumber')
+      const found = number === null ? 'all' : searchedFor(number)
+      if (found === 'refused') return refusedNumber()
       if (route === `/campaigns/${CAMPAIGN_ID}`) return campaignFixture
       if (route === `/campaigns/${CAMPAIGN_ID}/contacts`) {
-        const intent = new URLSearchParams(params).get('leadIntent')
-        return { items: [leadFixture].filter((row) => !intent || row.leadIntent === intent), total: 120 }
+        const intent = query.get('leadIntent')
+        const items = [leadFixture].filter((row) => !intent || row.leadIntent === intent)
+        if (found === 'all') return { items, total: 120 }
+        return found === 'lead' ? { items, total: items.length } : { items: [], total: 0 }
       }
-      if (route === `/campaigns/${CAMPAIGN_ID}/attempts`) return { items: [], total: 120 }
+      if (route === `/campaigns/${CAMPAIGN_ID}/attempts`) return { items: [], total: found === 'all' ? 120 : 0 }
       if (route === '/callbacks') return { items: [] }
       return undefined
     },
@@ -280,6 +309,7 @@ function renderCampaignAt(entries: string[]) {
   const router = createRouter({ routeTree: tree, history })
   const view = renderWithProviders(
     <RouterProvider router={router as unknown as Parameters<typeof RouterProvider>[0]['router']} />,
+    options,
   )
   return { ...view, backend, history }
 }
@@ -386,6 +416,19 @@ describe('reading the campaign page address', () => {
     [{ page: 2.5 }, {}],
     [{ page: 'two' }, {}],
     [{ page: 1e300 }, {}],
+    // A searched number stays as it was typed, trimmed, on the three listings.
+    [{ number: ' 138 0013 8000 ' }, { number: '138 0013 8000' }],
+    [{ tab: 'leads', intent: 'LOW', number: '+86 138-0013-8000' }, { tab: 'leads', intent: 'LOW', number: '+86 138-0013-8000' }],
+    [{ tab: 'attempts', number: '021 6555 0101', page: 2 }, { tab: 'attempts', number: '021 6555 0101', page: 2 }],
+    // Digits alone come back from the router as a JSON number.
+    [{ number: 13800138000 }, { number: '13800138000' }],
+    [{ tab: 'outcomes', number: '13800138000' }, { tab: 'outcomes' }],
+    [{ tab: 'settings', number: '13800138000' }, { tab: 'settings' }],
+    [{ number: '   ' }, {}],
+    [{ number: 'x'.repeat(65) }, {}],
+    [{ number: -5 }, {}],
+    [{ number: 1.5 }, {}],
+    [{ number: ['13800138000'] }, {}],
   ])('reads %o as %o', (raw, expected) => {
     expect(campaignDetailSearch(raw)).toEqual(expected)
   })
@@ -394,7 +437,147 @@ describe('reading the campaign page address', () => {
   // would hand the raw value to the page.
   it('names every key, so nothing raw gets through', () => {
     expect(Object.keys(campaignDetailSearch({ tab: 'reports', status: 'GONE' })).toSorted()).toEqual(
-      ['intent', 'outcome', 'page', 'status', 'tab'],
+      ['intent', 'number', 'outcome', 'page', 'status', 'tab'],
     )
+  })
+})
+
+const searchBox = () => screen.getByRole('textbox', { name: i18n.t('campaign.search.label') })
+
+/** The queries of the list's requests that searched a number, oldest first. */
+const searched = (backend: Backend, list: 'contacts' | 'attempts') =>
+  listQueries(backend, list).filter((q) => 'phoneNumber' in q)
+
+describe('searching a campaign by number', () => {
+  beforeEach(() => {
+    vi.stubGlobal('scrollTo', () => {})
+  })
+
+  it('asks nothing while a number is typed, and searches it on Enter, in the address', async () => {
+    const { user, history, backend } = renderCampaignAt([`${DETAIL}?tab=leads&intent=MEDIUM`])
+    await screen.findByRole('tab', { ...tab('leads'), selected: true })
+    await user.type(searchBox(), '138 0000 0000')
+    expect(searched(backend, 'contacts')).toEqual([])
+    expect(addressOf(history)).toEqual({ tab: 'leads', intent: 'MEDIUM' })
+
+    await user.keyboard('{Enter}')
+    await waitFor(() => expect(addressOf(history)).toEqual({ tab: 'leads', intent: 'MEDIUM', number: '138 0000 0000' }))
+    await waitFor(() => expect(searched(backend, 'contacts')).toEqual([
+      { leadIntent: 'MEDIUM', phoneNumber: '138 0000 0000', limit: '50', offset: '0' },
+    ]))
+    expect(await screen.findByText(leadFixture.leadNotes!)).toBeInTheDocument()
+    // The box keeps the number as typed: the page adds no country code to it.
+    expect(searchBox()).toHaveValue('138 0000 0000')
+  })
+
+  it('narrows with the filters, each kept when the other changes, and starts on the first page', async () => {
+    const { user, history, backend } = renderCampaignAt([`${DETAIL}?tab=attempts&outcome=NO_ANSWER&page=3`])
+    await waitFor(() => expect(listQueries(backend, 'attempts').at(-1)).toEqual({
+      outcome: 'NO_ANSWER', limit: '50', offset: '100',
+    }))
+    await user.type(searchBox(), '021-6555-0101{Enter}')
+    await waitFor(() => expect(listQueries(backend, 'attempts').at(-1)).toEqual({
+      outcome: 'NO_ANSWER', phoneNumber: '021-6555-0101', limit: '50', offset: '0',
+    }))
+    expect(await screen.findByText(i18n.t('campaign.search.noAttempts'))).toBeInTheDocument()
+    await user.selectOptions(screen.getByRole('combobox', { name: i18n.t('campaign.outcome') }), 'BUSY')
+    await waitFor(() => expect(addressOf(history)).toEqual({ tab: 'attempts', outcome: 'BUSY', number: '021-6555-0101' }))
+    await waitFor(() => expect(listQueries(backend, 'attempts').at(-1)).toEqual({
+      outcome: 'BUSY', phoneNumber: '021-6555-0101', limit: '50', offset: '0',
+    }))
+  })
+
+  it('opens with the number a reload or a link names, digits alone included', async () => {
+    const { backend } = renderCampaignAt([`${DETAIL}?status=DONE&number=13800000000`])
+    await waitFor(() => expect(searched(backend, 'contacts')).toEqual([
+      { status: 'DONE', phoneNumber: '13800000000', limit: '50', offset: '0' },
+    ]))
+    expect(searchBox()).toHaveValue('13800000000')
+    expect(await screen.findByText(leadFixture.number)).toBeInTheDocument()
+  })
+
+  it('clears with one click, keeping the other filters', async () => {
+    const { user, history, backend } = renderCampaignAt([`${DETAIL}?status=DONE&number=${encodeURIComponent('138 0000 0000')}&page=2`])
+    await waitFor(() => expect(searched(backend, 'contacts')).toHaveLength(1))
+    await user.click(screen.getByRole('button', { name: i18n.t('campaign.search.clear') }))
+    await waitFor(() => expect(addressOf(history)).toEqual({ status: 'DONE' }))
+    expect(searchBox()).toHaveValue('')
+    await waitFor(() => expect(listQueries(backend, 'contacts').at(-1)).toEqual({
+      status: 'DONE', limit: '50', offset: '0',
+    }))
+    expect(screen.queryByRole('button', { name: i18n.t('campaign.search.clear') })).toBeNull()
+  })
+
+  it('drops the search as soon as the box is emptied', async () => {
+    const { user, history } = renderCampaignAt([`${DETAIL}?tab=leads&number=${encodeURIComponent('138 0000 0000')}`])
+    await waitFor(() => expect(searchBox()).toHaveValue('138 0000 0000'))
+    await user.clear(searchBox())
+    await waitFor(() => expect(addressOf(history)).toEqual({ tab: 'leads' }))
+  })
+
+  it('says under the box that a value is not a number, once, and not while it is being changed', async () => {
+    const { user, backend } = renderCampaignAt([DETAIL])
+    await screen.findByRole('tab', { ...tab('contacts'), selected: true })
+    await user.type(searchBox(), '138 abc{Enter}')
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent(i18n.t('errors.rules.NUMBER_INVALID'))
+    expect(searchBox()).toHaveAttribute('aria-invalid', 'true')
+    // The table says there is no such contact, not that something failed.
+    expect(screen.getByText(i18n.t('campaign.search.noContacts'))).toBeInTheDocument()
+    expect(screen.queryByText(i18n.t('errors.VALIDATION_FAILED'))).toBeNull()
+    // Refused once: not asked again.
+    expect(searched(backend, 'contacts')).toHaveLength(1)
+
+    await user.type(searchBox(), '{Backspace}')
+    expect(screen.queryByRole('alert')).toBeNull()
+    expect(searchBox()).toHaveAttribute('aria-invalid', 'false')
+  })
+
+  // The application retries a failed query once; a refused number would only
+  // be refused again, and the box would wait a second for nothing.
+  it('does not ask again for a number the server refused', async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: 1, retryDelay: 0, gcTime: 0 } } })
+    const { user, backend } = renderCampaignAt([DETAIL], { queryClient })
+    await screen.findByRole('tab', { ...tab('contacts'), selected: true })
+    await user.type(searchBox(), '12{Enter}')
+    expect(await screen.findByRole('alert')).toHaveTextContent(i18n.t('errors.rules.NUMBER_INVALID'))
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(searched(backend, 'contacts')).toEqual([{ phoneNumber: '12', limit: '50', offset: '0' }])
+  })
+
+  it('comes Back from a call record to the searched list', async () => {
+    const { user, history } = renderCampaignAt(['/admin/campaigns', DETAIL])
+    await user.click(await screen.findByRole('tab', tab('leads')))
+    await user.selectOptions(await screen.findByRole('combobox', { name: i18n.t('campaign.leadIntent') }), 'MEDIUM')
+    await user.type(searchBox(), '138-0000-0000{Enter}')
+    await waitFor(() => expect(addressOf(history)).toEqual({ tab: 'leads', intent: 'MEDIUM', number: '138-0000-0000' }))
+
+    await user.click(await screen.findByRole('link', { name: i18n.t('campaign.openCall') }))
+    await screen.findByRole('heading', { name: 'call record' })
+    act(() => history.back())
+
+    expect(await screen.findByRole('tab', { ...tab('leads'), selected: true })).toBeInTheDocument()
+    expect(screen.getByRole('combobox', { name: i18n.t('campaign.leadIntent') })).toHaveValue('MEDIUM')
+    expect(searchBox()).toHaveValue('138-0000-0000')
+    expect(await screen.findByText(leadFixture.leadNotes!)).toBeInTheDocument()
+    // The search replaced the entry, as every move on the page does.
+    act(() => history.back())
+    await waitFor(() => expect(history.location.pathname).toBe('/admin/campaigns'))
+  })
+
+  // Like the tabs' other filters: a new tab opens unfiltered.
+  it('is on Contacts, Leads and Attempts, and a new tab opens without it', async () => {
+    const { user, history, backend } = renderCampaignAt([`${DETAIL}?number=${encodeURIComponent('138 0000 0000')}`])
+    await waitFor(() => expect(searchBox()).toHaveValue('138 0000 0000'))
+    await user.click(screen.getByRole('tab', tab('leads')))
+    await waitFor(() => expect(addressOf(history)).toEqual({ tab: 'leads' }))
+    expect(searchBox()).toHaveValue('')
+    await user.click(screen.getByRole('tab', tab('attempts')))
+    await waitFor(() => expect(addressOf(history)).toEqual({ tab: 'attempts' }))
+    expect(searchBox()).toHaveValue('')
+    await user.type(searchBox(), '138 0000 0000{Enter}')
+    await waitFor(() => expect(searched(backend, 'attempts')).toEqual([
+      { phoneNumber: '138 0000 0000', limit: '50', offset: '0' },
+    ]))
   })
 })

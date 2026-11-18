@@ -121,23 +121,29 @@ func dncNumberOf(e store.DNCNumber) api.DNCNumber {
 	}
 }
 
-// searchPrefix reads the prefix query parameter of a number listing. An
-// unencoded "+" arrives as a leading space, so a value that starts with a space
-// is "+" and the rest (read before anything is trimmed); the rest is read as a
-// number is (phonenum.CanonicalPrefix): "+" or "00" is international, and
-// digits without either are national in the deployment's default country code.
-// A prefix that is not a number is refused 422 VALIDATION_FAILED, as an
-// added number is. It reports false after answering.
+// searchPrefix reads the prefix query parameter of a number listing
+// (queryNumber), then as a number is read (phonenum.CanonicalPrefix): "+" or
+// "00" is international, and digits without either are national in the
+// deployment's default country code. A prefix that is not a number is refused
+// 422 VALIDATION_FAILED, as an added number is. It reports false after
+// answering.
 func (s *Server) searchPrefix(w http.ResponseWriter, raw *string) (string, bool) {
-	v := stringOr(raw)
-	if strings.HasPrefix(v, " ") {
-		v = "+" + v[1:]
-	}
-	prefix, err := phonenum.CanonicalPrefix(v, s.cfg.DefaultCountryCode)
+	prefix, err := phonenum.CanonicalPrefix(queryNumber(raw), s.cfg.DefaultCountryCode)
 	if err != nil {
 		writeError(w, http.StatusUnprocessableEntity, CodeValidationFailed, err.Error(),
 			map[string]any{"field": "prefix", "rule": string(phonenum.ReasonOf(err))})
 		return "", false
 	}
 	return prefix, true
+}
+
+// queryNumber reads a phone number sent as a query parameter. An unencoded "+"
+// arrives as a leading space, so a value that starts with a space is "+" and
+// the rest, read before anything is trimmed. Absent is empty.
+func queryNumber(raw *string) string {
+	v := stringOr(raw)
+	if strings.HasPrefix(v, " ") {
+		v = "+" + v[1:]
+	}
+	return v
 }

@@ -4,6 +4,7 @@ package campaign
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -121,5 +122,81 @@ func TestACampaignsCountryCodeBeatsTheDeployments(t *testing.T) {
 	if res.Imported != 1 || res.Duplicates != 2 || res.Rows[0].Number != "+14155550132" ||
 		res.Rows[1].ContactID != res.Rows[0].ContactID || res.Rows[2].ContactID != res.Rows[0].ContactID {
 		t.Errorf("result = %+v", res)
+	}
+}
+
+// A listing's phoneNumber is read as an imported row's number is, with the
+// campaign's own country code and else the deployment's, and the repository is
+// handed the canonical number to match exactly. A value that is not a number is
+// refused as an unreadable parameter and never reaches the repository.
+func TestAListingsPhoneNumberIsReadWithTheCampaignsCountryCode(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	f := newFixture(t, Env{DefaultCountryCode: "1"})
+	own := f.validNew()
+	own.DefaultCountryCode = "86"
+	cn, err := f.svc.Create(ctx, own)
+	if err != nil {
+		t.Fatal(err)
+	}
+	us, err := f.svc.Create(ctx, f.validNew()) // no code of its own: the deployment's
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, tc := range []struct {
+		campaign Campaign
+		typed    string
+		want     string
+	}{
+		{cn, "13800138000", "+8613800138000"},
+		{cn, "138 0013-8000", "+8613800138000"},
+		{cn, "+86 138 0013 8000", "+8613800138000"},
+		{cn, "008613800138000", "+8613800138000"},
+		{cn, "010 6123 4567", "+861061234567"}, // the landline's trunk 0 is dropped
+		{cn, "+12025550143", "+12025550143"},   // another country, as it is
+		{us, "(202) 555-0143", "+12025550143"},
+		{cn, "", ""}, // no narrowing
+	} {
+		f.repo.contactFilter, f.repo.attemptFilter = ContactFilter{}, AttemptFilter{}
+		if _, _, err := f.svc.ListContacts(ctx, tc.campaign.ID, ContactFilter{PhoneNumber: tc.typed, LeadIntent: LeadHigh}); err != nil {
+			t.Fatalf("contacts %q: %v", tc.typed, err)
+		}
+		if got := f.repo.contactFilter; got.PhoneNumber != tc.want || got.LeadIntent != LeadHigh {
+			t.Errorf("contacts %q: the repository got %+v, want %q with the lead kept", tc.typed, got, tc.want)
+		}
+		if _, _, err := f.svc.ListAttempts(ctx, tc.campaign.ID, AttemptFilter{PhoneNumber: tc.typed, Outcome: OutcomeBusy}); err != nil {
+			t.Fatalf("attempts %q: %v", tc.typed, err)
+		}
+		if got := f.repo.attemptFilter; got.PhoneNumber != tc.want || got.Outcome != OutcomeBusy {
+			t.Errorf("attempts %q: the repository got %+v, want %q with the outcome kept", tc.typed, got, tc.want)
+		}
+	}
+
+	for _, tc := range []struct{ typed, rule string }{
+		{"abc", "NUMBER_INVALID"},
+		{"138", "NUMBER_INVALID"},
+		{"0013800138000x", "NUMBER_INVALID"},
+		{"+0123456789", "NUMBER_INVALID"},
+		{"1234567890123456789", "NUMBER_INVALID"},
+		{" - ", "NUMBER_EMPTY"},
+	} {
+		f.repo.contactFilter, f.repo.attemptFilter = ContactFilter{Status: "untouched"}, AttemptFilter{Outcome: "untouched"}
+		_, _, err := f.svc.ListContacts(ctx, cn.ID, ContactFilter{PhoneNumber: tc.typed})
+		if ce := wantKind(t, err, ErrUnreadableParameter, tc.rule); ce.Field != "phoneNumber" {
+			t.Errorf("contacts %q: field %q", tc.typed, ce.Field)
+		}
+		_, _, err = f.svc.ListAttempts(ctx, cn.ID, AttemptFilter{PhoneNumber: tc.typed})
+		if ce := wantKind(t, err, ErrUnreadableParameter, tc.rule); ce.Field != "phoneNumber" {
+			t.Errorf("attempts %q: field %q", tc.typed, ce.Field)
+		}
+		if f.repo.contactFilter.Status != "untouched" || f.repo.attemptFilter.Outcome != "untouched" {
+			t.Errorf("%q reached the repository", tc.typed)
+		}
+	}
+
+	// An unknown campaign is not found before the number is read.
+	if _, _, err := f.svc.ListContacts(ctx, uuid.Must(uuid.NewV7()), ContactFilter{PhoneNumber: "abc"}); !errors.Is(err, ErrNotFound) {
+		t.Errorf("unknown campaign: %v", err)
 	}
 }

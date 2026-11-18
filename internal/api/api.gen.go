@@ -3570,8 +3570,11 @@ type ListCampaignAttemptsParams struct {
 
 	// IsTestNumber Absent: every attempt. true: only attempts to a number that was on the list of test numbers when the attempt was placed. false: only the others.
 	IsTestNumber *bool `form:"isTestNumber,omitempty" json:"isTestNumber,omitempty"`
-	Limit        *int  `form:"limit,omitempty" json:"limit,omitempty"`
-	Offset       *int  `form:"offset,omitempty" json:"offset,omitempty"`
+
+	// PhoneNumber Only the attempts that dialled this number: every call placed to the campaign's contact with this number. Typed as it is dialled in the campaign's own country, without a country code, it is completed with the campaign's defaultCountryCode (else the deployment's AICC_DEFAULT_COUNTRY_CODE) after one leading trunk 0 is dropped, as an imported row is: "13800138000" and "138 0013 8000" are "+8613800138000" when the code is 86. "+" or "00" in front makes it international and it is read as it is, so an E.164 value works too. Spaces, dashes, dots and round brackets are ignored; an unencoded + (which arrives as a space) still reads as +. The match is exact, on the whole number: part of a number (its last digits, say) matches nothing. A value that is not a phone number is 400 VALIDATION_FAILED, params {field: "phoneNumber", rule: NUMBER_INVALID or NUMBER_EMPTY}. Omitted or empty: no narrowing.
+	PhoneNumber *string `form:"phoneNumber,omitempty" json:"phoneNumber,omitempty"`
+	Limit       *int    `form:"limit,omitempty" json:"limit,omitempty"`
+	Offset      *int    `form:"offset,omitempty" json:"offset,omitempty"`
 }
 
 // ListCampaignContactsParams defines parameters for ListCampaignContacts.
@@ -3584,8 +3587,11 @@ type ListCampaignContactsParams struct {
 
 	// IsTestNumber Absent: every contact. true: only contacts whose latest finished attempt was to a listed test number (see CampaignAttempt.isTestNumber). false: only the others, a contact no attempt has finished for included.
 	IsTestNumber *bool `form:"isTestNumber,omitempty" json:"isTestNumber,omitempty"`
-	Limit        *int  `form:"limit,omitempty" json:"limit,omitempty"`
-	Offset       *int  `form:"offset,omitempty" json:"offset,omitempty"`
+
+	// PhoneNumber Only the contact with this number (a campaign holds a number once). Typed as it is dialled in the campaign's own country, without a country code, it is completed with the campaign's defaultCountryCode (else the deployment's AICC_DEFAULT_COUNTRY_CODE) after one leading trunk 0 is dropped, as an imported row is: "13800138000" and "138 0013 8000" are "+8613800138000" when the code is 86. "+" or "00" in front makes it international and it is read as it is, so an E.164 value works too. Spaces, dashes, dots and round brackets are ignored; an unencoded + (which arrives as a space) still reads as +. The match is exact, on the whole number: part of a number (its last digits, say) matches nothing. A value that is not a phone number is 400 VALIDATION_FAILED, params {field: "phoneNumber", rule: NUMBER_INVALID or NUMBER_EMPTY}. Omitted or empty: no narrowing.
+	PhoneNumber *string `form:"phoneNumber,omitempty" json:"phoneNumber,omitempty"`
+	Limit       *int    `form:"limit,omitempty" json:"limit,omitempty"`
+	Offset      *int    `form:"offset,omitempty" json:"offset,omitempty"`
 }
 
 // GetCampaignOutcomeSummaryParams defines parameters for GetCampaignOutcomeSummary.
@@ -6241,6 +6247,19 @@ func (siw *ServerInterfaceWrapper) ListCampaignAttempts(w http.ResponseWriter, r
 		return
 	}
 
+	// ------------- Optional query parameter "phoneNumber" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "phoneNumber", r.URL.Query(), &params.PhoneNumber, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "phoneNumber"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "phoneNumber", Err: err})
+		}
+		return
+	}
+
 	// ------------- Optional query parameter "limit" -------------
 
 	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
@@ -6370,6 +6389,19 @@ func (siw *ServerInterfaceWrapper) ListCampaignContacts(w http.ResponseWriter, r
 			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "isTestNumber"})
 		} else {
 			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "isTestNumber", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "phoneNumber" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "phoneNumber", r.URL.Query(), &params.PhoneNumber, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "phoneNumber"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "phoneNumber", Err: err})
 		}
 		return
 	}

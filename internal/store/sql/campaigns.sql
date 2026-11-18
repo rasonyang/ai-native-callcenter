@@ -145,6 +145,7 @@ WHERE c.campaign_id = sqlc.arg('campaign_id')
   AND (sqlc.arg('status')::text = '' OR c.status = sqlc.arg('status'))
   AND (sqlc.arg('lead_intent')::text = '' OR c.lead_intent = sqlc.arg('lead_intent'))
   AND (sqlc.arg('last_outcome')::text = '' OR c.last_outcome = sqlc.arg('last_outcome'))
+  AND (sqlc.arg('number_e164')::text = '' OR c.number_e164 = sqlc.arg('number_e164'))
 ORDER BY c.created_at, c.id
 LIMIT sqlc.arg('page_limit') OFFSET sqlc.arg('page_offset');
 
@@ -158,7 +159,8 @@ WHERE c.campaign_id = sqlc.arg('campaign_id')
        OR COALESCE(la.is_test_number, false) = sqlc.narg('is_test_number')::boolean)
   AND (sqlc.arg('status')::text = '' OR c.status = sqlc.arg('status'))
   AND (sqlc.arg('lead_intent')::text = '' OR c.lead_intent = sqlc.arg('lead_intent'))
-  AND (sqlc.arg('last_outcome')::text = '' OR c.last_outcome = sqlc.arg('last_outcome'));
+  AND (sqlc.arg('last_outcome')::text = '' OR c.last_outcome = sqlc.arg('last_outcome'))
+  AND (sqlc.arg('number_e164')::text = '' OR c.number_e164 = sqlc.arg('number_e164'));
 
 -- The outcome summary (GET /campaigns/{campaignId}/outcome-summary). Nothing
 -- is kept as a running total: every count is read here, grouped by the

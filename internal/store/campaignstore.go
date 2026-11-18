@@ -428,7 +428,8 @@ func (c *CampaignStore) ImportContacts(ctx context.Context, campaignID uuid.UUID
 	return out, nil
 }
 
-// ListContacts pages a campaign's contacts in import order.
+// ListContacts pages a campaign's contacts in import order. f.PhoneNumber is
+// canonical E.164 by now and is matched exactly.
 func (c *CampaignStore) ListContacts(ctx context.Context, campaignID uuid.UUID,
 	f campaign.ContactFilter) ([]campaign.Contact, int64, error) {
 	if f.Limit <= 0 || f.Limit > 1000 {
@@ -436,7 +437,8 @@ func (c *CampaignStore) ListContacts(ctx context.Context, campaignID uuid.UUID,
 	}
 	rows, err := c.q.ListCampaignContacts(ctx, queries.ListCampaignContactsParams{
 		CampaignID: campaignID, Status: string(f.Status), LeadIntent: string(f.LeadIntent),
-		LastOutcome: string(f.LastOutcome), PageLimit: int32(f.Limit), PageOffset: int32(f.Offset),
+		LastOutcome: string(f.LastOutcome), NumberE164: f.PhoneNumber,
+		PageLimit: int32(f.Limit), PageOffset: int32(f.Offset),
 		Now: ts(time.Now()), FrequencySec: c.frequency.Seconds(), IsTestNumber: f.IsTestNumber,
 	})
 	if err != nil {
@@ -444,7 +446,7 @@ func (c *CampaignStore) ListContacts(ctx context.Context, campaignID uuid.UUID,
 	}
 	total, err := c.q.CountCampaignContacts(ctx, queries.CountCampaignContactsParams{
 		CampaignID: campaignID, Status: string(f.Status), LeadIntent: string(f.LeadIntent),
-		LastOutcome: string(f.LastOutcome), IsTestNumber: f.IsTestNumber,
+		LastOutcome: string(f.LastOutcome), NumberE164: f.PhoneNumber, IsTestNumber: f.IsTestNumber,
 	})
 	if err != nil {
 		return nil, 0, fmt.Errorf("count contacts of campaign %s: %w", campaignID, err)

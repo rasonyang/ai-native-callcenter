@@ -14,6 +14,10 @@ var (
 	ErrNotFound = errors.New("campaign: not found")
 	// ErrValidation: a value is not acceptable; Field and Rule say which.
 	ErrValidation = errors.New("campaign: invalid value")
+	// ErrUnreadableParameter: a query parameter cannot be read as what it
+	// names (a phoneNumber that is not a phone number); Field and Rule say
+	// which. The transport answers it as any parameter that does not parse.
+	ErrUnreadableParameter = errors.New("campaign: unreadable parameter")
 	// ErrInvalidTransition: the operation does not exist in the campaign's
 	// current status (start a RUNNING campaign, delete a PAUSED one, import
 	// into a CANCELLED one).

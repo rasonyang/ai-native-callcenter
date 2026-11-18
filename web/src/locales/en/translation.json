@@ -1040,6 +1040,15 @@
       "failed": "The export stopped and no file was saved: {{reason}}"
     },
     "noAttempts": "No attempts yet.",
+    "search": {
+      "label": "Search by number",
+      "placeholder": "Search by number",
+      "hint": "Type the whole number as you would dial it, then press Enter.",
+      "clear": "Clear the search",
+      "noContacts": "No contact has this number.",
+      "noLeads": "No lead with this intent has this number.",
+      "noAttempts": "No call was placed to this number."
+    },
     "outcome": "Outcome",
     "allOutcomes": "All outcomes",
     "outcomes": {

@@ -32,6 +32,9 @@ type fakeRepo struct {
 	didFlowLookups int
 	// didFlowsErr, when set, is what DIDFlows answers.
 	didFlowsErr error
+	// contactFilter and attemptFilter are what the last listing was handed.
+	contactFilter ContactFilter
+	attemptFilter AttemptFilter
 }
 
 func newFakeRepo() *fakeRepo {
@@ -157,11 +160,17 @@ func (r *fakeRepo) ImportContacts(_ context.Context, id uuid.UUID, in []NewConta
 	}
 	return out, nil
 }
-func (r *fakeRepo) ListAttempts(context.Context, uuid.UUID, AttemptFilter) ([]Attempt, int64, error) {
+func (r *fakeRepo) ListAttempts(_ context.Context, _ uuid.UUID, f AttemptFilter) ([]Attempt, int64, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.attemptFilter = f
 	return nil, 0, nil
 }
 
-func (r *fakeRepo) ListContacts(context.Context, uuid.UUID, ContactFilter) ([]Contact, int64, error) {
+func (r *fakeRepo) ListContacts(_ context.Context, _ uuid.UUID, f ContactFilter) ([]Contact, int64, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.contactFilter = f
 	return nil, 0, nil
 }
 

@@ -7,6 +7,15 @@ carries the one-line installer's files.
 
 ## Unreleased
 
+### Upgrade notes
+
+- No migration, and no application setting added, removed or changed in
+  default. The number lookups use indexes that already exist.
+- API contract: additive only. `listCampaignContacts` and
+  `listCampaignAttempts` gain an optional `phoneNumber` query parameter (#617).
+  `make api-breaking BASE=v0.8.8` reports no breaking change; oasdiff lists the
+  two parameters as `new-optional-request-parameter`.
+
 ### Added
 
 - The Leads tab of a campaign has an Export button: it downloads a CSV of
@@ -23,6 +32,22 @@ carries the one-line installer's files.
   apostrophe. The file imports back through Import contacts as the same
   numbers. The button shows progress and can be cancelled; a cancel or a
   failed request saves no file (#618).
+- A campaign's contacts, leads and attempts can be searched by phone number.
+  `GET /campaigns/{campaignId}/contacts` and
+  `GET /campaigns/{campaignId}/attempts` take `phoneNumber`: the number as it
+  is dialled in the campaign's own country, without a country code (it is
+  completed with the campaign's `defaultCountryCode`, else the deployment's),
+  or in E.164; spaces, dashes, dots and brackets are ignored. The match is
+  exact, on the whole number: part of a number, such as its last digits, finds
+  nothing. It narrows together with the listing's other filters, `total`
+  counts what it keeps, and a number held by another campaign is never
+  returned. Every call to a number is one request on the attempts listing. A
+  value that is not a phone number is `400 VALIDATION_FAILED` with
+  `params.field` `phoneNumber`, not an empty list. On the campaign page the
+  Contacts, Leads and Attempts tabs have a search box: type the number and
+  press Enter. The search is kept in the address with the tab's other filters,
+  so Back from a call record and a reload return to it, and it clears with one
+  click. On Leads, Export follows the search as it follows the intent (#617).
 
 ## v0.8.8 - 2026-11-18
 

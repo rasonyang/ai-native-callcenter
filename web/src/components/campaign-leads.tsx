@@ -2,6 +2,7 @@ import { Link } from '@tanstack/react-router'
 import { Download } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
+import { NumberSearch } from '@/components/number-search'
 import { Pager } from '@/components/pager'
 import { Select } from '@/components/record-dialog'
 import { CellText, DataTable, TBody, THead, TableMessage, Td, Th, Tr } from '@/components/table'
@@ -11,7 +12,7 @@ import {
   LEAD_INTENTS, campaignApi, isPlacedCall, useCampaignContacts, type Campaign, type CampaignContact,
   type CampaignLeadIntent, type ContactQuery,
 } from '@/lib/campaigns'
-import { describeError } from '@/lib/errors'
+import { describeError, fieldErrorText } from '@/lib/errors'
 import { ledgerApi, useCallbackOfCall } from '@/lib/ledger'
 import { useCsvExport } from '@/lib/use-csv-export'
 
@@ -25,21 +26,24 @@ const PAGE_SIZE = 50
  * number, which one customer's several calls and campaigns share. The status
  * is text only: working a callback is an agent's job on their own screen.
  *
- * The intent and the page (counted from 0) are the caller's, which keeps them
- * in the address.
+ * The intent, the searched number and the page (counted from 0) are the
+ * caller's, which keeps them in the address. A number narrows the intent's
+ * leads to that one number: "is this number a HIGH lead".
  *
  * Export writes every lead the filter matches, all pages, as a CSV file
  * (campaign-export.ts). The table and the export read the same filter object,
- * so a filter added to the tab narrows both.
+ * so a filter added to the tab narrows both: a searched number exports that
+ * number's lead alone.
  */
-export function CampaignLeads({ campaign, intent, page, onChange }: {
+export function CampaignLeads({ campaign, intent, number, page, onChange }: {
   campaign: Campaign
   intent: CampaignLeadIntent
+  number?: string
   page: number
-  onChange: (next: { intent: CampaignLeadIntent; page: number }) => void
+  onChange: (next: { intent: CampaignLeadIntent; number?: string; page: number }) => void
 }) {
   const { t } = useTranslation()
-  const filter = { leadIntent: intent } satisfies ContactQuery
+  const filter = { leadIntent: intent, phoneNumber: number } satisfies ContactQuery
   const { data, isPending, isError, error } = useCampaignContacts(campaign.id, {
     ...filter,
     limit: PAGE_SIZE,
@@ -61,13 +65,16 @@ export function CampaignLeads({ campaign, intent, page, onChange }: {
       }),
     )
 
+  const isRefused = Boolean(fieldErrorText(error, 'phoneNumber', t))
+
   return (
     <>
-      <div className="mb-3 flex items-center gap-2">
+      <div className="mb-3 flex items-start gap-2">
+        <NumberSearch value={number} error={error} onSearch={(next) => onChange({ intent, number: next, page: 0 })} />
         <Select
           ariaLabel={t('campaign.leadIntent')}
           value={intent}
-          onChange={(next) => onChange({ intent: next as CampaignLeadIntent, page: 0 })}
+          onChange={(next) => onChange({ intent: next as CampaignLeadIntent, number, page: 0 })}
           options={LEAD_INTENTS.map((s) => ({ value: s, label: t(`campaign.intents.${s}`) }))}
         />
         {csv.state.phase === 'running' ? (
@@ -108,9 +115,9 @@ export function CampaignLeads({ campaign, intent, page, onChange }: {
         </THead>
         <TBody>
           {isPending && <TableMessage colSpan={5}>{t('common.loading')}</TableMessage>}
-          {isError && <TableMessage colSpan={5}>{describeError(error, t)}</TableMessage>}
-          {!isPending && !isError && rows.length === 0 && (
-            <TableMessage colSpan={5}>{t('campaign.noLeads')}</TableMessage>
+          {isError && !isRefused && <TableMessage colSpan={5}>{describeError(error, t)}</TableMessage>}
+          {((!isPending && !isError && rows.length === 0) || isRefused) && (
+            <TableMessage colSpan={5}>{t(number ? 'campaign.search.noLeads' : 'campaign.noLeads')}</TableMessage>
           )}
           {rows.map((row) => (
             <Tr key={row.id}>
@@ -135,7 +142,7 @@ export function CampaignLeads({ campaign, intent, page, onChange }: {
         page={page}
         pageSize={PAGE_SIZE}
         total={data?.total ?? 0}
-        onPage={(next) => onChange({ intent, page: next })}
+        onPage={(next) => onChange({ intent, number, page: next })}
       />
     </>
   )

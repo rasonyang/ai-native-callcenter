@@ -10,6 +10,7 @@ import { CampaignOutcomes } from '@/components/campaign-outcomes'
 import { CampaignState } from '@/components/campaign-state'
 import { ConfirmAction } from '@/components/confirm-action'
 import { KpiCard } from '@/components/kpi-card'
+import { NumberSearch } from '@/components/number-search'
 import { PageHeader } from '@/components/page-header'
 import { Pager } from '@/components/pager'
 import { Select } from '@/components/record-dialog'
@@ -25,7 +26,7 @@ import {
   useInvalidateContacts, type Campaign, type CampaignContactStatus, type CampaignLeadIntent,
   type CampaignOutcome,
 } from '@/lib/campaigns'
-import { describeError } from '@/lib/errors'
+import { describeError, fieldErrorText } from '@/lib/errors'
 import { requireRole } from '@/lib/guards'
 import { formatDuration } from '@/lib/ledger'
 
@@ -48,18 +49,35 @@ type CampaignTab = (typeof CAMPAIGN_TABS)[number]
  * The open tab, its filter and its page, kept in the address so that Back from
  * a call record, a reload and a shared link all land where the reader was.
  * Every default is left out: no tab means Contacts, no page the first page,
- * no filter every row (on Leads, HIGH). `page` counts from 1.
+ * no filter every row (on Leads, HIGH). `page` counts from 1. `number` is the
+ * phone number searched on Contacts, Leads or Attempts, as it was typed.
  */
 interface CampaignDetailSearch {
   tab?: Exclude<CampaignTab, 'contacts'>
   status?: CampaignContactStatus
   intent?: CampaignLeadIntent
   outcome?: CampaignOutcome
+  number?: string
   page?: number
 }
 
 const oneOf = <T extends string>(values: readonly T[], raw: unknown): T | undefined =>
   values.find((value) => value === raw)
+
+/** The longest searched number the address keeps, as the search box does. */
+const MAX_NUMBER_LENGTH = 64
+
+/**
+ * A searched number from the address, trimmed. The router reads a value of
+ * digits alone ("13800138000") as a JSON number, so a whole number is taken
+ * back as its digits; anything else that is not text is dropped.
+ */
+function searchedNumber(raw: unknown): string | undefined {
+  if (typeof raw === 'number') return Number.isSafeInteger(raw) && raw > 0 ? String(raw) : undefined
+  if (typeof raw !== 'string') return undefined
+  const value = raw.trim()
+  return value !== '' && value.length <= MAX_NUMBER_LENGTH ? value : undefined
+}
 
 /**
  * Reads the address. Whatever it does not understand is dropped, never an
@@ -76,6 +94,7 @@ export function campaignDetailSearch(raw: Record<string, unknown>): CampaignDeta
     status: tab === 'contacts' ? oneOf(CONTACT_STATUSES, raw.status) : undefined,
     intent: tab === 'contacts' || (tab === 'leads' && intent !== 'HIGH') ? intent : undefined,
     outcome: tab === 'attempts' ? oneOf(CAMPAIGN_OUTCOMES, raw.outcome) : undefined,
+    number: isPaged ? searchedNumber(raw.number) : undefined,
     page: isPaged && typeof raw.page === 'number' && Number.isSafeInteger(raw.page) && raw.page > 1
       ? raw.page
       : undefined,
@@ -87,6 +106,7 @@ interface TabView {
   status?: CampaignContactStatus
   intent?: CampaignLeadIntent
   outcome?: CampaignOutcome
+  number?: string
   page: number
 }
 
@@ -116,7 +136,8 @@ function CampaignDetail() {
   }
 
   const view: TabView = {
-    status: search.status, intent: search.intent, outcome: search.outcome, page: (search.page ?? 1) - 1,
+    status: search.status, intent: search.intent, outcome: search.outcome, number: search.number,
+    page: (search.page ?? 1) - 1,
   }
   // A move inside the page replaces the entry, so one Back still leaves the
   // campaign. Switching tab passes no view: the new tab opens unfiltered on
@@ -254,6 +275,7 @@ function CampaignDetail() {
           <CampaignLeads
             campaign={data}
             intent={view.intent ?? 'HIGH'}
+            number={view.number}
             page={view.page}
             onChange={(next) => show('leads', next)}
           />
@@ -363,21 +385,24 @@ export function ContactsTab({ campaign, view, onView }: {
   onView: (next: TabView) => void
 }) {
   const { t, i18n } = useTranslation()
-  const { status, intent, page } = view
+  const { status, intent, number, page } = view
   const { data, isPending, isError, error } = useCampaignContacts(campaign.id, {
     status,
     leadIntent: intent,
+    phoneNumber: number,
     limit: PAGE_SIZE,
     offset: page * PAGE_SIZE,
   })
   const rows = data?.items ?? []
+  const isRefused = Boolean(fieldErrorText(error, 'phoneNumber', t))
   const time = new Intl.DateTimeFormat(i18n.language, {
     month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
   })
 
   return (
     <>
-      <div className="mb-3 flex gap-2">
+      <div className="mb-3 flex items-start gap-2">
+        <NumberSearch value={number} error={error} onSearch={(next) => onView({ ...view, number: next, page: 0 })} />
         <Select
           ariaLabel={t('campaign.contactStatus')}
           value={status ?? ''}
@@ -408,9 +433,9 @@ export function ContactsTab({ campaign, view, onView }: {
         </THead>
         <TBody>
           {isPending && <TableMessage colSpan={6}>{t('common.loading')}</TableMessage>}
-          {isError && <TableMessage colSpan={6}>{describeError(error, t)}</TableMessage>}
-          {!isPending && !isError && rows.length === 0 && (
-            <TableMessage colSpan={6}>{t('campaign.noContacts')}</TableMessage>
+          {isError && !isRefused && <TableMessage colSpan={6}>{describeError(error, t)}</TableMessage>}
+          {((!isPending && !isError && rows.length === 0) || isRefused) && (
+            <TableMessage colSpan={6}>{t(number ? 'campaign.search.noContacts' : 'campaign.noContacts')}</TableMessage>
           )}
           {rows.map((row) => (
             <Tr key={row.id}>
@@ -461,20 +486,23 @@ export function AttemptsTab({ campaign, view, onView }: {
   onView: (next: TabView) => void
 }) {
   const { t, i18n } = useTranslation()
-  const { outcome, page } = view
+  const { outcome, number, page } = view
   const { data, isPending, isError, error } = useCampaignAttempts(campaign.id, {
     outcome,
+    phoneNumber: number,
     limit: PAGE_SIZE,
     offset: page * PAGE_SIZE,
   })
   const rows = data?.items ?? []
+  const isRefused = Boolean(fieldErrorText(error, 'phoneNumber', t))
   const time = new Intl.DateTimeFormat(i18n.language, {
     month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit',
   })
 
   return (
     <>
-      <div className="mb-3 flex gap-2">
+      <div className="mb-3 flex items-start gap-2">
+        <NumberSearch value={number} error={error} onSearch={(next) => onView({ ...view, number: next, page: 0 })} />
         <Select
           ariaLabel={t('campaign.outcome')}
           value={outcome ?? ''}
@@ -496,9 +524,9 @@ export function AttemptsTab({ campaign, view, onView }: {
         </THead>
         <TBody>
           {isPending && <TableMessage colSpan={6}>{t('common.loading')}</TableMessage>}
-          {isError && <TableMessage colSpan={6}>{describeError(error, t)}</TableMessage>}
-          {!isPending && !isError && rows.length === 0 && (
-            <TableMessage colSpan={6}>{t('campaign.noAttempts')}</TableMessage>
+          {isError && !isRefused && <TableMessage colSpan={6}>{describeError(error, t)}</TableMessage>}
+          {((!isPending && !isError && rows.length === 0) || isRefused) && (
+            <TableMessage colSpan={6}>{t(number ? 'campaign.search.noAttempts' : 'campaign.noAttempts')}</TableMessage>
           )}
           {rows.map((row) => (
             <Tr key={row.id}>

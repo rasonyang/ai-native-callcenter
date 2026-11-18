@@ -16,6 +16,7 @@ import (
 	"github.com/rasonyang/ai-native-callcenter/internal/config"
 	"github.com/rasonyang/ai-native-callcenter/internal/dayrange"
 	"github.com/rasonyang/ai-native-callcenter/internal/flow"
+	"github.com/rasonyang/ai-native-callcenter/internal/phonenum"
 )
 
 // DIDFlow is what a campaign needs to know about the number it dials from.
@@ -363,7 +364,11 @@ func (s *Service) ListAttempts(ctx context.Context, id uuid.UUID, f AttemptFilte
 	if f.Outcome != "" && !f.Outcome.IsValid() {
 		return nil, 0, invalid("outcome", "UNKNOWN_OUTCOME", "%q is not an outcome", f.Outcome)
 	}
-	if _, err := s.repo.Get(ctx, id); err != nil {
+	c, err := s.repo.Get(ctx, id)
+	if err != nil {
+		return nil, 0, err
+	}
+	if f.PhoneNumber, err = s.searchNumber(c, f.PhoneNumber); err != nil {
 		return nil, 0, err
 	}
 	return s.repo.ListAttempts(ctx, id, f)
@@ -733,10 +738,34 @@ func (s *Service) ListContacts(ctx context.Context, id uuid.UUID, f ContactFilte
 	if f.LastOutcome != "" && !f.LastOutcome.IsValid() {
 		return nil, 0, invalid("lastOutcome", "UNKNOWN_OUTCOME", "%q is not an outcome", f.LastOutcome)
 	}
-	if _, err := s.repo.Get(ctx, id); err != nil {
+	c, err := s.repo.Get(ctx, id)
+	if err != nil {
+		return nil, 0, err
+	}
+	if f.PhoneNumber, err = s.searchNumber(c, f.PhoneNumber); err != nil {
 		return nil, 0, err
 	}
 	return s.repo.ListContacts(ctx, id, f)
+}
+
+// searchNumber reads the phoneNumber a listing is narrowed by as an imported
+// row's number is read (phonenum.Canonical with the campaign's country code):
+// national digits are completed with the code, "+" or "00" makes the value
+// international, separators are ignored. What comes out is matched exactly, so
+// part of a number finds nothing. Empty stays empty: no narrowing. A value that
+// is not a phone number is refused, never answered with an empty list.
+func (s *Service) searchNumber(c Campaign, raw string) (string, error) {
+	if raw == "" {
+		return "", nil
+	}
+	number, err := phonenum.Canonical(raw, s.countryCode(c))
+	if err != nil {
+		return "", &Error{
+			Kind: ErrUnreadableParameter, Field: "phoneNumber", Rule: string(phonenum.ReasonOf(err)),
+			Message: "phoneNumber is not a phone number: " + err.Error(),
+		}
+	}
+	return number, nil
 }
 
 // validate checks the fields named in touched and returns the campaign with

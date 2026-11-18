@@ -348,7 +348,8 @@ func (a *AttemptStore) FinishFromLedger(ctx context.Context, callID uuid.UUID) (
 	return found, err
 }
 
-// ListAttempts pages a campaign's attempts, newest first.
+// ListAttempts pages a campaign's attempts, newest first. f.PhoneNumber is
+// canonical E.164 by now and is matched exactly against the number dialled.
 func (c *CampaignStore) ListAttempts(ctx context.Context, campaignID uuid.UUID,
 	f campaign.AttemptFilter) ([]campaign.Attempt, int64, error) {
 	if f.Limit <= 0 || f.Limit > 1000 {
@@ -356,13 +357,14 @@ func (c *CampaignStore) ListAttempts(ctx context.Context, campaignID uuid.UUID,
 	}
 	rows, err := c.q.ListCampaignAttempts(ctx, queries.ListCampaignAttemptsParams{
 		CampaignID: campaignID, ContactID: f.ContactID, Outcome: string(f.Outcome), IsTestNumber: f.IsTestNumber,
-		PageLimit: int32(f.Limit), PageOffset: int32(f.Offset),
+		NumberE164: f.PhoneNumber, PageLimit: int32(f.Limit), PageOffset: int32(f.Offset),
 	})
 	if err != nil {
 		return nil, 0, fmt.Errorf("list attempts of %s: %w", campaignID, err)
 	}
 	total, err := c.q.CountCampaignAttempts(ctx, queries.CountCampaignAttemptsParams{
 		CampaignID: campaignID, ContactID: f.ContactID, Outcome: string(f.Outcome), IsTestNumber: f.IsTestNumber,
+		NumberE164: f.PhoneNumber,
 	})
 	if err != nil {
 		return nil, 0, fmt.Errorf("count attempts of %s: %w", campaignID, err)
