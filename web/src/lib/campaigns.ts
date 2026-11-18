@@ -87,6 +87,11 @@ export interface ContactFilter {
   lastOutcome?: CampaignOutcome
   /** Absent: all; false leaves test-number contacts out; true keeps only them. */
   isTestNumber?: boolean
+  /**
+   * One whole number, as typed: the server completes a national number with
+   * the campaign's country code and matches it exactly.
+   */
+  phoneNumber?: string
   limit?: number
   offset?: number
 }
@@ -98,6 +103,8 @@ export interface AttemptFilter {
   contactId?: string
   outcome?: CampaignOutcome
   isTestNumber?: boolean
+  /** As ContactFilter.phoneNumber: every call to that number. */
+  phoneNumber?: string
   limit?: number
   offset?: number
 }
@@ -174,10 +181,19 @@ export function useCampaign(id: string) {
   return useQuery({ queryKey: campaignKey(id), queryFn: () => campaignApi.get(id) })
 }
 
+/**
+ * A search by number the server refused (400: not a phone number) is refused
+ * again, so it is not retried, and the refusal reaches the search box at once.
+ * A failure of the server is tried once more, as every other query is.
+ */
+const searchRetry = (failures: number, error: unknown) =>
+  failures < 1 && !(error instanceof ApiError && error.status < 500)
+
 export function useCampaignContacts(id: string, filter: ContactFilter) {
   return useQuery({
     queryKey: [...contactsKey(id), filter],
     queryFn: () => campaignApi.contacts(id, filter),
+    ...(filter.phoneNumber ? { retry: searchRetry } : {}),
   })
 }
 
@@ -185,6 +201,7 @@ export function useCampaignAttempts(id: string, filter: AttemptFilter) {
   return useQuery({
     queryKey: [...attemptsKey(id), filter],
     queryFn: () => campaignApi.attempts(id, filter),
+    ...(filter.phoneNumber ? { retry: searchRetry } : {}),
   })
 }
 

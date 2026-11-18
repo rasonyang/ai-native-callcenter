@@ -208,12 +208,16 @@ WHERE campaign_id = sqlc.arg('campaign_id') AND state = 'FINISHED'
 ORDER BY finished_at DESC, id DESC
 LIMIT sqlc.arg('row_limit');
 
+-- An attempt's number_e164 is its contact's, copied when it is written and
+-- never changed (a contact's number is its identity in the campaign), so the
+-- number filter reads the attempt's own column: the number dialled.
 -- name: ListCampaignAttempts :many
 SELECT * FROM campaign_attempts
 WHERE campaign_id = sqlc.arg('campaign_id')
   AND (sqlc.narg('contact_id')::uuid IS NULL OR campaign_contact_id = sqlc.narg('contact_id')::uuid)
   AND (sqlc.arg('outcome')::text = '' OR outcome = sqlc.arg('outcome'))
   AND (sqlc.narg('is_test_number')::boolean IS NULL OR is_test_number = sqlc.narg('is_test_number')::boolean)
+  AND (sqlc.arg('number_e164')::text = '' OR number_e164 = sqlc.arg('number_e164'))
 ORDER BY started_at DESC, id DESC
 LIMIT sqlc.arg('page_limit') OFFSET sqlc.arg('page_offset');
 
@@ -222,4 +226,5 @@ SELECT count(*) FROM campaign_attempts
 WHERE campaign_id = sqlc.arg('campaign_id')
   AND (sqlc.narg('contact_id')::uuid IS NULL OR campaign_contact_id = sqlc.narg('contact_id')::uuid)
   AND (sqlc.arg('outcome')::text = '' OR outcome = sqlc.arg('outcome'))
-  AND (sqlc.narg('is_test_number')::boolean IS NULL OR is_test_number = sqlc.narg('is_test_number')::boolean);
+  AND (sqlc.narg('is_test_number')::boolean IS NULL OR is_test_number = sqlc.narg('is_test_number')::boolean)
+  AND (sqlc.arg('number_e164')::text = '' OR number_e164 = sqlc.arg('number_e164'));

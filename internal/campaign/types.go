@@ -209,6 +209,11 @@ type ContactFilter struct {
 	// attempt's IsTestNumber is equal (a contact no attempt has finished for is
 	// not a test-number contact).
 	IsTestNumber *bool
-	Limit        int
-	Offset       int
+	// PhoneNumber keeps the contact with this number. The service is given
+	// what the client sent and hands the repository its canonical E.164 form
+	// (Service.searchNumber), which the repository matches exactly; empty
+	// keeps every contact.
+	PhoneNumber string
+	Limit       int
+	Offset      int
 }

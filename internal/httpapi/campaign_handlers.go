@@ -212,7 +212,8 @@ func (s *Server) campaignMove(w http.ResponseWriter, r *http.Request,
 	writeJSON(w, http.StatusOK, campaignOut(c))
 }
 
-// ListCampaignContacts pages a campaign's contacts.
+// ListCampaignContacts pages a campaign's contacts. The service reads
+// phoneNumber with the campaign's country code.
 func (s *Server) ListCampaignContacts(w http.ResponseWriter, r *http.Request,
 	campaignID openapi_types.UUID, params api.ListCampaignContactsParams) {
 	items, total, err := s.campaigns.ListContacts(r.Context(), campaignID, campaign.ContactFilter{
@@ -220,6 +221,7 @@ func (s *Server) ListCampaignContacts(w http.ResponseWriter, r *http.Request,
 		LeadIntent:   campaign.LeadIntent(stringOr(params.LeadIntent)),
 		LastOutcome:  campaign.Outcome(stringOr(params.LastOutcome)),
 		IsTestNumber: params.IsTestNumber,
+		PhoneNumber:  queryNumber(params.PhoneNumber),
 		Limit:        intOr(params.Limit, 50),
 		Offset:       intOr(params.Offset, 0),
 	})
@@ -241,6 +243,7 @@ func (s *Server) ListCampaignAttempts(w http.ResponseWriter, r *http.Request,
 		ContactID:    params.ContactID,
 		Outcome:      campaign.Outcome(stringOr(params.Outcome)),
 		IsTestNumber: params.IsTestNumber,
+		PhoneNumber:  queryNumber(params.PhoneNumber),
 		Limit:        intOr(params.Limit, 50),
 		Offset:       intOr(params.Offset, 0),
 	})
@@ -447,6 +450,9 @@ func campaignRefusal(err error) (status int, code ErrorCode, message string, par
 		return http.StatusNotFound, CodeNotFound, "no such campaign", nil, true
 	case errors.Is(ce.Kind, campaign.ErrValidation):
 		return http.StatusUnprocessableEntity, CodeValidationFailed, ce.Message, params, true
+	case errors.Is(ce.Kind, campaign.ErrUnreadableParameter):
+		// As a parameter the generated binding cannot parse (writeParamError).
+		return http.StatusBadRequest, CodeValidationFailed, ce.Message, params, true
 	case errors.Is(ce.Kind, campaign.ErrInvalidTransition):
 		return http.StatusConflict, CodeCampaignInvalidTransition, ce.Message, params, true
 	case errors.Is(ce.Kind, campaign.ErrFieldLocked):

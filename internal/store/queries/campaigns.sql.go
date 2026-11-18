@@ -217,6 +217,7 @@ WHERE c.campaign_id = $1
   AND ($3::text = '' OR c.status = $3)
   AND ($4::text = '' OR c.lead_intent = $4)
   AND ($5::text = '' OR c.last_outcome = $5)
+  AND ($6::text = '' OR c.number_e164 = $6)
 `
 
 type CountCampaignContactsParams struct {
@@ -225,6 +226,7 @@ type CountCampaignContactsParams struct {
 	Status       string    `json:"status"`
 	LeadIntent   string    `json:"leadIntent"`
 	LastOutcome  string    `json:"lastOutcome"`
+	NumberE164   string    `json:"numberE164"`
 }
 
 // The test-number flag of a contact is its latest finished attempt's
@@ -236,6 +238,7 @@ func (q *Queries) CountCampaignContacts(ctx context.Context, arg CountCampaignCo
 		arg.Status,
 		arg.LeadIntent,
 		arg.LastOutcome,
+		arg.NumberE164,
 	)
 	var count int64
 	err := row.Scan(&count)
@@ -542,8 +545,9 @@ WHERE c.campaign_id = $3
   AND ($5::text = '' OR c.status = $5)
   AND ($6::text = '' OR c.lead_intent = $6)
   AND ($7::text = '' OR c.last_outcome = $7)
+  AND ($8::text = '' OR c.number_e164 = $8)
 ORDER BY c.created_at, c.id
-LIMIT $9 OFFSET $8
+LIMIT $10 OFFSET $9
 `
 
 type ListCampaignContactsParams struct {
@@ -554,6 +558,7 @@ type ListCampaignContactsParams struct {
 	Status       string             `json:"status"`
 	LeadIntent   string             `json:"leadIntent"`
 	LastOutcome  string             `json:"lastOutcome"`
+	NumberE164   string             `json:"numberE164"`
 	PageOffset   int32              `json:"pageOffset"`
 	PageLimit    int32              `json:"pageLimit"`
 }
@@ -578,6 +583,7 @@ func (q *Queries) ListCampaignContacts(ctx context.Context, arg ListCampaignCont
 		arg.Status,
 		arg.LeadIntent,
 		arg.LastOutcome,
+		arg.NumberE164,
 		arg.PageOffset,
 		arg.PageLimit,
 	)

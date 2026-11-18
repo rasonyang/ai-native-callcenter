@@ -1217,15 +1217,24 @@ Contract first in `docs/openapi.json`; final shapes come with the PR.
   later admissions and not calls in flight; anything else is `CAMPAIGN_FIELD_LOCKED`. `DELETE` only
   in `DRAFT`.
 - `POST /campaigns/{campaignId}/start | pause | resume | cancel`
-- `POST/GET /campaigns/{campaignId}/contacts` (filter by `status`, `leadIntent`, `lastOutcome`). A
-  contact carries `lastCallId` and `lastAttemptId`, required and `null` until its first attempt
-  finishes (§3.2).
+- `POST/GET /campaigns/{campaignId}/contacts` (filter by `status`, `leadIntent`, `lastOutcome`,
+  `isTestNumber`, `phoneNumber`). A contact carries `lastCallId` and `lastAttemptId`, required and
+  `null` until its first attempt finishes (§3.2).
+- `phoneNumber` (#617) narrows the contacts and the attempts to one number. It is read as an
+  imported row's number is (`phonenum.Canonical` with the campaign's `defaultCountryCode`, else the
+  deployment's), so an operator types it as dialled at home, without a country code, and an
+  integration may send E.164; the canonical result is matched exactly against `number_e164`, never
+  as a prefix or suffix. A value that is not a number is `400 VALIDATION_FAILED` with
+  `params.field = phoneNumber`. The lookups ride `uq_campaign_contacts_number (campaign_id,
+  number_e164)` and `idx_campaign_attempts_number_started (number_e164, started_at)`.
 - `GET /callbacks?callId=` (#188): only the callbacks one call filed. A campaign call files at most
   one, so a `HIGH` lead resolves to its callback with the contact's `lastCallId`, never by comparing
   phone numbers: one number can hold callbacks from several calls and campaigns, and `numberRaw` and
   `phoneNumber` need not share a format.
-- `GET /campaigns/{campaignId}/attempts` (filter by `contactId`, `outcome`, `isTestNumber`). An
-  attempt carries `isTestNumber` (§3.3).
+- `GET /campaigns/{campaignId}/attempts` (filter by `contactId`, `outcome`, `isTestNumber`,
+  `phoneNumber`). An attempt carries `isTestNumber` (§3.3). `phoneNumber` matches the attempt's own
+  `number_e164`, the number dialled, which is its contact's: copied when the attempt is written, and
+  a contact's number never changes.
 - `GET/POST /test-numbers`, `DELETE /test-numbers/{number}` (`testnumbers:read` / `testnumbers:write`,
   audited like the do-not-call list; §3.4a).
 - `GET /campaigns/{campaignId}/outcome-summary` (`campaigns:read`, #476): what the calls came to,

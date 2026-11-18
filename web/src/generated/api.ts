@@ -1572,7 +1572,7 @@ export interface paths {
         };
         /**
          * List a campaign's contacts
-         * @description In import order. status, leadIntent, lastOutcome and isTestNumber narrow the list. Needs campaigns:read.
+         * @description In import order. status, leadIntent, lastOutcome, isTestNumber and phoneNumber narrow the list, together, and total counts what they keep. Needs campaigns:read.
          */
         get: operations["listCampaignContacts"];
         put?: never;
@@ -1600,7 +1600,7 @@ export interface paths {
         };
         /**
          * List a campaign's attempts
-         * @description Newest first. contactId, outcome and isTestNumber narrow the list. Needs campaigns:read.
+         * @description Newest first. contactId, outcome, isTestNumber and phoneNumber narrow the list, together, and total counts what they keep. Needs campaigns:read.
          */
         get: operations["listCampaignAttempts"];
         put?: never;
@@ -6750,6 +6750,8 @@ export interface operations {
                 lastOutcome?: components["schemas"]["CampaignOutcome"];
                 /** @description Absent: every contact. true: only contacts whose latest finished attempt was to a listed test number (see CampaignAttempt.isTestNumber). false: only the others, a contact no attempt has finished for included. */
                 isTestNumber?: boolean;
+                /** @description Only the contact with this number (a campaign holds a number once). Typed as it is dialled in the campaign's own country, without a country code, it is completed with the campaign's defaultCountryCode (else the deployment's AICC_DEFAULT_COUNTRY_CODE) after one leading trunk 0 is dropped, as an imported row is: "13800138000" and "138 0013 8000" are "+8613800138000" when the code is 86. "+" or "00" in front makes it international and it is read as it is, so an E.164 value works too. Spaces, dashes, dots and round brackets are ignored; an unencoded + (which arrives as a space) still reads as +. The match is exact, on the whole number: part of a number (its last digits, say) matches nothing. A value that is not a phone number is 400 VALIDATION_FAILED, params {field: "phoneNumber", rule: NUMBER_INVALID or NUMBER_EMPTY}. Omitted or empty: no narrowing. */
+                phoneNumber?: string;
                 limit?: number;
                 offset?: number;
             };
@@ -6826,6 +6828,8 @@ export interface operations {
                 outcome?: components["schemas"]["CampaignOutcome"];
                 /** @description Absent: every attempt. true: only attempts to a number that was on the list of test numbers when the attempt was placed. false: only the others. */
                 isTestNumber?: boolean;
+                /** @description Only the attempts that dialled this number: every call placed to the campaign's contact with this number. Typed as it is dialled in the campaign's own country, without a country code, it is completed with the campaign's defaultCountryCode (else the deployment's AICC_DEFAULT_COUNTRY_CODE) after one leading trunk 0 is dropped, as an imported row is: "13800138000" and "138 0013 8000" are "+8613800138000" when the code is 86. "+" or "00" in front makes it international and it is read as it is, so an E.164 value works too. Spaces, dashes, dots and round brackets are ignored; an unencoded + (which arrives as a space) still reads as +. The match is exact, on the whole number: part of a number (its last digits, say) matches nothing. A value that is not a phone number is 400 VALIDATION_FAILED, params {field: "phoneNumber", rule: NUMBER_INVALID or NUMBER_EMPTY}. Omitted or empty: no narrowing. */
+                phoneNumber?: string;
                 limit?: number;
                 offset?: number;
             };

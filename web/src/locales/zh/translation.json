@@ -1036,6 +1036,15 @@
       "failed": "导出已中止，未保存文件：{{reason}}"
     },
     "noAttempts": "还没有呼叫记录。",
+    "search": {
+      "label": "按号码搜索",
+      "placeholder": "按号码搜索",
+      "hint": "按拨打时的写法输入完整号码，然后按回车。",
+      "clear": "清除搜索",
+      "noContacts": "没有这个号码的联系人。",
+      "noLeads": "这个号码不是这种意向的线索。",
+      "noAttempts": "没有呼叫过这个号码。"
+    },
     "outcome": "结果",
     "allOutcomes": "全部结果",
     "outcomes": {

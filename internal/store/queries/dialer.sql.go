@@ -105,6 +105,7 @@ WHERE campaign_id = $1
   AND ($2::uuid IS NULL OR campaign_contact_id = $2::uuid)
   AND ($3::text = '' OR outcome = $3)
   AND ($4::boolean IS NULL OR is_test_number = $4::boolean)
+  AND ($5::text = '' OR number_e164 = $5)
 `
 
 type CountCampaignAttemptsParams struct {
@@ -112,6 +113,7 @@ type CountCampaignAttemptsParams struct {
 	ContactID    *uuid.UUID `json:"contactId"`
 	Outcome      string     `json:"outcome"`
 	IsTestNumber *bool      `json:"isTestNumber"`
+	NumberE164   string     `json:"numberE164"`
 }
 
 func (q *Queries) CountCampaignAttempts(ctx context.Context, arg CountCampaignAttemptsParams) (int64, error) {
@@ -120,6 +122,7 @@ func (q *Queries) CountCampaignAttempts(ctx context.Context, arg CountCampaignAt
 		arg.ContactID,
 		arg.Outcome,
 		arg.IsTestNumber,
+		arg.NumberE164,
 	)
 	var count int64
 	err := row.Scan(&count)
@@ -430,8 +433,9 @@ WHERE campaign_id = $1
   AND ($2::uuid IS NULL OR campaign_contact_id = $2::uuid)
   AND ($3::text = '' OR outcome = $3)
   AND ($4::boolean IS NULL OR is_test_number = $4::boolean)
+  AND ($5::text = '' OR number_e164 = $5)
 ORDER BY started_at DESC, id DESC
-LIMIT $6 OFFSET $5
+LIMIT $7 OFFSET $6
 `
 
 type ListCampaignAttemptsParams struct {
@@ -439,16 +443,21 @@ type ListCampaignAttemptsParams struct {
 	ContactID    *uuid.UUID `json:"contactId"`
 	Outcome      string     `json:"outcome"`
 	IsTestNumber *bool      `json:"isTestNumber"`
+	NumberE164   string     `json:"numberE164"`
 	PageOffset   int32      `json:"pageOffset"`
 	PageLimit    int32      `json:"pageLimit"`
 }
 
+// An attempt's number_e164 is its contact's, copied when it is written and
+// never changed (a contact's number is its identity in the campaign), so the
+// number filter reads the attempt's own column: the number dialled.
 func (q *Queries) ListCampaignAttempts(ctx context.Context, arg ListCampaignAttemptsParams) ([]CampaignAttempt, error) {
 	rows, err := q.db.Query(ctx, listCampaignAttempts,
 		arg.CampaignID,
 		arg.ContactID,
 		arg.Outcome,
 		arg.IsTestNumber,
+		arg.NumberE164,
 		arg.PageOffset,
 		arg.PageLimit,
 	)
