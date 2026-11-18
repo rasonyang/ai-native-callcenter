@@ -149,7 +149,8 @@ be replaced by one a real trunk rings.
 | C03 | 180, then 486 | `BUSY`, cause `USER_BUSY` |
 | C05 | 180, then 603 | `REJECTED`, cause `CALL_REJECTED` |
 | C06 | 180, then 404 | `INVALID_NUMBER`, cause `UNALLOCATED_NUMBER`; contact `INVALID_NUMBER`; no further INVITE |
-| C07 | 180, never answered | `NO_ANSWER`; CANCEL 3.75 to 6 s after the INVITE (the 5 s ring timeout, read on the simulator's monotonic clock); no provider session |
+| C07 | 180, never answered | `NO_ANSWER`; CANCEL 3.75 to 6 s after the INVITE (the 5 s ring timeout, read on the simulator's monotonic clock); CDR `tech.endedBy` `PLATFORM` and no `tech.sipStatus`; no provider session |
+| C11 | 180, then 487 at 2 s by itself, before the ring timeout (number `…16`) | `NO_ANSWER`, cause `ORIGINATOR_CANCEL`; after the first attempt `attempts` 1 and `systemFailures` 0; CDR `tech.sipStatus` 487 and `tech.endedBy` `PEER`; the caller sent no CANCEL |
 | C08 | 183 with early media, never answered | `NO_ANSWER`; CANCEL; no provider session |
 | C09 | number on the do-not-call list | `DNC_SKIPPED`, cause `NUMBER_ON_DNC`; contact `DNC`; zero INVITEs |
 | C10 | 180, then 486; the driver lists the number while the retry waits | attempt 1 `BUSY` (`USER_BUSY`), attempt 2 `DNC_SKIPPED` (`NUMBER_ON_DNC`); contact `DNC`; exactly one INVITE, one CDR (attempt 1's), none for the skipped attempt |
@@ -169,6 +170,15 @@ P2's assertions follow the measured outcome, as for every probe: with the 60 s
 policy it is dialled twice and ends `EXHAUSTED` with `attempts` 2 and
 `systemFailures` 0, both countries agreeing. P2's 200 ms ring is too short to
 measure a `ringSec`; `make e2e-carrier-timeout` is the case that does.
+
+C11 (#613) is C07's mirror: the same ringing callee, but the far end ends the
+INVITE with a 487 of its own before the 5 s ring timeout, as a network whose
+ring timer is shorter than the campaign's does. The switch sends no CANCEL and
+reports the leg as `ORIGINATOR_CANCEL` with `sip_term_status` 487, which the
+outcome table reads as `NO_ANSWER` because the leg rang first. C07 is its
+control: there our own CANCEL ends the leg, the cause is `NO_ANSWER`, and the
+CDR's `tech.endedBy` says `PLATFORM` where C11's says `PEER`. A probe whose
+cause is `ORIGINATOR_CANCEL` is held to the same rule (`expectedOutcome`).
 
 C07's bound is read from the INVITE to the CANCEL on the simulator's
 monotonic clock (`afterInviteMs` on the dialog's `end`, `cancelAfterInviteMs`

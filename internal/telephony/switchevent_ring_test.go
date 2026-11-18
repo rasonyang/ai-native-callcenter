@@ -21,6 +21,7 @@ import (
 //	D  183 with SDP at 2 s, then 408 at 10 s
 //	E  180 at 2 s, then this platform's own CANCEL at the ring timeout
 //	F  180 at 2 s, 200 at 5 s, then BYE
+//	G  180 at 1 s, then the far end's own 487 at 8 s, no CANCEL (#613)
 //
 // loadEvent reads one the way the client does: percent-encoded values.
 func loadEvent(t *testing.T, name string) map[string]string {
@@ -67,6 +68,7 @@ func TestNormalizeReadsRingProgressAndTheFarEndsStatusFromTheHangup(t *testing.T
 		{"183 with SDP sets only the media time", "D_channel_hangup_complete.txt", time.UnixMicro(1794820414834617).UTC(), 408},
 		{"our own cancel leaves no status", "E_channel_hangup_complete.txt", time.UnixMicro(1794820511337144).UTC(), 0},
 		{"an answered call ends 200", "F_channel_hangup_complete.txt", time.UnixMicro(1794820061595604).UTC(), 200},
+		{"180 then the far end's own 487", "G_channel_hangup_complete.txt", time.UnixMicro(1794988027450080).UTC(), 487},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -124,5 +126,69 @@ func TestNormalizeReadsTheRingStartOnAnAnswer(t *testing.T) {
 	}
 	if got.SIPStatus != 0 {
 		t.Errorf("SIPStatus = %d on an answer, want 0 (only a hangup reports it)", got.SIPStatus)
+	}
+}
+
+// Which side ended the leg, from the recorded hangups: the far end's 408 and
+// its own 487 are refusals it sent, our ring timeout is a CANCEL we sent, and
+// the answered call's BYE came from the far end. The 487 is reported with the
+// cause ORIGINATOR_CANCEL, the word a cancel of ours could carry; this is what
+// tells them apart.
+func TestNormalizeReadsWhichSideEndedTheLeg(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		fixture   string
+		wantCause string
+		want      EndedBy
+	}{
+		{"A_channel_hangup_complete.txt", "RECOVERY_ON_TIMER_EXPIRE", EndedByPeer},
+		{"D_channel_hangup_complete.txt", "RECOVERY_ON_TIMER_EXPIRE", EndedByPeer},
+		{"E_channel_hangup_complete.txt", "NO_ANSWER", EndedByPlatform},
+		{"F_channel_hangup_complete.txt", "NORMAL_CLEARING", EndedByPeer},
+		{"G_channel_hangup_complete.txt", "ORIGINATOR_CANCEL", EndedByPeer},
+	}
+	for _, tt := range tests {
+		t.Run(tt.fixture, func(t *testing.T) {
+			t.Parallel()
+			got := normalized(t, loadEvent(t, tt.fixture))
+			if got.HangupCause != tt.wantCause {
+				t.Errorf("HangupCause = %q, want %q", got.HangupCause, tt.wantCause)
+			}
+			if got.EndedBy != tt.want {
+				t.Errorf("EndedBy = %q, want %q", got.EndedBy, tt.want)
+			}
+		})
+	}
+}
+
+// Every value mod_sofia writes to sip_hangup_disposition maps to a side; an
+// unknown or absent one says nothing, and the switch's words never leave this
+// package.
+func TestEveryHangupDispositionMapsToASide(t *testing.T) {
+	t.Parallel()
+	h := loadEvent(t, "G_channel_hangup_complete.txt")
+	for disposition, want := range map[string]EndedBy{
+		"recv_bye": EndedByPeer, "recv_refuse": EndedByPeer, "recv_cancel": EndedByPeer,
+		"send_bye": EndedByPlatform, "send_refuse": EndedByPlatform, "send_cancel": EndedByPlatform,
+		"": "", "RECV_REFUSE": "", "send_nothing": "",
+	} {
+		h["variable_sip_hangup_disposition"] = disposition
+		if got := normalized(t, h).EndedBy; got != want {
+			t.Errorf("%q: EndedBy = %q, want %q", disposition, got, want)
+		}
+	}
+	delete(h, "variable_sip_hangup_disposition")
+	if got := normalized(t, h).EndedBy; got != "" {
+		t.Errorf("no disposition: EndedBy = %q, want none", got)
+	}
+}
+
+// Only the hangup carries it: an answer has no ending to report.
+func TestAnAnswerSaysNothingOfWhoEndedTheLeg(t *testing.T) {
+	t.Parallel()
+	h := loadEvent(t, "F_channel_answer.txt")
+	h["variable_sip_hangup_disposition"] = "recv_bye"
+	if got := normalized(t, h).EndedBy; got != "" {
+		t.Errorf("EndedBy = %q on an answer, want none", got)
 	}
 }

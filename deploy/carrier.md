@@ -130,24 +130,40 @@ prefix on the gateway, not in the dial string:
 ## A carrier that ends an unanswered call itself
 
 Some carriers give up on an unanswered call before the application's own ring
-timeout (`AICC_OUTBOUND_RING_TIMEOUT`, 45 s by default, or a campaign's
-`ringTimeoutSec`) and answer the call with a final `408 Request Timeout` while
-the customer's phone is still ringing. The switch reports such a call with the
-hangup cause `RECOVERY_ON_TIMER_EXPIRE`.
+timeout and end it themselves while the customer's phone is still ringing. The
+ring timeout of a campaign call is always the campaign's `ringTimeoutSec`;
+`AICC_OUTBOUND_RING_TIMEOUT` (45 s by default) applies only to a call placed
+without one of its own, such as a single AI call or a click-to-dial. A carrier
+ends such a call in one of two ways:
 
-- From the release after v0.8.6, a call that rang and then ended with a 408 from
-  the carrier counts as `NO_ANSWER`: a campaign retries it by the campaign's
-  usual rules and counts it against `maxAttempts`, exactly like a call the
-  application itself cancelled at its ring timeout. Nothing needs to be
-  configured.
-- In v0.8.6 and earlier such calls were treated as a system failure. A campaign
+- with a final `408 Request Timeout`, which the switch reports with the hangup
+  cause `RECOVERY_ON_TIMER_EXPIRE`;
+- with a final `487 Request Terminated` of its own, without any CANCEL from the
+  switch, which the switch reports with the hangup cause `ORIGINATOR_CANCEL`.
+  What makes a network end a call this way (its own ring timer, a customer
+  who declines) cannot be told from the application's side.
+
+How the application treats them:
+
+- A call that rang and then ended with a 408 from the carrier counts as
+  `NO_ANSWER` from the release after v0.8.6; one that rang and then ended with
+  the carrier's own 487 counts as `NO_ANSWER` from the release after v0.8.7. A
+  campaign retries it by the campaign's usual rules and counts it against
+  `maxAttempts`, exactly like a call the application itself cancelled at its
+  ring timeout, and a run of them does not pause the campaign. Nothing needs to
+  be configured.
+- Before those releases such calls were treated as a system failure. A campaign
   retried them within minutes without spending `maxAttempts`, and a long run of
-  them could pause the campaign as a trunk outage. The workaround was to set
-  `AICC_OUTBOUND_RING_TIMEOUT` (and the campaign's ring timeout) below the
-  carrier's own timer, so that the application's cancel came first. That
-  workaround is no longer needed and can be removed.
+  them could pause the campaign as a trunk outage. Lowering the campaign's ring
+  timeout below the carrier's own timer, so that the application's cancel came
+  first, worked around the 408; it is no longer needed and can be removed.
 - The call detail shows what the carrier did: `ringSec` counts from the first
   180 or 183 the carrier sent, and the call's `tech` carries `sipStatus` (the
-  status the carrier ended the call with) and `ringStartedAt` (when it first
-  rang). A 408 without any ringing before it is still treated as a failure of
-  the line, since nothing shows the customer's phone was reached.
+  status the carrier ended the call with), `ringStartedAt` (when it first rang)
+  and `endedBy` (`PEER` when the carrier ended the call, `PLATFORM` when the
+  application did, for example at its ring timeout). A 408 or a 487 without any
+  ringing before it is still treated as a failure of the line, since nothing
+  shows the customer's phone was reached.
+- The application log's `ai outbound placed` line carries `ringTimeoutSec`, the
+  ring timeout the call was placed with, so a call ended by the carrier before
+  that time can be told from one the application cancelled.

@@ -118,6 +118,9 @@ type Case struct {
 	// HasRingTimeoutBound asserts the CANCEL at the ring timeout within
 	// RingTimeoutTolerance (C07). Other ringing cases report the time only.
 	HasRingTimeoutBound bool
+	// Tech, when set, is what the CDR's tech must say about the dialled leg
+	// on every attempt of the case (C07, C11).
+	Tech *TechExpectation
 
 	// Steps, when set, lists the case's attempts one by one: what the callee
 	// does on each and what it must come to. Every case that reaches an
@@ -135,6 +138,20 @@ type Case struct {
 	// Callbacks is how many callbacks the contact's calls must file.
 	Callbacks int
 }
+
+// TechExpectation is what a CDR's tech says about the dialled leg: which side
+// ended it (tech.endedBy) and the far end's final status (tech.sipStatus,
+// absent when SIPStatus is zero).
+type TechExpectation struct {
+	EndedBy   string
+	SIPStatus int
+}
+
+// The values of tech.endedBy, written down from the contract (CDR.tech).
+const (
+	techEndedByPeer     = "PEER"
+	techEndedByPlatform = "PLATFORM"
+)
 
 // Step is one attempt of a case written attempt by attempt.
 type Step struct {
@@ -218,8 +235,9 @@ const (
 	listedSkipCause   = "NUMBER_ON_DNC"
 )
 
-// DefaultCases are C03, C05, C06, C07, C08, C09, C10 and P1 to P5 (issues
-// #245 and #496).
+// DefaultCases are C03, C05, C06, C07, C11, C08, C09, C10 and P1 to P5
+// (issues #245, #496 and #613). C11 sits beside C07, its control: the same
+// ringing callee, ended by the far end's own 487 instead of our ring timeout.
 var DefaultCases = []Case{
 	{ID: "C03", Kind: KindScenario, Suffix: "03", Callee: "180, then 486 Busy Here", Provisional: 180, SIPStatus: 486,
 		Outcome: "BUSY", Cause: "USER_BUSY"},
@@ -228,7 +246,13 @@ var DefaultCases = []Case{
 	{ID: "C06", Kind: KindScenario, Suffix: "06", Callee: "180, then 404 Not Found", Provisional: 180, SIPStatus: 404,
 		Outcome: "INVALID_NUMBER", Cause: "UNALLOCATED_NUMBER"},
 	{ID: "C07", Kind: KindScenario, Suffix: "07", Callee: "180, never answered", Provisional: 180,
-		Outcome: "NO_ANSWER", Cause: "NO_ANSWER", HasRingTimeoutBound: true},
+		Outcome: "NO_ANSWER", Cause: "NO_ANSWER", HasRingTimeoutBound: true,
+		Tech: &TechExpectation{EndedBy: techEndedByPlatform}},
+	{ID: "C11", Kind: KindScenario, Suffix: "16",
+		Callee:      "180, then 487 at 2 s by itself, before the ring timeout (no CANCEL from the caller)",
+		Provisional: 180, SIPStatus: 487,
+		Outcome: "NO_ANSWER", Cause: causeFarEndTerminated,
+		Tech: &TechExpectation{EndedBy: techEndedByPeer, SIPStatus: 487}},
 	{ID: "C08", Kind: KindScenario, Suffix: "08", Callee: "183 with early media, never answered", Provisional: 183, EarlyMedia: true,
 		Outcome: "NO_ANSWER", Cause: "NO_ANSWER"},
 	{ID: "C09", Kind: KindScenario, Suffix: "09", Callee: "on the do-not-call list (never dialled)", IsOnDNC: true,
@@ -329,13 +353,32 @@ var designCauseOutcomes = map[string]string{
 // own timer ended the dial with a SIP 408 (variable_sip_term_status=408).
 const causeRingTimer = "RECOVERY_ON_TIMER_EXPIRE"
 
-// expectedOutcome is the outcome design 10 section 7.2 (and issue #576) gives
-// an unanswered attempt that ended with cause. It reads the dialog for the one
-// cause that needs it: the far end's 408 ends a call that rang (180 or 183
-// first) as NO_ANSWER, which spends maxAttempts, and one that never rang as
-// TRANSIENT. The second result names the rule, for the check's text; ok is
-// false when the design does not say.
+// causeFarEndTerminated is the hangup cause the switch reports when the far
+// end ended the ringing INVITE with a 487 of its own, without a CANCEL from
+// the caller (C11). Our own ring timeout is NO_ANSWER.
+const causeFarEndTerminated = "ORIGINATOR_CANCEL"
+
+// expectedOutcome is the outcome design 10 section 7.2 (and issues #576 and
+// #613) gives an unanswered attempt that ended with cause. It reads the dialog
+// for the two causes that need it: the far end's 408, or its own 487, ends a
+// call that rang (180 or 183 first) as NO_ANSWER, which spends maxAttempts,
+// and one that never rang as TRANSIENT. The second result names the rule, for
+// the check's text; ok is false when the design does not say.
 func expectedOutcome(cause string, d *calleesim.DialogRecord) (want, rule string, ok bool) {
+	if cause == causeFarEndTerminated {
+		if d == nil || d.Final == nil {
+			return "", "", false
+		}
+		if d.Final.Status != 487 || (d.End != nil && d.End.Method == calleesim.EndedWithCancel) {
+			return "TRANSIENT", "an ORIGINATOR_CANCEL that is not the far end's own 487 (an unknown cause)", true
+		}
+		for _, p := range d.Provisionals {
+			if p.Status == 180 || p.Status == 183 {
+				return "NO_ANSWER", "the far end's own 487 after 180/183 (it rang)", true
+			}
+		}
+		return "TRANSIENT", "the far end's own 487 with no 180/183 (it never rang)", true
+	}
 	if cause == causeRingTimer {
 		if d == nil || d.Final == nil {
 			return "", "", false
@@ -365,6 +408,7 @@ var sipIntent = map[int]string{
 	480: "NO_ANSWER (the callee's side reports the user not reachable now)",
 	484: "INVALID_NUMBER (the number is malformed)",
 	486: "BUSY",
+	487: "NO_ANSWER when the far end sends it by itself after the leg rang (180/183), TRANSIENT when it never rang (#613)",
 	503: "TRANSIENT (the network is unavailable)",
 	603: "REJECTED",
 }

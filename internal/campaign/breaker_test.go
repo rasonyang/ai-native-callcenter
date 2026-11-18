@@ -105,3 +105,52 @@ func TestACarriers408AfterRingingDoesNotTripTheTrunkBreaker(t *testing.T) {
 		}
 	}
 }
+
+// A far end that ends every ringing call with a 487 of its own (a ring timer
+// shorter than ours, or callees who decline) is not a trunk outage either:
+// each call is NO_ANSWER and breaks the run, as any unanswered call does. A
+// real outage still trips the breaker: the carrier's 503s, a route that does
+// not exist, originates that never make a channel, and an ORIGINATOR_CANCEL
+// that is not a far end's 487 after ringing. The outcomes come out of Classify.
+func TestAFarEnds487AfterRingingDoesNotTripTheTrunkBreaker(t *testing.T) {
+	const n = 20
+	classified := func(e CallEnd, k int) []Outcome {
+		out := make([]Outcome, k)
+		for i := range out {
+			out[i] = Classify(e)
+		}
+		return out
+	}
+	declined := CallEnd{HangupCause: CauseOriginatorCancel, SIPStatus: 487, HasRingProgress: true, EndedBy: "PEER"}
+	if got := Classify(declined); got != OutcomeNoAnswer {
+		t.Fatalf("Classify(a far end's 487 after ringing) = %s, want NO_ANSWER", got)
+	}
+	if TrunkBreakerTrips(classified(declined, n), n) {
+		t.Errorf("%d unanswered calls the far end ended with a 487 after ringing tripped the trunk breaker", n)
+	}
+
+	outages := map[string]CallEnd{
+		"the carrier's 503":                 {HangupCause: "NORMAL_TEMPORARY_FAILURE", SIPStatus: 503},
+		"no route to the number":            {HangupCause: "NO_ROUTE_DESTINATION", SIPStatus: 404},
+		"an originate that made no channel": {HangupCause: "GATEWAY_DOWN", IsPlacementFailure: true},
+		"a 487 with no ringing before it":   {HangupCause: CauseOriginatorCancel, SIPStatus: 487},
+		"a cancel with no status":           {HangupCause: CauseOriginatorCancel, HasRingProgress: true, EndedBy: "PLATFORM"},
+	}
+	for name, e := range outages {
+		if !TrunkBreakerTrips(classified(e, n), n) {
+			t.Errorf("%d consecutive endings of %s did not trip the trunk breaker", n, name)
+		}
+	}
+
+	// It resets the run like any NO_ANSWER: one far end's 487 among the
+	// outage's failures, newest first, keeps the breaker shut until n more
+	// failures follow it.
+	outage := outages["the carrier's 503"]
+	broken := slices.Concat(classified(outage, n-1), classified(declined, 1), classified(outage, n))
+	if TrunkBreakerTrips(broken, n) {
+		t.Error("a far end's 487 after ringing did not break the run of failures")
+	}
+	if !TrunkBreakerTrips(slices.Concat(classified(outage, n), broken), n) {
+		t.Error("n failures after the 487 did not trip the trunk breaker")
+	}
+}

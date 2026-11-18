@@ -566,9 +566,10 @@ func TestCallTimelineIsTheCallsStartAndTheCarrierLegsAnswer(t *testing.T) {
 	}
 }
 
-// A leg's ring start and the far end's SIP status reach the snapshot from the
-// switch events: the ring start from the answer or, on a leg that never
-// answered, the hangup; the status from the hangup. Neither is on the wire.
+// A leg's ring start, the far end's SIP status and the side that ended the leg
+// reach the snapshot from the switch events: the ring start from the answer
+// or, on a leg that never answered, the hangup; the status and the side from
+// the hangup. None of them is on the wire.
 func TestARingStartAndSIPStatusReachTheSnapshot(t *testing.T) {
 	t.Parallel()
 	reg, rec := newTestRegistry(t)
@@ -588,7 +589,7 @@ func TestARingStartAndSIPStatusReachTheSnapshot(t *testing.T) {
 	reg.Dispatch(SwitchEvent{Kind: KindChannelAnswer, ChannelID: "chan-a",
 		OccurredAt: testTime.Add(5 * time.Second), RingStartedAt: ring})
 	reg.Dispatch(SwitchEvent{Kind: KindChannelHangup, ChannelID: "chan-b", HangupCause: "RECOVERY_ON_TIMER_EXPIRE",
-		OccurredAt: testTime.Add(25 * time.Second), RingStartedAt: ring, SIPStatus: 408})
+		OccurredAt: testTime.Add(25 * time.Second), RingStartedAt: ring, SIPStatus: 408, EndedBy: EndedByPeer})
 	rec.waitFor(t, events.TypePartyReleased)
 
 	snap, err := reg.Snapshot(callID)
@@ -608,8 +609,19 @@ func TestARingStartAndSIPStatusReachTheSnapshot(t *testing.T) {
 		if p.SIPStatus != want {
 			t.Errorf("%s: SIPStatus = %d, want %d", p.ChannelID, p.SIPStatus, want)
 		}
+		wantBy := EndedBy("")
+		if p.ChannelID == "chan-b" {
+			wantBy = EndedByPeer
+		}
+		if p.EndedBy != wantBy {
+			t.Errorf("%s: EndedBy = %q, want %q", p.ChannelID, p.EndedBy, wantBy)
+		}
 	}
-	if b, err := json.Marshal(snap.Parties[0]); err != nil || strings.Contains(string(b), "ingStartedAt") || strings.Contains(string(b), "sipStatus") {
-		t.Errorf("the snapshot writes the new fields to the wire: %s (%v)", b, err)
+	for _, p := range snap.Parties {
+		b, err := json.Marshal(p)
+		if err != nil || strings.Contains(string(b), "ingStartedAt") || strings.Contains(string(b), "sipStatus") ||
+			strings.Contains(string(b), "ndedBy") || strings.Contains(string(b), "PEER") {
+			t.Errorf("the snapshot writes the new fields to the wire: %s (%v)", b, err)
+		}
 	}
 }

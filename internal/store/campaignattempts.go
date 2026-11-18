@@ -237,6 +237,7 @@ func (f attemptFinisher) fromCDR(ctx context.Context, q *queries.Queries, cdr CD
 // endingFromCDR reads how a campaign call went off the ledger row.
 func endingFromCDR(cdr CDR) campaign.Ending {
 	end := campaign.CallEnd{
+		CallID:      cdr.CallID,
 		HangupCause: cdr.HangupCause,
 		IsAnswered:  !cdr.AnsweredAt.IsZero() || cdr.Status == CDRStatusAnswered,
 		IsFailed:    cdr.Status == CDRStatusFailed,
@@ -255,6 +256,7 @@ func endingFromCDR(cdr CDR) campaign.Ending {
 	if v, ok := cdr.Tech[CDRTechRingStartedAt].(string); ok && v != "" {
 		end.HasRingProgress = true
 	}
+	end.EndedBy, _ = cdr.Tech[CDRTechEndedBy].(string)
 	// A campaign call never reaches an agent (design 10 section 10), so the
 	// CDR's TalkSec (agent talk time) is zero; the customer's conversation
 	// is the time with the bot, BotSec. Summing both keeps the figure right

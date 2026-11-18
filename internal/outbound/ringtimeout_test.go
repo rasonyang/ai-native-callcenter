@@ -4,8 +4,10 @@ package outbound
 
 import (
 	"context"
+	"log/slog"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -231,6 +233,82 @@ func TestPerAttemptRingTimeout(t *testing.T) {
 	}
 	if n := len(sw.originates); n != 1 {
 		t.Errorf("%d originates, want only the valid one", n)
+	}
+}
+
+// placementLog keeps the attributes of each record by message.
+type placementLog struct {
+	mu      sync.Mutex
+	records map[string][]map[string]any
+}
+
+func (l *placementLog) Enabled(context.Context, slog.Level) bool { return true }
+func (l *placementLog) WithAttrs([]slog.Attr) slog.Handler       { return l }
+func (l *placementLog) WithGroup(string) slog.Handler            { return l }
+func (l *placementLog) Handle(_ context.Context, r slog.Record) error {
+	attrs := map[string]any{}
+	r.Attrs(func(a slog.Attr) bool {
+		attrs[a.Key] = a.Value.Any()
+		return true
+	})
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.records == nil {
+		l.records = map[string][]map[string]any{}
+	}
+	l.records[r.Message] = append(l.records[r.Message], attrs)
+	return nil
+}
+
+func (l *placementLog) of(msg string) []map[string]any {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.records[msg]
+}
+
+// The line that records a placement says which ring timeout the leg was sent
+// with: the originate_timeout itself, the campaign's per-attempt value or the
+// service's default.
+func TestThePlacementLogsTheRingTimeoutItSent(t *testing.T) {
+	tests := []struct {
+		name  string
+		msg   string
+		place func(*Service) error
+	}{
+		{"a campaign attempt's own value", "ai outbound placed", func(s *Service) error {
+			_, err := s.DialAI(context.Background(), AIDialRequest{To: "13912345678", DIDNumber: "95012", RingTimeout: 20 * time.Second})
+			return err
+		}},
+		{"a single AI call takes the default", "ai outbound placed", func(s *Service) error {
+			_, err := s.DialAI(context.Background(), AIDialRequest{To: "13912345678", DIDNumber: "95012"})
+			return err
+		}},
+		{"click-to-dial", "click-to-dial placed", func(s *Service) error {
+			_, err := s.Dial(context.Background(), AgentDialRequest{AgentExtension: "1001", To: "13912345678"})
+			return err
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sw := &fakeSwitch{}
+			s := testService(t, sw, nil)
+			log := &placementLog{}
+			s.log = slog.New(log)
+			if err := tt.place(s); err != nil {
+				t.Fatal(err)
+			}
+			sent, err := strconv.Atoi(sw.lastOriginate().vars["originate_timeout"])
+			if err != nil {
+				t.Fatal(err)
+			}
+			records := log.of(tt.msg)
+			if len(records) != 1 {
+				t.Fatalf("%d %q records, want 1", len(records), tt.msg)
+			}
+			if got, ok := records[0]["ringTimeoutSec"].(int64); !ok || int(got) != sent {
+				t.Errorf("ringTimeoutSec = %v, want the originate_timeout sent, %d", records[0]["ringTimeoutSec"], sent)
+			}
+		})
 	}
 }
 

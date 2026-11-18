@@ -3,8 +3,15 @@
 package campaign
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
+	"log/slog"
+	"strings"
+	"sync"
 	"testing"
+
+	"github.com/google/uuid"
 )
 
 // One row of the table of design 10 section 7.2 per case: the cause, and what
@@ -67,6 +74,110 @@ func TestARecoveryCauseIsNoAnswerOnlyForA408AfterRinging(t *testing.T) {
 			}
 		})
 	}
+}
+
+// ORIGINATOR_CANCEL with a 487 is a far end that ended the ringing INVITE by
+// itself (our own ring timeout is NO_ANSWER and leaves no status). After ring
+// progress it is the customer not answering, as the 408 above; anything else
+// with this cause is not a row of the table, so it is the unknown cause.
+func TestAFarEnds487AfterRingingIsNoAnswer(t *testing.T) {
+	tests := []struct {
+		name string
+		end  CallEnd
+		want Outcome
+	}{
+		{"487 after ring progress", CallEnd{HangupCause: CauseOriginatorCancel, SIPStatus: 487, HasRingProgress: true, EndedBy: "PEER"}, OutcomeNoAnswer},
+		{"the same with no word on who ended it", CallEnd{HangupCause: CauseOriginatorCancel, SIPStatus: 487, HasRingProgress: true}, OutcomeNoAnswer},
+		{"487 without ring progress", CallEnd{HangupCause: CauseOriginatorCancel, SIPStatus: 487}, OutcomeTransient},
+		{"ring progress and no SIP status", CallEnd{HangupCause: CauseOriginatorCancel, HasRingProgress: true}, OutcomeTransient},
+		{"ring progress, no status, ended by us", CallEnd{HangupCause: CauseOriginatorCancel, HasRingProgress: true, EndedBy: "PLATFORM"}, OutcomeTransient},
+		{"another status after ring progress", CallEnd{HangupCause: CauseOriginatorCancel, SIPStatus: 408, HasRingProgress: true}, OutcomeTransient},
+		{"neither", CallEnd{HangupCause: CauseOriginatorCancel}, OutcomeTransient},
+		{"a 487 with another cause is that cause's", CallEnd{HangupCause: "NORMAL_TEMPORARY_FAILURE", SIPStatus: 487, HasRingProgress: true}, OutcomeTransient},
+		{"answered, whatever the status", CallEnd{HangupCause: CauseOriginatorCancel, IsAnswered: true, SIPStatus: 487, HasRingProgress: true}, OutcomeAnswered},
+		{"answered with a bot that failed", CallEnd{HangupCause: CauseOriginatorCancel, IsAnswered: true, IsFailed: true, SIPStatus: 487, HasRingProgress: true}, OutcomeBotFailed},
+		{"a placement failure keeps its handling", CallEnd{HangupCause: CauseOriginatorCancel, SIPStatus: 487, HasRingProgress: true, IsPlacementFailure: true}, OutcomeOriginateFailed},
+		// #576's rows are untouched.
+		{"#576: 408 after ring progress", CallEnd{HangupCause: CauseRecovery, SIPStatus: 408, HasRingProgress: true}, OutcomeNoAnswer},
+		{"#576: 487 with the recovery cause", CallEnd{HangupCause: CauseRecovery, SIPStatus: 487, HasRingProgress: true}, OutcomeTransient},
+		{"our own ring timeout", CallEnd{HangupCause: "NO_ANSWER", HasRingProgress: true, EndedBy: "PLATFORM"}, OutcomeNoAnswer},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := Classify(tt.end); got != tt.want {
+				t.Errorf("Classify = %s, want %s", got, tt.want)
+			}
+		})
+	}
+}
+
+// The warning of an unknown cause carries what is needed to find the call and
+// tell who ended it: the call id, the far end's status, whether the leg rang
+// and which side ended it.
+func TestTheUnknownCauseWarningNamesTheCallAndWhatTheSwitchSaid(t *testing.T) {
+	var buf lockedBuffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&buf, nil)))
+	defer slog.SetDefault(prev)
+
+	callID := uuid.Must(uuid.NewV7())
+	if got := Classify(CallEnd{CallID: callID, HangupCause: CauseOriginatorCancel, SIPStatus: 487, EndedBy: "PEER"}); got != OutcomeTransient {
+		t.Fatalf("Classify = %s, want TRANSIENT", got)
+	}
+	var found map[string]any
+	for _, line := range bytes.Split(buf.Bytes(), []byte("\n")) {
+		var rec map[string]any
+		if json.Unmarshal(line, &rec) == nil && rec["callId"] == callID.String() {
+			found = rec
+		}
+	}
+	if found == nil {
+		t.Fatalf("no record carries callId %s:\n%s", callID, buf.Bytes())
+	}
+	want := map[string]any{
+		"level": "WARN", "hangupCause": CauseOriginatorCancel, "sipStatus": float64(487),
+		"hasRingProgress": false, "endedBy": "PEER",
+	}
+	for k, v := range want {
+		if found[k] != v {
+			t.Errorf("%s = %v, want %v", k, found[k], v)
+		}
+	}
+	if !strings.Contains(found["msg"].(string), "does not know") {
+		t.Errorf("msg = %v", found["msg"])
+	}
+
+	// A cause the table knows says nothing.
+	buf.Reset()
+	Classify(CallEnd{CallID: callID, HangupCause: CauseOriginatorCancel, SIPStatus: 487, HasRingProgress: true})
+	if bytes.Contains(buf.Bytes(), []byte(callID.String())) {
+		t.Errorf("a far end's 487 after ringing warned:\n%s", buf.Bytes())
+	}
+}
+
+// lockedBuffer is a log sink that other goroutines may write to while a test
+// reads it.
+type lockedBuffer struct {
+	mu sync.Mutex
+	b  bytes.Buffer
+}
+
+func (l *lockedBuffer) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.b.Write(p)
+}
+
+func (l *lockedBuffer) Bytes() []byte {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return bytes.Clone(l.b.Bytes())
+}
+
+func (l *lockedBuffer) Reset() {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.b.Reset()
 }
 
 func TestAnUnmappedCauseIsTransient(t *testing.T) {

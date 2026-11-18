@@ -153,6 +153,9 @@ Rules:
    `ring_timeout_sec` (default 30 s), and campaign validation requires it to be **strictly below** `AnswerWindow`. With F5 as
    it stands, an answer after the window reaches a customer who hears silence; the dialer must
    make that unreachable. The single-call path has the same exposure and gets its own issue.
+   The campaign's value always applies: `AICC_OUTBOUND_RING_TIMEOUT` is only the default of a call
+   placed without a ring timeout of its own (a single AI call, a click-to-dial), and the dialer
+   always sends one. The `ai outbound placed` log line carries the value sent (`ringTimeoutSec`).
 3. **The bridge carries the campaign.** `X-AICC-Campaign-ID` and `X-AICC-Attempt-ID` go alongside
    the existing `X-AICC-*` headers, so the orchestrator knows it is a campaign call (§10) and the
    CDR carries the campaign.
@@ -823,7 +826,7 @@ after how long; and did this call use up one of the customer's chances?**
     that reached the customer count: rang, busy, rejected, answered, or impossible to tell.
   - `maxSystemRetries` (default 5): **how many times our or the network's failures are retried.**
     These calls never reached the customer's phone (or cannot be shown to have: a carrier's 408
-    with no ringing before it, §7.2) and must not use up the customer's chances, but they are
+    or 487 with no ringing before it, §7.2) and must not use up the customer's chances, but they are
     bounded so a number that always fails is not retried forever.
 - **Retry time = this call's end + the interval for its outcome.** If that falls outside the
   contact's window, it moves to the start of the next window; it is never dropped.
@@ -845,7 +848,7 @@ any channel (§5.5) — not from `releaseReason` alone, because `FAILED` folds a
 | `ANSWERED` | answered, any talk time | no — contact `DONE` | — | `maxAttempts` |
 | `BOT_FAILED` | answered; the bot side failed before the flow ended, the bridge to it never ran (`BOT_BRIDGE_UNCONFIRMED`, §5.7), the bot leg was refused or failed before media (`userData.botReason=BOT_LEG_FAILED`, whatever the cause, §5.7), or it answered and its session never started (`hangupCause=BOT_START_FAILED`, §5.7) | no — contact `DONE` | — | `maxAttempts` |
 | `OVERFLOW` | answered; no bot slot after `overflowHold` (§6.4) | no — contact `DONE` | — | `maxAttempts` |
-| `NO_ANSWER` | `NO_ANSWER`, `NO_USER_RESPONSE`, our ring timeout; `RECOVERY_ON_TIMER_EXPIRE` when the far end sent a SIP 408 after the leg rang (below) | yes | 2 h | `maxAttempts` |
+| `NO_ANSWER` | `NO_ANSWER`, `NO_USER_RESPONSE`, our ring timeout; `RECOVERY_ON_TIMER_EXPIRE` when the far end sent a SIP 408 after the leg rang; `ORIGINATOR_CANCEL` when the far end sent a SIP 487 of its own after the leg rang (below) | yes | 2 h | `maxAttempts` |
 | `BUSY` | `USER_BUSY` | yes | 30 min | `maxAttempts` |
 | `REJECTED` | `CALL_REJECTED` | yes | 24 h | `maxAttempts` |
 | `UNKNOWN` | reconciliation could not tell (§8.2) | yes | 24 h | `maxAttempts` |
@@ -867,6 +870,18 @@ any channel (§5.5) — not from `releaseReason` alone, because `FAILED` folds a
   `TRANSIENT`, and an answered call with this cause stays `BOT_FAILED`. `NO_ANSWER` is a customer
   outcome, so these calls also break a run of system failures for the trunk breaker (§7.4): a line
   that ends every unanswered call with 408 no longer pauses a campaign as a trunk outage.
+- **A far end that ends a ringing call with a 487 of its own is `NO_ANSWER` too** (#613). Some
+  networks end an unanswered INVITE with a final 487 Request Terminated instead of a 408, whatever
+  ended it on their side (a ring timer, a callee who declines); when the carrier's ring timer is
+  shorter than ours, ours never fires. No CANCEL is sent by either side, and the switch reports the leg's cause as
+  `ORIGINATOR_CANCEL`. Our own ring timeout is `NO_ANSWER` with no `sipStatus`, so the rule is
+  `ORIGINATOR_CANCEL`, a call nobody answered, `sipStatus` 487 **and** ring progress: `NO_ANSWER`,
+  on `maxAttempts`, and a customer outcome for the trunk breaker. Without ring progress or without
+  the 487 the cause is not a row: it is the unmapped cause below, `TRANSIENT` with the warning.
+  Which side ended the leg is kept in the CDR's `tech.endedBy` (`PEER` or `PLATFORM`, mapped in
+  `internal/telephony` from mod_sofia's `sip_hangup_disposition` on `CHANNEL_HANGUP_COMPLETE`; it
+  can still be empty on the earlier `CHANNEL_HANGUP`). It is evidence for a person, not an input
+  of the rule, so a CDR written before it was kept classifies the same.
 - Which outcomes retry, their intervals and both budgets are the campaign's `retry_policy`; the
   table holds the defaults. The answered outcomes are not configurable.
 - **An answered number is never dialled again (owner's decision).** A customer who has picked up
@@ -887,7 +902,8 @@ any channel (§5.5) — not from `releaseReason` alone, because `FAILED` folds a
   not retried (above).
 - The cause → outcome mapping is a table in code with a test per cause. An unmapped cause becomes
   `TRANSIENT`, logs a WARN and increments a metric, so new causes surface; it stays bounded by
-  `maxSystemRetries`.
+  `maxSystemRetries`. The WARN carries the `callId`, the far end's `sipStatus`, whether the leg
+  rang (`hasRingProgress`) and `endedBy`, so one line says whose ending it was.
 
 ### 7.3 Example
 
@@ -907,7 +923,9 @@ outside the window, and move to Tuesday 09:00.
 
 - **Trunk breaker:** `N` consecutive attempts in a campaign (default 20) ending `TRANSIENT` or
   `ORIGINATE_FAILED` → `PAUSED / TRUNK_FAILURE`. Without it, a trunk outage spends the whole list's
-  system retries in minutes.
+  system retries in minutes. A far end that ends unanswered calls itself after ringing, with a 408
+  or a 487 of its own (§7.2), is not an outage: those calls are `NO_ANSWER` and break the run like
+  any unanswered call. An unmapped cause still counts toward it as `TRANSIENT`.
 - **Provider breaker:** `M` consecutive answered calls (default 5) ending `BOT_FAILED` →
   `PAUSED / PROVIDER_FAILURE`. Answered contacts are not redialled, so a provider outage that does
   not stop the campaign burns one lead per answered call.

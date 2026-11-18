@@ -572,9 +572,14 @@ func (a *CDRAssembler) assemble(ctx context.Context, snap Snapshot) store.CDR {
 	if carrier != nil {
 		// What the far end said and when it first rang: the facts the campaign
 		// outcome needs to tell a carrier that ended an unanswered call itself
-		// (a 408 after ringing) from a system failure.
+		// (a 408 or a 487 after ringing) from a system failure. Which side
+		// ended the leg is kept beside them, for whoever has to tell a far
+		// end's ending from ours afterwards.
 		if carrier.SIPStatus > 0 {
 			cdr.Tech[store.CDRTechSIPStatus] = carrier.SIPStatus
+		}
+		if carrier.EndedBy != "" {
+			cdr.Tech[store.CDRTechEndedBy] = string(carrier.EndedBy)
 		}
 		if carrier.RingStartedAt != nil {
 			cdr.Tech[store.CDRTechRingStartedAt] = store.FormatRingStartedAt(*carrier.RingStartedAt)

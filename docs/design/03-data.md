@@ -119,7 +119,7 @@ cdrs(call_id uuid pk, started_at, answered_at, ended_at,
                                        -- owed for a call that never comes. It returns with the feature.
      disposition text, is_contained bool, has_recording bool,
      user_data jsonb,      -- business context (ticketId, slots); merge-patched during the call
-     tech jsonb,           -- CDR technical tab: sipCallId, codec, IPs; on a call placed to an outside number also sipStatus and ringStartedAt of the carrier-facing leg (release cause is the hangup_cause column)
+     tech jsonb,           -- CDR technical tab: sipCallId, codec, IPs; on a call placed to an outside number also sipStatus, ringStartedAt and endedBy (PEER or PLATFORM) of the carrier-facing leg (release cause is the hangup_cause column)
      legs jsonb,
      unbacked_claims text[] check <@ ('TRANSFER','LOOKUP','MESSAGE','FAREWELL'))
                                        -- added 2026-10-01 (00034, #44): each kind of claim the bot made in a
