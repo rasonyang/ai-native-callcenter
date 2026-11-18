@@ -151,6 +151,18 @@ type Profile struct {
 	// session.update, which costs the whole session.
 	AcceptsTemperature bool
 
+	// AcceptsTranscriptionLanguage means that, when this client names no
+	// transcription model (TranscribeModel empty), the opening session
+	// configuration still tells the provider's own input transcriber the
+	// call's language, alone and with no model. True on qwen only, where
+	// the default transcriber varies per session and, left to guess per
+	// utterance, wrote a one-syllable Chinese reply in Korean (qwen-findings
+	// W-Q19, #602). Grok, the gateway, OpenAI and Doubao leave it false:
+	// unmeasured, or not applicable (OpenAI names a model and sends the
+	// language with it). It is optional, so the reduced retry drops it, and a
+	// mid-call update never carries it.
+	AcceptsTranscriptionLanguage bool
+
 	// AcceptsResponseToolChoice means a response.create may carry tool_choice
 	// in its response object and the engine obeys it, and this client sends
 	// "none" on every request for a line (SpeakText: a phase's announce, the
@@ -266,14 +278,16 @@ func QwenProfile() Profile {
 		// model is undocumented.
 		AcceptsTemperature: true,
 		// No TranscribeModel, and that is the finding rather than an omission.
-		// Design 08 §4.2 left it open — "Qwen-Audio-Realtime's default
-		// behaviour for input transcription is unverified" — and live calls on
-		// 2026-08-23 settled it: this dialect sends
-		// conversation.item.input_audio_transcription.* unprompted, and the
-		// caller's words reach the transcript as CUSTOMER|MODEL rows, while
-		// the Beta branch of buildSessionUpdate sends no transcription field
-		// at all. Setting one here would be a value nothing reads — the same
-		// dead configuration this campaign has been filing against.
+		// This dialect transcribes the caller unprompted
+		// (conversation.item.input_audio_transcription.*), and the default
+		// transcriber varies per session (session.created reported fun-asr in
+		// 7 of 8 probe sessions and gummy-realtime-v1 in 1), while the opening
+		// session.update goes out before session.created, so no model can be
+		// named. The call's language alone is accepted, merges into whichever
+		// default the session has and survives an instructions-only update
+		// (qwen-findings W-Q19, #602).
+		AcceptsTranscriptionLanguage: true,
+
 		AcceptsG711:  false,
 		LinearInput:  media.PCM16Format(media.RateProviderIn),
 		LinearOutput: media.PCM16Format(media.RateProviderOut),
@@ -359,9 +373,10 @@ func GatewayProfile() Profile {
 //
 // It is therefore the one profile whose values do not all mean what they mean
 // above: everything the Realtime client alone reads — Style,
-// TranscribeModel, CancelsResponseItself, NeedsCueForFirstTurn,
-// NeedsDirectedLineInConversation, AcceptsResponseToolChoice,
-// NeedsToolFreeLineDirection — is left at zero, because the client that answers for this name
+// TranscribeModel, AcceptsTranscriptionLanguage, CancelsResponseItself,
+// NeedsCueForFirstTurn, NeedsDirectedLineInConversation,
+// AcceptsResponseToolChoice, NeedsToolFreeLineDirection — is left at zero,
+// because the client that answers for this name
 // (internal/provider/doubao) reads none of them. What it does read is the name,
 // the endpoint, the credential, the voice and the two audio
 // formats.

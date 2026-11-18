@@ -5,6 +5,18 @@ under one tag, `rasonyang/ai-native-callcenter` and `rasonyang/freeswitch-aicc`;
 run them together. From v0.2.0 on, the GitHub release of the same tag also
 carries the one-line installer's files.
 
+## Unreleased
+
+### Fixed
+
+- On qwen, the session's own transcriber is told the call's language. It was
+  left to guess the language of each utterance, and a lone 「嗯」 on a zh call
+  came back in Korean, so the acknowledgement list missed it and the CDR
+  transcript was in the wrong language. The opening session configuration now
+  names the language, with no model, since the vendor's default transcriber
+  varies per session (#602). The language makes such a transcript less likely,
+  not impossible.
+
 ## v0.8.7 - 2026-11-17
 
 ### Upgrade notes

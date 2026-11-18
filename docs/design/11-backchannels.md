@@ -82,7 +82,10 @@ server reactions to speech, so the client decides after the transcript. With it:
   (`audio.input.transcription.language`). On a live round without it, a Chinese
   "嗯" came back as "うん" or "Mmm.", "对" as "Right." or "Sí.", so the list could
   not match the most common acknowledgements. A caller speaking another language
-  than the call's is transcribed less well as a result.
+  than the call's is transcribed less well as a result. Qwen names no model, so
+  it sends the language alone (`Profile.AcceptsTranscriptionLanguage`, #602,
+  qwen-findings W-Q19); it is a bias, so a transcript in another script can
+  still reach a classifier that matches only the call's language.
 - The client implements `provider.CallerTurnController`, an optional interface
   in the pattern of `QuietToolAnswerer` (`VoiceSession` is not widened):
   `AnswerCallerTurn(itemID)` asks for the caller's turn and
