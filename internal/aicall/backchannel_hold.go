@@ -31,7 +31,8 @@ import (
 const holdCap = 2000 * time.Millisecond
 
 // cutVerdictWait is how long a tool call that could move the flow waits for the
-// verdict on the cut that preceded its response before running as it always did.
+// verdict on the cut that preceded its response. Past it the call runs as it
+// always did, unless the cut was of the opening (cutVerdictWordsUnknown).
 const cutVerdictWait = 1000 * time.Millisecond
 
 type utteranceState int
@@ -79,7 +80,28 @@ const (
 	cutVerdictContent
 	// cutVerdictGreeting: a greeting ("喂") that cut the call's opening line.
 	cutVerdictGreeting
+	// cutVerdictWordsUnknown: words that cut the call's opening line while it
+	// could still be said again (isOpeningReplayable), and that no transcript
+	// made known: the final was blank, or none came within cutVerdictWait
+	// (#610). The callee has not heard the opening, so the cut is judged as a
+	// greeting's is.
+	cutVerdictWordsUnknown
 )
+
+// String is the verdict as the log names it.
+func (v cutVerdict) String() string {
+	switch v {
+	case cutVerdictAck:
+		return "ACKNOWLEDGEMENT"
+	case cutVerdictContent:
+		return "WORDS"
+	case cutVerdictGreeting:
+		return "GREETING"
+	case cutVerdictWordsUnknown:
+		return "WORDS_UNKNOWN"
+	}
+	return "NONE"
+}
 
 // openCut is a cut the engine made over audible playback (trait off), kept
 // until the utterance's final transcript says what it was.
@@ -93,10 +115,21 @@ type openCut struct {
 	// answerTurn is the first turn that began after the cut (zero before one).
 	answerTurn int
 	// isOpening says the cut was over the call's opening line or its replay,
-	// so a greeting is judged as such (classifyGreeting).
-	isOpening bool
-	verdict   cutVerdict
-	done      chan struct{}
+	// so a greeting is judged as such (classifyGreeting). isOpeningLine says
+	// it was over that line's own turn, not over another turn while the
+	// opening was owed: only then do played and unplayed time date the cut
+	// within the opening (openingHeardToItsEnd).
+	isOpening     bool
+	isOpeningLine bool
+	verdict       cutVerdict
+	done          chan struct{}
+	// isOpeningUnheard says an acknowledgement cut the opening before its
+	// final sentence while it could still be said again: no answer to an
+	// offer the callee has not heard, so the opening is owed once more (#610).
+	isOpeningUnheard bool
+	// isReplayAsked says the opening was asked for again on this cut's verdict
+	// (SayOpeningAgain).
+	isReplayAsked bool
 }
 
 // backchannelState is everything the session keeps for backchannels. mu is
@@ -459,7 +492,8 @@ func (s *Session) openCut(cut Event) {
 	if s.isHolding() {
 		return
 	}
-	isOpening := s.isOpeningTurn(cut.Turn)
+	isOpeningLine := s.isOpeningTurn(cut.Turn)
+	isOpening := isOpeningLine
 	s.bc.mu.Lock()
 	defer s.bc.mu.Unlock()
 	if s.bc.isOpeningOwed {
@@ -469,7 +503,7 @@ func (s *Session) openCut(cut Event) {
 		s.bc.isOpeningOwed = true
 		s.bc.owedAfterTurn = max(s.bc.owedAfterTurn, cut.Turn)
 	}
-	next := &openCut{event: cut, isOpening: isOpening, done: make(chan struct{})}
+	next := &openCut{event: cut, isOpening: isOpening, isOpeningLine: isOpeningLine, done: make(chan struct{})}
 	// The utterance that cut is the latest one the provider named, unless its
 	// transcript is already in (then it was an earlier utterance, and the next
 	// speech start is this one).
@@ -505,28 +539,32 @@ func (s *Session) cutFor(turn int) *openCut {
 // acknowledgement is reported to the call's OnCutAcknowledged; words close the
 // window for the next utterances' sake (a later non-backchannel utterance
 // replaces the cut). A greeting over the opening is not an acknowledgement and
-// is not reported there: it returns the cut, so the transcript's event carries
-// it and the orchestrator, which knows the phase and the ending, can say the
-// opening again (Session.SayOpeningAgain).
-func (s *Session) noteCutVerdict(event provider.Event) (greetingCut *openCut) {
-	greetingCut = s.judgeCut(event)
+// is not reported there, nor is a blank final over an opening that can still
+// be said again (#610). Either returns the cut, and so does an acknowledgement
+// that cut the opening before its final sentence (#610): the transcript's
+// event carries it and the orchestrator, which knows the phase and the ending,
+// can say the opening again (Session.SayOpeningAgain).
+func (s *Session) noteCutVerdict(event provider.Event) (replayCut *openCut) {
+	replayCut = s.judgeCut(event)
 	text := strings.TrimSpace(event.Text)
 	if text == "" {
-		return greetingCut
+		return replayCut
 	}
 	isGreeting := classifyGreeting(s.cfg.Session.Language, text) == verdictGreeting
 	isStandIn := false
 	s.bc.mu.Lock()
 	switch {
-	case !isGreeting:
+	case !isGreeting && replayCut == nil:
 		// Words answer what the opening was owed to; so does an
-		// acknowledgement. A greeting leaves it owed until it is replayed.
+		// acknowledgement heard over its final sentence, or over a replay. A
+		// greeting, or an acknowledgement before the final sentence (#610),
+		// leaves it owed until it is replayed.
 		s.bc.isOpeningOwed = false
-	case greetingCut == nil && s.bc.isOpeningOwed:
+	case isGreeting && replayCut == nil && s.bc.isOpeningOwed:
 		// The opening is owed and no cut of its own judged these words (the
 		// cut was superseded, or this is another utterance's final): they
 		// still owe it. The mark stands in for the cut.
-		greetingCut = &openCut{isOpening: true, verdict: cutVerdictGreeting}
+		replayCut = &openCut{isOpening: true, verdict: cutVerdictGreeting}
 		isStandIn = true
 	}
 	s.bc.mu.Unlock()
@@ -534,16 +572,21 @@ func (s *Session) noteCutVerdict(event provider.Event) (greetingCut *openCut) {
 		// A turn that began since is the reply, to be muted if it is live.
 		s.mu.Lock()
 		if !s.isOpeningTurnLocked(s.turnSeq) {
-			greetingCut.answerTurn = s.turnSeq
+			replayCut.answerTurn = s.turnSeq
 		}
 		s.mu.Unlock()
 	}
-	return greetingCut
+	return replayCut
 }
 
 // judgeCut is the verdict on the open cut for a final transcript
-// (noteCutVerdict).
-func (s *Session) judgeCut(event provider.Event) (greetingCut *openCut) {
+// (noteCutVerdict). It returns the cut when the verdict says the opening is to
+// be said again: a greeting over it, or, while it can still be said again,
+// words left unknown by a blank final or an acknowledgement before its final
+// sentence (#610).
+func (s *Session) judgeCut(event provider.Event) (replayCut *openCut) {
+	// Asked before bc.mu, and with no lock held (isOpeningReplayable).
+	isReplayable := s.isOpeningReplayable()
 	s.bc.mu.Lock()
 	if event.ItemID == s.bc.lastItem {
 		s.bc.isLastItemFinal = true
@@ -564,19 +607,47 @@ func (s *Session) judgeCut(event provider.Event) (greetingCut *openCut) {
 		isAckRun(s.cfg.Session.Language, text))
 	isGreeting := !isAck && cut.isOpening && text != "" &&
 		classifyGreeting(s.cfg.Session.Language, text) == verdictGreeting
+	// A blank final over the opening says nothing of what the callee said, and
+	// they have not heard the opening: judged as a greeting is, while the
+	// opening can still be said again. Anywhere else it is content, as a cough
+	// that takes the floor always was.
+	isWordsUnknown := text == "" && cut.isOpening && isReplayable
+	// An acknowledgement over the opening is no answer to an offer the callee
+	// has not heard either (#610), unless it fell in the opening's final
+	// sentence: then the callee heard all of it but the end, and it is the
+	// acknowledgement it always was.
+	var finalSentence time.Duration
+	isHeardToEnd := false
+	if isAck && cut.isOpening && isReplayable {
+		finalSentence, isHeardToEnd = s.openingHeardToItsEnd(cut)
+		cut.isOpeningUnheard = !isHeardToEnd
+	}
+	isOpeningUnheard := cut.isOpeningUnheard
 	switch {
 	case isAck:
 		cut.verdict = cutVerdictAck
 	case isGreeting:
 		cut.verdict = cutVerdictGreeting
+	case isWordsUnknown:
+		cut.verdict = cutVerdictWordsUnknown
 	default:
 		cut.verdict = cutVerdictContent
 	}
+	verdict := cut.verdict
 	close(cut.done)
 	s.bc.mu.Unlock()
+	if text == "" {
+		// The engine heard speech and its transcriber wrote nothing: the one
+		// trace of words the call's transcript leaves out.
+		s.log.Info("the final transcript of the words that cut the bot is blank",
+			"turn", cut.event.Turn, "isOpening", cut.isOpening, "verdict", verdict.String())
+	}
 	if isGreeting {
 		s.log.Info("the engine cut the opening for a greeting; limiting the damage",
 			"text", text, "turn", cut.event.Turn)
+		return cut
+	}
+	if isWordsUnknown {
 		return cut
 	}
 	if !isAck {
@@ -584,33 +655,118 @@ func (s *Session) judgeCut(event provider.Event) (greetingCut *openCut) {
 	}
 	s.log.Info("the engine cut the bot for an acknowledgement; limiting the damage",
 		"text", text, "turn", cut.event.Turn)
+	switch {
+	case isOpeningUnheard:
+		s.log.Info("the acknowledgement cut the opening before its final sentence; the opening is owed once more",
+			"turn", cut.event.Turn, "playedMs", cut.event.Played.Milliseconds(),
+			"unplayedMs", cut.event.Unplayed.Milliseconds())
+	case isHeardToEnd:
+		s.log.Info("the acknowledgement fell in the opening's final sentence; the opening counts as heard",
+			"turn", cut.event.Turn, "playedMs", cut.event.Played.Milliseconds(),
+			"unplayedMs", cut.event.Unplayed.Milliseconds(), "finalSentenceMs", finalSentence.Milliseconds())
+	}
 	if s.cfg.OnCutAcknowledged != nil {
 		s.cfg.OnCutAcknowledged(cut.event)
+	}
+	if isOpeningUnheard {
+		return cut
 	}
 	return nil
 }
 
-// refusesMove says a tool that could move the call is refused for this verdict.
-func (v cutVerdict) refusesMove() bool { return v == cutVerdictAck || v == cutVerdictGreeting }
+// openingHeardToItsEnd reports whether a cut of the opening fell in its final
+// sentence, with that sentence's estimated length: the estimate #465 makes for
+// an armed closing line (cutInFinalSentence), on the opening's rendered text.
+// Only a cut of the opening line's own turn, made after it finished generating
+// (its whole length is then known), is dated; any other cut is before the end.
+func (s *Session) openingHeardToItsEnd(cut *openCut) (finalSentence time.Duration, ok bool) {
+	if !cut.isOpeningLine || cut.event.IsGenerating {
+		return 0, false
+	}
+	return cutInFinalSentence(s.cfg.Session.OpeningText, cut.event.Played, cut.event.Unplayed)
+}
 
-// cutVerdictOf is the verdict on the cut, waiting up to cutVerdictWait for it.
-// No verdict in time is cutVerdictUnknown: the call runs as it always did.
-func (s *Session) cutVerdictOf(cut *openCut) cutVerdict {
+// openingReplayOf reports, for a cut, whether its verdict owes the opening once
+// more (a greeting, words not known, or an acknowledgement before the final
+// sentence) and whether it has been asked for again on it.
+func (s *Session) openingReplayOf(cut *openCut) (isOwed, isAsked bool) {
+	s.bc.mu.Lock()
+	defer s.bc.mu.Unlock()
+	isOwed = cut.verdict == cutVerdictGreeting || cut.verdict == cutVerdictWordsUnknown ||
+		(cut.verdict == cutVerdictAck && cut.isOpeningUnheard)
+	return isOwed, cut.isReplayAsked
+}
+
+// verdictName is the verdict on a cut as the log names it.
+func (s *Session) verdictName(cut *openCut) string {
+	if cut == nil {
+		return cutVerdictUnknown.String()
+	}
+	s.bc.mu.Lock()
+	defer s.bc.mu.Unlock()
+	return cut.verdict.String()
+}
+
+// refusesMove says a tool that could move the call is refused for this verdict.
+func (v cutVerdict) refusesMove() bool {
+	return v == cutVerdictAck || v == cutVerdictGreeting || v == cutVerdictWordsUnknown
+}
+
+// cutVerdictOf is the verdict on the cut, waiting up to cutVerdictWait for it,
+// and how long it waited. No verdict in time is cutVerdictUnknown, and the call
+// runs as it always did, except on a cut of an opening that can still be said
+// again: its words are not known, and isExpired says this wait settled it so
+// (cutVerdictWordsUnknown, #610). No transcript will bring that cut to the
+// orchestrator, so the caller says the opening again itself.
+func (s *Session) cutVerdictOf(cut *openCut) (verdict cutVerdict, waited time.Duration, isExpired bool) {
 	select {
 	case <-cut.done:
 	default:
+		began := time.Now()
 		select {
 		case <-cut.done:
+			waited = time.Since(began)
 		case <-s.cutWaitChan(cutVerdictWait):
+			waited = time.Since(began)
+			if s.expireOpeningCut(cut) {
+				s.log.Info("no verdict on the cut of the opening within the wait; the callee's words are not known",
+					"turn", cut.event.Turn, "waitedMs", waited.Milliseconds())
+				return cutVerdictWordsUnknown, waited, true
+			}
+			s.bc.mu.Lock()
+			verdict = cut.verdict
+			s.bc.mu.Unlock()
+			if verdict != cutVerdictUnknown {
+				// A final judged it as the wait ran out.
+				return verdict, waited, false
+			}
 			s.log.Info("no verdict on the cut within the wait; the tool call runs as it always did")
-			return cutVerdictUnknown
+			return cutVerdictUnknown, waited, false
 		case <-s.done:
-			return cutVerdictUnknown
+			return cutVerdictUnknown, time.Since(began), false
 		}
 	}
 	s.bc.mu.Lock()
 	defer s.bc.mu.Unlock()
-	return cut.verdict
+	return cut.verdict, waited, false
+}
+
+// expireOpeningCut settles a cut of the opening that no final transcript
+// judged within the wait, while the opening can still be said again: its words
+// are not known (#610). A transcript that arrives later is the caller's words
+// as ever and judges nothing. It reports false for any other cut, and for one a
+// final judged meanwhile.
+func (s *Session) expireOpeningCut(cut *openCut) bool {
+	// Asked before bc.mu, and with no lock held (isOpeningReplayable).
+	isReplayable := s.isOpeningReplayable()
+	s.bc.mu.Lock()
+	defer s.bc.mu.Unlock()
+	if cut.verdict != cutVerdictUnknown || !cut.isOpening || !isReplayable {
+		return false
+	}
+	cut.verdict = cutVerdictWordsUnknown
+	close(cut.done)
+	return true
 }
 
 // onGreetingCap handles the cap of a held utterance that is a greeting so far

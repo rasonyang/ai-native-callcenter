@@ -139,9 +139,10 @@ type Event struct {
 	cut *openCut
 
 	// openingCut, on a final CUSTOMER_SAID, is the cut of the bot's opening
-	// line that these words made, when they were only a greeting ("喂"): the
-	// opening is owed once more (Session.SayOpeningAgain). Only the
-	// orchestrator in this package reads it.
+	// line that these words made, when they were only a greeting ("喂"), or
+	// were left unknown by a blank transcript before the opening had been said
+	// again (#610): the opening is owed once more (Session.SayOpeningAgain).
+	// Only the orchestrator in this package reads it.
 	openingCut *openCut
 
 	// soFar is, on a TOOL_CALL, what the response that made the call had said
@@ -1505,7 +1506,7 @@ func (s *Session) logMuted() {
 		return
 	}
 	if s.muteLog.tool == openingReplayMute {
-		s.log.Info("muted the model's reply to a greeting; the opening is said again",
+		s.log.Info("muted the model's reply to the cut of the opening; the opening is said again",
 			"turn", s.mutedTurn, "playedMs", s.muteLog.playedMs, "flushedMs", s.muteLog.flushedMs,
 			"droppedChunks", s.cutOffChunks)
 		s.muteLog = nil

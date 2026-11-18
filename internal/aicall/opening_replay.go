@@ -15,8 +15,11 @@ import (
 // On an engine that cuts by itself the opening is cut and the model answers the
 // greeting. The opening is the line the flow wrote for the call's start, so it
 // is said again once, from its start and word for word, in place of that
-// answer. On an engine whose client holds speech over audible playback
-// (backchannel_hold.go) the greeting never cuts it.
+// answer. Words that cut it and that no transcript made known (a blank final,
+// or none in time) are treated the same way (#610): the callee has not heard
+// the opening, and nothing says they answered it. On an engine whose client
+// holds speech over audible playback (backchannel_hold.go) the greeting never
+// cuts it.
 
 // openingReplayMute is the name MuteTurn is given for the reply it mutes.
 const openingReplayMute = "opening replay"
@@ -80,13 +83,14 @@ func (s *Session) noteUnqueuedOpeningCut(turn int) {
 }
 
 // SayOpeningAgain says the call's opening line once more, from its start, in
-// place of the model's own reply to a greeting that cut it. It is for the
+// place of the model's own reply to a greeting that cut it, or to words that
+// cut it and that no transcript made known (#610). It is for the
 // orchestrator, which has judged that the flow is still in the entry phase and
 // no ending is under way. It reports whether the line is on its way: false
 // when the call has no opening or has already said it again (once per call).
 //
-// Like any line it pre-empts and never queues. The model's reply to the
-// greeting is muted when it has started, so the caller does not hear it; one
+// Like any line it pre-empts and never queues. The model's reply to the cut is
+// muted when it has started, so the caller does not hear it; one
 // that has not started yet is waited for (replayWaitCap), because the line
 // would be taken for it.
 func (s *Session) SayOpeningAgain(cut *openCut) bool {
@@ -100,15 +104,17 @@ func (s *Session) SayOpeningAgain(cut *openCut) bool {
 	s.clearOpeningOwed()
 	// Read with mu held: beginTurn, which sets the cut's answer turn, holds it.
 	s.bc.mu.Lock()
-	answerTurn := 0
+	answerTurn, verdict := 0, cutVerdictUnknown
 	if cut != nil {
-		answerTurn = cut.answerTurn
+		answerTurn, verdict = cut.answerTurn, cut.verdict
+		cut.isReplayAsked = true
 	}
 	s.bc.mu.Unlock()
 	if answerTurn == 0 {
 		s.isReplayWaiting = true
 		s.mu.Unlock()
-		s.log.Info("the opening was cut by a greeting; saying it again once the model's reply to the greeting starts")
+		s.log.Info("the opening was cut and is owed; saying it again once the model's reply to the cut starts",
+			"verdict", verdict.String())
 		stop := s.holdTimer(replayWaitCap, s.onReplayWaitOver)
 		s.mu.Lock()
 		if s.isReplayWaiting {
@@ -123,13 +129,33 @@ func (s *Session) SayOpeningAgain(cut *openCut) bool {
 	isLive := s.turnSeq == answerTurn &&
 		(s.isResponding || (s.framesQueued > 0 && s.leg.Pending() > 0))
 	s.mu.Unlock()
-	s.log.Info("the opening was cut by a greeting; saying it again", "replyTurn", answerTurn,
-		"isReplyLive", isLive)
+	s.log.Info("the opening was cut and is owed; saying it again", "verdict", verdict.String(),
+		"replyTurn", answerTurn, "isReplyLive", isLive)
 	if isLive {
 		s.MuteTurn(answerTurn, openingReplayMute)
 	}
 	s.sayOpening(text)
 	return true
+}
+
+// isOpeningSaidAgain reports whether the opening has been asked for again
+// (once per call).
+func (s *Session) isOpeningSaidAgain() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.isOpeningReplayed
+}
+
+// isOpeningReplayable reports whether, as far as the session can tell, the
+// opening could still be said again: it has not been, and no ending is armed
+// (Config.IsEndingArmed). The flow's phase and an ending decided otherwise are
+// the orchestrator's to judge (canSayOpeningAgain). Called with no lock held:
+// the ending's own lock is taken before the session's elsewhere.
+func (s *Session) isOpeningReplayable() bool {
+	if s.isOpeningSaidAgain() {
+		return false
+	}
+	return s.cfg.IsEndingArmed == nil || !s.cfg.IsEndingArmed()
 }
 
 // onReplyStartedForReplay is called as a turn starts. A replay waiting for the
@@ -148,7 +174,8 @@ func (s *Session) onReplyStartedForReplay() {
 	if stop != nil {
 		stop()
 	}
-	s.log.Info("the model's reply to the greeting started; muting it and saying the opening", "replyTurn", turn)
+	s.log.Info("the model's reply to the cut of the opening started; muting it and saying the opening",
+		"replyTurn", turn)
 	s.MuteTurn(turn, openingReplayMute)
 	s.sayOpening(s.cfg.Session.OpeningText)
 }
@@ -167,7 +194,7 @@ func (s *Session) onReplayWaitOver() {
 	if s.isClosed() {
 		return
 	}
-	s.log.Info("no reply to the greeting started in time; saying the opening")
+	s.log.Info("no reply to the cut of the opening started in time; saying the opening")
 	s.sayOpening(s.cfg.Session.OpeningText)
 }
 
