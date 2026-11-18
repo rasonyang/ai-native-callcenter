@@ -78,7 +78,8 @@ export interface Backend {
   /**
    * Answers the paths the built-in routes do not know (the admin screens'
    * endpoints), ahead of them. Return a `Response`, any other value to be sent
-   * as JSON, or `undefined` to fall through to the defaults.
+   * as JSON, or `undefined` to fall through to the defaults; or a promise of
+   * one of them, which is waited for (one that never settles holds the request).
    */
   handle?: (request: RecordedRequest) => unknown
 }
@@ -346,7 +347,8 @@ export function installBackend(initial: Partial<Backend> = {}): Backend {
       }
       backend.requests.push(recorded)
 
-      const handled = backend.handle?.(recorded)
+      // A promise is waited for, so a test can hold a request open.
+      const handled = await backend.handle?.(recorded)
       if (handled !== undefined) return handled instanceof Response ? handled : json(handled)
 
       if (path.includes('/transcript')) {

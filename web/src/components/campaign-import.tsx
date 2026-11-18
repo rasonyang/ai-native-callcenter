@@ -13,6 +13,7 @@ import {
 } from '@/lib/campaign-import'
 import { IMPORT_CHUNK_SIZE, campaignApi } from '@/lib/campaigns'
 import { parseCsv } from '@/lib/csv'
+import { downloadCsv } from '@/lib/download'
 import { describeError } from '@/lib/errors'
 import { readXlsxWorkbook, type XlsxSheet } from '@/lib/xlsx'
 
@@ -36,16 +37,6 @@ function readText(file: File): Promise<string> {
  */
 function isWorkbook(file: File): boolean {
   return /\.xlsx$/i.test(file.name)
-}
-
-/** Hands the operator a file made in the browser. */
-function download(name: string, text: string) {
-  const url = URL.createObjectURL(new Blob([text], { type: 'text/csv;charset=utf-8' }))
-  const link = document.createElement('a')
-  link.href = url
-  link.download = name
-  link.click()
-  URL.revokeObjectURL(url)
 }
 
 /**
@@ -449,7 +440,7 @@ export function CampaignImportDialog({
                     variant="outline"
                     size="sm"
                     onClick={() =>
-                      download(
+                      downloadCsv(
                         t('campaign.import.rejectedFile', { name: fileName.replace(/\.[^.]+$/, '') }),
                         rejectedCsv(table.header, summary.entries),
                       )

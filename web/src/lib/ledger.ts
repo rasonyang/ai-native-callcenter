@@ -107,8 +107,8 @@ export const ledgerApi = {
   callbacks: (status?: string, page: PageParams = {}) =>
     request<CallbackList>(`/callbacks${query({ status, ...page })}`),
 
-  callbacksOfCall: (callId: string) =>
-    request<{ items: Callback[] }>(`/callbacks${query({ callId })}`),
+  callbacksOfCall: (callId: string, signal?: AbortSignal) =>
+    request<{ items: Callback[] }>(`/callbacks${query({ callId })}`, { signal }),
 
   claimCallback: (id: string) =>
     request<Callback>(`/callbacks/${id}/claim`, { method: 'POST' }),

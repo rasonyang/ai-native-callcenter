@@ -5,6 +5,25 @@ under one tag, `rasonyang/ai-native-callcenter` and `rasonyang/freeswitch-aicc`;
 run them together. From v0.2.0 on, the GitHub release of the same tag also
 carries the one-line installer's files.
 
+## Unreleased
+
+### Added
+
+- The Leads tab of a campaign has an Export button: it downloads a CSV of
+  every lead the tab's filter matches, all pages, built in the browser from
+  the same list operation the tab reads, so the contract gains no route. The
+  columns are the table's (number, intent, notes, callback status, call) and
+  the contact's id, headed by their wire names, with enum values as the API
+  writes them, so the file is the same in English and Chinese. It is UTF-8
+  with a BOM and RFC 4180 quoting. A number of the campaign's default country
+  code is written in national form, without the country code, a Chinese
+  landline with its leading 0; a number of another country keeps its
+  international form. The number is written as text, so a spreadsheet keeps
+  the leading 0, and a note that starts like a formula gets a leading
+  apostrophe. The file imports back through Import contacts as the same
+  numbers. The button shows progress and can be cancelled; a cancel or a
+  failed request saves no file (#618).
+
 ## v0.8.8 - 2026-11-18
 
 ### Upgrade notes
