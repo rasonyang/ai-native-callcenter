@@ -21,7 +21,8 @@ import (
 // or the cap, takes the floor through the same path a barge-in always took.
 //
 // On the other engines the engine cuts by itself. There the same classifier
-// judges the utterance afterwards, and its verdict limits the damage
+// judges the utterance afterwards, with a run of different acknowledgements
+// ("嗯，好的", isAckRun) counted as one too, and its verdict limits the damage
 // (openCut): an acknowledgement does not move the flow, and does not count as
 // the caller answering an armed closing line.
 
@@ -557,7 +558,10 @@ func (s *Session) judgeCut(event provider.Event) (greetingCut *openCut) {
 		return nil
 	}
 	text := strings.TrimSpace(event.Text)
-	isAck := text != "" && classifyBackchannel(s.cfg.Session.Language, text) == verdictAck
+	// A run of different acknowledgements ("嗯，好的") is one here too (#600);
+	// the hold keeps the classifier's single phrase.
+	isAck := text != "" && (classifyBackchannel(s.cfg.Session.Language, text) == verdictAck ||
+		isAckRun(s.cfg.Session.Language, text))
 	isGreeting := !isAck && cut.isOpening && text != "" &&
 		classifyGreeting(s.cfg.Session.Language, text) == verdictGreeting
 	switch {

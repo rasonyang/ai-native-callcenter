@@ -55,6 +55,31 @@ func newDamageRig(t *testing.T) *damageRig {
 	return &damageRig{quietHarness: h, wait: wait}
 }
 
+// newDamageRigIn is newDamageRig on a call in language: the flow's, and the
+// session's, which picks the acknowledgement list.
+func newDamageRigIn(t *testing.T, language string) *damageRig {
+	t.Helper()
+	wait := newVerdictWait()
+	h := newClaimsHarnessModel(t, provider.QwenProfile(), quietFlow, language, "", quietConfig(), nil,
+		func(c *claimsHarness) {
+			c.session.cutWait = wait.after
+			c.session.cfg.OnCutAcknowledged = c.actions.onCutAcknowledged
+			c.session.cfg.Session.Language = language
+		})
+	return &damageRig{quietHarness: &quietHarness{claimsHarness: h}, wait: wait}
+}
+
+// agreeAfter has the caller say said and the model answer with the classify
+// call that would move the call to agreed, in the response that follows.
+func (r *damageRig) agreeAfter(t *testing.T, said string) {
+	t.Helper()
+	r.started()
+	r.callerFinal("u1", said)
+	r.toolCall("fc_1", "classify", `{"value":"agree"}`)
+	r.ended()
+	r.awaitResult(t)
+}
+
 // botSpeaksUntilCut plays audio that is still queued, and has the engine cut it
 // for the utterance item; the next response is the one that answers the cut.
 func (r *damageRig) botSpeaksUntilCut(t *testing.T, item string) {
@@ -179,6 +204,63 @@ func TestAMovingToolRunsWhenTheCallerSaidWordsOrNothingWasPlaying(t *testing.T) 
 	})
 }
 
+// #600: a run of different acknowledgements that cut the bot is an
+// acknowledgement too, whatever punctuation the transcriber put in it: the
+// moving tool is refused and the call stays where it was. In production a
+// model took such words for agreement and moved a call to its terminal phase.
+func TestAMovingToolIsRefusedWhenTheCutWasARunOfAcknowledgements(t *testing.T) {
+	for _, tt := range []struct{ language, said string }{
+		{"zh", "嗯，可以。"},
+		{"zh", "嗯，好的。"},
+		{"zh", "对，是的。"},
+		{"zh", "嗯，是。"},
+		{"zh", "嗯，嗯。"},
+		{"zh", "嗯好的"},
+		{"en", "yeah, okay."},
+		{"en", "oh right"},
+	} {
+		t.Run(tt.said, func(t *testing.T) {
+			r := newDamageRigIn(t, tt.language)
+			r.botSpeaksUntilCut(t, "u1")
+			r.agreeAfter(t, tt.said)
+
+			if out := r.lastResult(t); !strings.Contains(out, `"ok":"0"`) {
+				t.Errorf("tool result = %s, want a refusal", out)
+			}
+			if r.node() != "offer" {
+				t.Errorf("the call moved to %q on a run of acknowledgements", r.node())
+			}
+			if !strings.Contains(r.logs.String(), "the caller only acknowledged") {
+				t.Errorf("the refusal left no trace in the log:\n%s", r.logs.String())
+			}
+		})
+	}
+}
+
+// Words after an acknowledgement, a fragment cut off after one (layer 2 of #600
+// is not built) or a question are words: the tool runs. So does a run said when
+// nothing was playing, which answers a question the caller has heard.
+func TestAMovingToolRunsWhenARunHasWordsOrNothingWasPlaying(t *testing.T) {
+	for _, said := range []string{"嗯，需要。", "嗯，你。", "好的，我考虑一下。", "嗯？"} {
+		t.Run(said, func(t *testing.T) {
+			r := newDamageRigIn(t, "zh")
+			r.botSpeaksUntilCut(t, "u1")
+			r.agreeAfter(t, said)
+			if r.node() != "agreed" {
+				t.Errorf("the call is in %q after %q, want agreed", r.node(), said)
+			}
+		})
+	}
+	t.Run("nothing was playing", func(t *testing.T) {
+		r := newDamageRigIn(t, "zh")
+		r.model.events <- provider.Event{Type: provider.EventTypeSpeechStarted, ItemID: "u1"}
+		r.agreeAfter(t, "嗯，可以。")
+		if r.node() != "agreed" {
+			t.Errorf("a 嗯，可以 said to a question that had finished playing was refused: the call is in %q", r.node())
+		}
+	})
+}
+
 // A tool that only reads or records is not touched by the verdict.
 func TestAToolThatMovesNothingIsNotRefusedAfterAnAcknowledgement(t *testing.T) {
 	r := newDamageRig(t)
@@ -293,6 +375,21 @@ func TestAnAcknowledgementCutOverTheFinishedLineEndsTheCall(t *testing.T) {
 	}
 	if !strings.Contains(r.logs.String(), "running the armed action now") {
 		t.Errorf("the ending left no trace in the log:\n%s", r.logs.String())
+	}
+}
+
+// A run of acknowledgements over the finished closing line is the same verdict:
+// the caller let the goodbye stand, and the call ends at once (#600).
+func TestARunOfAcknowledgementsCutOverTheFinishedLineEndsTheCall(t *testing.T) {
+	r := startCutRig(t, time.Minute)
+	r.session.cfg.OnCutAcknowledged = r.actions.onCutAcknowledged
+	r.lineTurn(t, lineFrames, lineFrames, cutLine)
+	r.interrupt(t, lineFrames/2, 1)
+
+	r.callerFinal("oh, okay.")
+	r.awaitCallEnded(t, 5*time.Second)
+	if n := len(r.asked()); n != 0 {
+		t.Errorf("the line was asked for %d times, want none", n)
 	}
 }
 

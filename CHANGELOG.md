@@ -21,6 +21,17 @@ carries the one-line installer's files.
   Contacts with the filter and page reset; Back, a reload and a shared link
   now return to the same tab, filter and page. Moving between tabs adds no
   history entries, so one Back still leaves the campaign (#606).
+- On the engines that cut the bot by themselves (qwen, grok, doubao, gateway),
+  a run of different acknowledgements said over the bot, such as 「嗯，可以」,
+  「对，是的」 or "yeah, okay", now counts as an acknowledgement, as a single
+  「嗯」 already did: it can no longer move the flow, and over a closing line
+  that already counts as said it ends the call instead of being answered. A
+  model had taken such words for agreement and moved a call to its terminal
+  phase. Up to four phrases count, with or without punctuation between them; a
+  question mark or any other word makes it words. A caller who meant yes this
+  way is asked again. On `openai`, where speech over the bot is held, such a
+  run is still answered as words (#607). An acknowledgement followed by a cut-off word
+  (「嗯，你。」) is still words (#600).
 
 ## v0.8.7 - 2026-11-17
 

@@ -158,6 +158,18 @@ a. Flow. If the verdict is `ack`, a tool call in the response that answers the
    1000 ms, and with no verdict runs as it always did. The window is the first
    response after the cut. A "嗯" said when nothing was playing is never
    affected, because no cut is recorded for it.
+   On a cut, a run of acknowledgements is `ack` too (`isAckRun`, #600): the
+   whole final, punctuation and spaces dropped, is one to four phrases of the
+   list and nothing else, different ones allowed, in any split (嗯，可以;
+   对，是的; 嗯好的; "yeah, okay"; "oh right"; 嗯嗯 is one phrase or two). No
+   punctuation is needed between the phrases, because the transcriber's is
+   unreliable. A question mark makes it words, and so does a fifth phrase: a
+   longer run is a caller insisting. A fourth repeat of one phrase (对对对对),
+   `content` to the classifier, is within the cap and so an acknowledged cut.
+   The run is judged on cuts only. The classifier is shared with the hold, which
+   keeps the single phrase: a held "嗯，可以" on openai is released as words and
+   answered, as words always were. The cost: a caller who meant yes with
+   "嗯，可以" over the bot's audio is asked again.
    A greeting that cut the opening line (see "Greetings over the opening") is
    judged the same way: the tool is refused with its own reason (the caller only
    said hello as they picked up), and the opening is said again.
@@ -287,6 +299,14 @@ and was judged against that one. So the opening is owed at call level:
   VAD. That is a different design and is not built here.
 - The check for a moving tool is on rules, not conditions: a tool whose rule
   only fires on a failure result is refused after an acknowledgement as well.
+- An acknowledgement followed by a cut-off fragment ("嗯，你。") is words on a
+  cut: a moving tool made in answer to it runs. Tracked in #600.
+- A run of acknowledgements is an acknowledgement on a cut only. The hold
+  releases a held "yeah, okay" as words, and a moving tool made in answer to it
+  runs (seen live on openai). Tracked in #607.
+- The run is judged on the transcript: a "yeah, okay" the engine writes as
+  "Yes. Okay." is words, because "yes" is an answer and not on the list (seen
+  live on grok).
 - A declined item stays in the conversation between its commit and the final
   transcript (about a second); a response created in that window can read it.
 - The measurements have 1-2 samples per cell and the clips are synthetic.

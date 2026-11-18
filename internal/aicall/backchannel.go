@@ -196,6 +196,31 @@ func segmentsAreAckPrefixes(list []string, segments []string) bool {
 	return true
 }
 
+// ackRunMaxPhrases is how many acknowledgements a run may be made of and still
+// be one (isAckRun): "嗯，好的", "对，是的，可以". A longer run is a caller
+// insisting, and is words.
+const ackRunMaxPhrases = 4
+
+// isAckRun reports whether a transcript is a run of acknowledgements, different
+// ones allowed: "嗯，可以", "对，是的", "嗯好的", "yeah, okay", "oh right". The
+// compact form of the whole text (compactAck: punctuation and spaces dropped)
+// must be one to ackRunMaxPhrases phrases of the call language's list and
+// nothing else. Any split counts (嗯嗯 is one phrase or two), and no punctuation
+// is needed between phrases, because the transcriber's is unreliable. A question
+// mark anywhere makes it words, as for classifyBackchannel, and so does no text.
+//
+// It is for the verdict on a cut only (judgeCut), where a run taken for an
+// answer moves the flow. The hold keeps the shared classifier's single phrase:
+// a held "嗯，可以" is released as words and answered, as words always were.
+// Pure; it runs off the frame path.
+func isAckRun(language, text string) bool {
+	if strings.ContainsAny(text, "?？") {
+		return false
+	}
+	compact := compactAck(text)
+	return compact != "" && isPhraseRun(acknowledgements[flow.Lang(language)], compact, ackRunMaxPhrases)
+}
+
 // greetingMaxWords is how many greeting words one utterance may be made of and
 // still be a greeting ("喂，您好", "喂喂喂", "hi, hello").
 const greetingMaxWords = 3
@@ -230,7 +255,7 @@ func classifyGreeting(language, text string) backchannelVerdict {
 	if joined == "" {
 		return verdictGreetingSoFar
 	}
-	if isGreetingRun(list, joined, greetingMaxWords) {
+	if isPhraseRun(list, joined, greetingMaxWords) {
 		return verdictGreeting
 	}
 	if isGreetingRunPrefix(list, joined, greetingMaxWords) {
@@ -239,8 +264,10 @@ func classifyGreeting(language, text string) backchannelVerdict {
 	return verdictContent
 }
 
-// isGreetingRun reports whether s is one to max greeting words, nothing else.
-func isGreetingRun(list []string, s string, max int) bool {
+// isPhraseRun reports whether s is one to max phrases of the list, in any order
+// and with any repetition, nothing else: greeting words (classifyGreeting) or
+// acknowledgements (isAckRun). Every split is tried. Empty s is a run of none.
+func isPhraseRun(list []string, s string, max int) bool {
 	if s == "" {
 		return true
 	}
@@ -248,7 +275,7 @@ func isGreetingRun(list []string, s string, max int) bool {
 		return false
 	}
 	for _, word := range list {
-		if strings.HasPrefix(s, word) && isGreetingRun(list, s[len(word):], max-1) {
+		if word != "" && strings.HasPrefix(s, word) && isPhraseRun(list, s[len(word):], max-1) {
 			return true
 		}
 	}
