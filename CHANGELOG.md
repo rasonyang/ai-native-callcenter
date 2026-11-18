@@ -7,6 +7,17 @@ carries the one-line installer's files.
 
 ## Unreleased
 
+### Added
+
+- The CDR `tech` of a call placed to an outside number gains `endedBy`: `PEER`
+  when the far end ended the carrier-facing leg, `PLATFORM` when this platform
+  did (its ring timeout's CANCEL, for example), absent when the switch did not
+  say. The log line of an AI outbound or click-to-dial placement carries
+  `ringTimeoutSec`, the ring timeout the call was placed with. A campaign's
+  calls always ring for the campaign's `ringTimeoutSec`;
+  `AICC_OUTBOUND_RING_TIMEOUT` is only the default of a call placed without a
+  ring timeout of its own (#613).
+
 ### Fixed
 
 - On qwen, the session's own transcriber is told the call's language. It was
@@ -47,6 +58,17 @@ carries the one-line installer's files.
   been said again, such words are judged as before. The log now notes a blank
   transcript of words that cut the bot, and what was decided whenever a tool
   that could move the call answers a cut (#610).
+- A campaign call that the far end ends with a SIP 487 of its own after the
+  customer's phone rang is now `NO_ANSWER`, retried by `maxAttempts` like any
+  unanswered call, instead of `TRANSIENT`. Some networks end an unanswered call
+  this way before the campaign's ring timeout is reached, so the application
+  never cancels it; the switch sends no CANCEL and reports the call as
+  `ORIGINATOR_CANCEL`. It used to be treated as a system failure: retried
+  within minutes without using up an attempt, and enough of them in a row
+  paused the campaign as a trunk outage. A 487 with no ringing before it stays
+  `TRANSIENT`. The warning logged for a hangup cause the outcome table does not
+  know now names the call (`callId`) and carries the far end's SIP status,
+  whether the leg rang and which side ended it (#613).
 
 ## v0.8.7 - 2026-11-17
 

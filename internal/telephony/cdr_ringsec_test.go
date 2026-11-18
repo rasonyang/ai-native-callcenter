@@ -222,3 +222,59 @@ func TestRingSecOfAnInboundCallIsStillTheAgentLegs(t *testing.T) {
 		t.Error("an inbound call carries tech.ringStartedAt")
 	}
 }
+
+// Which side ended the carrier-facing leg reaches the CDR's tech as the
+// domain word, never the switch's: a far end that ended the ringing INVITE
+// with a 487 of its own, and our own cancel at the ring timeout. A leg the
+// switch said nothing about carries no endedBy, and neither does a call that
+// was not placed to an outside number.
+func TestTheCDRSaysWhichSideEndedTheCarrierFacingLeg(t *testing.T) {
+	t.Parallel()
+	placed := func(mod func(*PartySnapshot)) Snapshot {
+		leg := PartySnapshot{Role: RoleOriginator, Number: "+12025550116", ChannelID: "customer",
+			CreatedAt: at(0), RingStartedAt: atPtr(1), ReleasedAt: atPtr(8)}
+		mod(&leg)
+		return Snapshot{
+			CallID: uuid.Must(uuid.NewV7()), CallType: events.CallTypeOutbound,
+			CreatedAt: at(0), EndedAt: atPtr(8), Bot: BotShare{DID: "95012"},
+			Parties: []PartySnapshot{leg},
+		}
+	}
+	assemble := func(s Snapshot) store.CDR {
+		return newAssembler(&memoryLedger{}, staticQueues{}).assemble(t.Context(), s)
+	}
+	tests := []struct {
+		name        string
+		snap        Snapshot
+		wantEndedBy any // nil: absent
+		wantStatus  any // nil: absent
+	}{
+		{"the far end's own 487 after ringing", placed(func(p *PartySnapshot) {
+			p.ReleaseCause, p.SIPStatus, p.EndedBy = "ORIGINATOR_CANCEL", 487, EndedByPeer
+		}), "PEER", 487},
+		{"our own cancel at the ring timeout", placed(func(p *PartySnapshot) {
+			p.ReleaseCause, p.EndedBy = "NO_ANSWER", EndedByPlatform
+		}), "PLATFORM", nil},
+		{"the switch did not say", placed(func(p *PartySnapshot) {
+			p.ReleaseCause, p.SIPStatus = "ORIGINATOR_CANCEL", 487
+		}), nil, 487},
+		{"an inbound call", Snapshot{
+			CallID: uuid.Must(uuid.NewV7()), CallType: events.CallTypeInbound,
+			CreatedAt: at(0), EndedAt: atPtr(8),
+			Parties: []PartySnapshot{{Role: RoleOriginator, Number: "13800138000", ChannelID: "customer",
+				CreatedAt: at(0), ReleasedAt: atPtr(8), ReleaseCause: "ORIGINATOR_CANCEL", EndedBy: EndedByPeer}},
+		}, nil, nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := assemble(tt.snap)
+			if v, ok := got.Tech[store.CDRTechEndedBy]; ok != (tt.wantEndedBy != nil) || (ok && v != tt.wantEndedBy) {
+				t.Errorf("tech.endedBy = %v (present %v), want %v", v, ok, tt.wantEndedBy)
+			}
+			if v, ok := got.Tech[store.CDRTechSIPStatus]; ok != (tt.wantStatus != nil) || (ok && v != tt.wantStatus) {
+				t.Errorf("tech.sipStatus = %v (present %v), want %v", v, ok, tt.wantStatus)
+			}
+		})
+	}
+}

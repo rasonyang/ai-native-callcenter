@@ -21,8 +21,8 @@ func TestScenarioFileCoversEveryCampaignCase(t *testing.T) {
 		if err := CheckScenarioCoversCases(s, Regions, AllCases, form); err != nil {
 			t.Fatal(err)
 		}
-		if len(Regions) != 2 || len(DefaultCases) != 12 || len(AllCases) != 15 {
-			t.Fatalf("%d regions, %d unanswered and %d cases in all, want 2, 12 and 15", len(Regions), len(DefaultCases), len(AllCases))
+		if len(Regions) != 2 || len(DefaultCases) != 13 || len(AllCases) != 16 {
+			t.Fatalf("%d regions, %d unanswered and %d cases in all, want 2, 13 and 16", len(Regions), len(DefaultCases), len(AllCases))
 		}
 	})
 }
@@ -148,6 +148,84 @@ func TestC07BoundReadsTheMonotonicRing(t *testing.T) {
 			}
 			if len(failures) > 0 && !strings.Contains(failures[0], "wall clock") {
 				t.Errorf("the failure does not give the wall-clock values: %s", failures[0])
+			}
+		})
+	}
+}
+
+// C07 and C11 hold the CDR's tech to who ended the dialled leg: our ring
+// timeout's CANCEL leaves PLATFORM and no status, the far end's own 487 leaves
+// PEER and 487.
+func TestAssessTechReadsWhoEndedTheLeg(t *testing.T) {
+	tech := func(kv ...any) *map[string]interface{} {
+		m := map[string]interface{}{}
+		for i := 0; i+1 < len(kv); i += 2 {
+			m[kv[i].(string)] = kv[i+1]
+		}
+		return &m
+	}
+	c07, c11 := caseByID(AllCases, "C07"), caseByID(AllCases, "C11")
+	if c07.Tech == nil || c11.Tech == nil {
+		t.Fatal("C07 and C11 assert the CDR's tech")
+	}
+	for _, tc := range []struct {
+		name string
+		want TechExpectation
+		tech *map[string]interface{}
+		pass bool
+	}{
+		{"C07 as expected", *c07.Tech, tech("endedBy", "PLATFORM"), true},
+		{"C07 with a status", *c07.Tech, tech("endedBy", "PLATFORM", "sipStatus", float64(487)), false},
+		{"C07 ended by the peer", *c07.Tech, tech("endedBy", "PEER"), false},
+		{"C11 as expected", *c11.Tech, tech("endedBy", "PEER", "sipStatus", float64(487)), true},
+		{"C11 without endedBy", *c11.Tech, tech("sipStatus", float64(487)), false},
+		{"C11 ended by us", *c11.Tech, tech("endedBy", "PLATFORM", "sipStatus", float64(487)), false},
+		{"C11 without a status", *c11.Tech, tech("endedBy", "PEER"), false},
+		{"no tech at all", *c11.Tech, nil, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var col Checks
+			assessTech(&col, "", tc.want, tc.tech)
+			if got := len(col.failures) == 0; got != tc.pass {
+				t.Errorf("passed = %v, want %v: %v", got, tc.pass, col.failures)
+			}
+		})
+	}
+}
+
+// C11's 487 must be the callee's own: a dialog our CANCEL ended fails it.
+func TestC11RefusesA487ThatAnsweredOurCancel(t *testing.T) {
+	cs := caseByID(AllCases, "C11")
+	t0 := time.Date(2026, 11, 18, 7, 47, 6, 0, time.UTC)
+	rv := RegionView{}
+	rv.DID.Number = "95000001"
+	for _, tc := range []struct {
+		name string
+		end  *calleesim.EndRecord
+		pass bool
+	}{
+		{"the callee's own 487", nil, true},
+		{"a 487 after our CANCEL", &calleesim.EndRecord{Method: calleesim.EndedWithCancel, By: calleesim.EndedByCaller, At: t0.Add(2 * time.Second)}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			d := calleesim.DialogRecord{
+				InviteAt:      t0,
+				InviteHeaders: map[string]string{"from": "<sip:95000001@10.0.0.11>"},
+				Provisionals:  []calleesim.ProvisionalRecord{{Status: 180}},
+				Final:         &calleesim.FinalRecord{Status: 487},
+				End:           tc.end,
+			}
+			var col Checks
+			var ar AttemptResult
+			assessDialog(&col, "", rv, cs, api.CampaignAttempt{StartedAt: t0}, &d, nil, &ar)
+			var own []string
+			for _, f := range col.failures {
+				if strings.Contains(f, "the caller sent no CANCEL") {
+					own = append(own, f)
+				}
+			}
+			if got := len(own) == 0; got != tc.pass {
+				t.Errorf("passed = %v, want %v: %v", got, tc.pass, col.failures)
 			}
 		})
 	}

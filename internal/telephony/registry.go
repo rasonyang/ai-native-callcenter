@@ -466,6 +466,7 @@ func (a *actor) applySwitchEvent(ev SwitchEvent) {
 		party.CloseBridge(ev.OccurredAt)
 		party.BilledSec = ev.BilledSec
 		party.SIPStatus = ev.SIPStatus
+		party.EndedBy = ev.EndedBy
 		if party.RingStartedAt.IsZero() {
 			party.RingStartedAt = ev.RingStartedAt
 		}

@@ -2767,7 +2767,7 @@ export interface components {
             userData?: {
                 [key: string]: unknown;
             };
-            /** @description Technical residue (switch causes and the like); never business data. On a call placed to an outside number, the carrier-facing leg adds sipStatus (a number: the SIP status the far end ended the call with, such as 408 for a carrier that ends an unanswered call itself, present only when the switch reported one) and ringStartedAt (an RFC 3339 UTC timestamp with fractional seconds: when that leg first sent a 180 or 183, present only when it did). The keys are open and may grow. */
+            /** @description Technical residue (switch causes and the like); never business data. On a call placed to an outside number, the carrier-facing leg adds sipStatus (a number: the SIP status the far end ended the call with, such as 408 or 487 for a carrier that ends an unanswered call itself, present only when the switch reported one), ringStartedAt (an RFC 3339 UTC timestamp with fractional seconds: when that leg first sent a 180 or 183, present only when it did) and endedBy (which side ended that leg: PEER for its far end, as when the carrier ends a ringing call itself, or PLATFORM for this platform, as when its ring timeout cancels the call; present only when the switch said). The keys are open and may grow. */
             tech?: {
                 [key: string]: unknown;
             };
@@ -3664,7 +3664,7 @@ export interface components {
             defaultCountryCode?: string;
             /** @description This campaign's share of the deployment's concurrent calls. */
             maxConcurrent: number;
-            /** @description How long each attempt rings before giving up. Always below the originator's 60-second answer window. */
+            /** @description How long each attempt rings before giving up. Every call of the campaign is placed with this value, whatever AICC_OUTBOUND_RING_TIMEOUT says: that setting is only the default of a call placed without a ring timeout of its own. Always below the originator's 60-second answer window. */
             ringTimeoutSec: number;
             retryPolicy: components["schemas"]["CampaignRetryPolicy"];
             /**
@@ -3713,7 +3713,7 @@ export interface components {
              */
             maxConcurrent?: number;
             /**
-             * @description Defaults to 30 when omitted. At least 5 and strictly below the 60-second answer window, else CAMPAIGN_RING_TIMEOUT_TOO_LONG. GET /campaigns/settings states the limits.
+             * @description Defaults to 30 when omitted. At least 5 and strictly below the 60-second answer window, else CAMPAIGN_RING_TIMEOUT_TOO_LONG. GET /campaigns/settings states the limits. Every call of the campaign rings for this value; AICC_OUTBOUND_RING_TIMEOUT does not apply to it.
              * @default 30
              */
             ringTimeoutSec?: number;

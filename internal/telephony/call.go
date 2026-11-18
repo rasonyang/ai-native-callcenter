@@ -253,6 +253,9 @@ type Party struct {
 	// SIPStatus is the final SIP status the far end ended this leg with (see
 	// SwitchEvent.SIPStatus); zero when none was reported.
 	SIPStatus int
+	// EndedBy is which side ended this leg (see SwitchEvent.EndedBy); empty
+	// when the switch did not say.
+	EndedBy EndedBy
 	// RingStartedAt is when the far end first signalled ringing on this leg
 	// (see SwitchEvent.RingStartedAt); zero when it never did.
 	RingStartedAt time.Time
@@ -871,9 +874,10 @@ type PartySnapshot struct {
 	Bridges []BridgeSpan `json:"bridges,omitempty"`
 	// BilledSec is the switch's own count of this leg's answered seconds.
 	BilledSec int `json:"billedSec,omitempty"`
-	// SIPStatus and RingStartedAt feed the CDR's tech and ringSec. The
-	// contract does not declare them on a call, so they stay off the wire.
+	// SIPStatus, EndedBy and RingStartedAt feed the CDR's tech and ringSec.
+	// The contract does not declare them on a call, so they stay off the wire.
 	SIPStatus     int        `json:"-"`
+	EndedBy       EndedBy    `json:"-"`
 	RingStartedAt *time.Time `json:"-"`
 }
 
@@ -920,6 +924,7 @@ func (c *Call) Snapshot() Snapshot {
 			Bridges:         slices.Clone(p.Bridges),
 			BilledSec:       p.BilledSec,
 			SIPStatus:       p.SIPStatus,
+			EndedBy:         p.EndedBy,
 		}
 		if !p.RingStartedAt.IsZero() {
 			rang := p.RingStartedAt

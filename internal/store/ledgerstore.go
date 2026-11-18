@@ -59,6 +59,9 @@ const (
 	// CDRTechRingStartedAt is when the leg first sent a 180 or 183, present
 	// only when it did.
 	CDRTechRingStartedAt = "ringStartedAt"
+	// CDRTechEndedBy is which side ended the leg, PEER or PLATFORM
+	// (telephony.EndedBy), present only when the switch said.
+	CDRTechEndedBy = "endedBy"
 )
 
 // FormatRingStartedAt is the wire form of tech.ringStartedAt: UTC RFC 3339

@@ -261,6 +261,36 @@ const (
 	DirectionOutbound CallDirection = "OUTBOUND"
 )
 
+// EndedBy is which side ended a SIP leg: the peer the leg faces, or this
+// platform. How it was ended needs no value of its own, because it follows
+// from the side, the leg's direction and whether it was answered: an answered
+// leg ends with a BYE from either side; before the answer, the peer of a leg
+// this platform dialled refuses the INVITE with a final response (its status
+// is SwitchEvent.SIPStatus) and this platform cancels it, while the peer of a
+// leg that called in cancels its INVITE and this platform refuses it.
+type EndedBy string
+
+const (
+	// EndedByPeer: the far end of the leg ended it.
+	EndedByPeer EndedBy = "PEER"
+	// EndedByPlatform: this platform ended it, the switch acting on its own
+	// timer (a ring timeout) or on a command.
+	EndedByPlatform EndedBy = "PLATFORM"
+)
+
+// endedBy reads mod_sofia's sip_hangup_disposition: recv_* is what the peer
+// sent, send_* what the switch sent. Any other value, and its absence (a leg
+// that is not SIP), say nothing.
+func endedBy(disposition string) EndedBy {
+	switch disposition {
+	case "recv_bye", "recv_refuse", "recv_cancel":
+		return EndedByPeer
+	case "send_bye", "send_refuse", "send_cancel":
+		return EndedByPlatform
+	}
+	return ""
+}
+
 // SwitchEvent is a normalized FreeSWITCH event.
 //
 // Only fields relevant to a given Kind are populated; the raw event stays
@@ -323,6 +353,12 @@ type SwitchEvent struct {
 	// up on an unanswered call). Zero when the switch reported none: a leg
 	// this platform cancelled itself carries no status.
 	SIPStatus int
+	// EndedBy is which side ended this leg, read from the switch's
+	// sip_hangup_disposition at hangup; empty when it did not say. A far end
+	// that ends a ringing INVITE with a 487 of its own is reported with the
+	// cause ORIGINATOR_CANCEL, the same word as a cancel of ours: this is
+	// what tells the two apart.
+	EndedBy EndedBy
 	// RingStartedAt is when the far end first signalled ringing on this leg:
 	// the earlier of its first 180 or 183 without media (Progress-Time) and its
 	// first 183 with early media (Progress-Media-Time). Zero when it never did.
@@ -569,6 +605,8 @@ func normalizeChannel(ev *esl.Event, out SwitchEvent) (SwitchEvent, bool) {
 		if status, ok := ev.GetInt("variable_sip_term_status"); ok && status > 0 {
 			out.SIPStatus = int(status)
 		}
+		// Only here: on the earlier CHANNEL_HANGUP it can still be empty.
+		out.EndedBy = endedBy(ev.Variable("sip_hangup_disposition"))
 	case "DTMF":
 		out.Kind = KindDTMF
 		out.Digit = ev.Get("DTMF-Digit")

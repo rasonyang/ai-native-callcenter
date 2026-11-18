@@ -636,6 +636,9 @@ func assessAttempt(rv RegionView, cs Case, i int, a api.CampaignAttempt, key, ex
 			col.That(cdr.ToNumber == key, pre+"the CDR's dialled number is %s (%s)", key, cdr.ToNumber)
 			col.That(deref(cdr.DID) == rv.DID.Number, pre+"the CDR names the campaign's DID %s (%s)", rv.DID.Number, deref(cdr.DID))
 			col.That(cdr.AnsweredAt == nil && cdr.BotSec == 0, pre+"the CDR records no answer and no bot time (answered %v, botSec %d)", cdr.AnsweredAt != nil, cdr.BotSec)
+			if cs.Tech != nil {
+				assessTech(&col, pre, *cs.Tech, cdr.Tech)
+			}
 		}
 		col.That(dlg != nil, "%sthe simulator recorded the attempt's INVITE", pre)
 	}
@@ -646,6 +649,19 @@ func assessAttempt(rv RegionView, cs Case, i int, a api.CampaignAttempt, key, ex
 	ar.Checks, ar.Failures = nonNil(col.checks), nonNil(col.failures)
 	ar.Passed = len(ar.Failures) == 0
 	return ar
+}
+
+// assessTech checks what the CDR's tech says about the dialled leg: which side
+// ended it, and the far end's final status or its absence.
+func assessTech(col *Checks, pre string, want TechExpectation, tech *map[string]interface{}) {
+	by, _ := techString(tech, "endedBy")
+	col.That(by == want.EndedBy, pre+"the CDR's tech.endedBy is %s (%s)", want.EndedBy, techText(tech, "endedBy"))
+	status, hasStatus := techNumber(tech, "sipStatus")
+	if want.SIPStatus == 0 {
+		col.That(!hasStatus, pre+"the CDR's tech carries no sipStatus (%s)", techText(tech, "sipStatus"))
+		return
+	}
+	col.That(hasStatus && int(status) == want.SIPStatus, pre+"the CDR's tech.sipStatus is %d (%s)", want.SIPStatus, techText(tech, "sipStatus"))
 }
 
 func assessDialog(col *Checks, pre string, rv RegionView, cs Case, a api.CampaignAttempt, d *calleesim.DialogRecord, next *time.Time, ar *AttemptResult) {
@@ -667,6 +683,11 @@ func assessDialog(col *Checks, pre string, rv RegionView, cs Case, a api.Campaig
 	}
 	if cs.SIPStatus != 0 {
 		col.That(final == cs.SIPStatus, pre+"the callee answered %d (%d)", cs.SIPStatus, final)
+		if cs.SIPStatus == 487 {
+			// The far end's own 487 (C11), not the answer to a CANCEL of ours.
+			cancelled := d.End != nil && d.End.Method == calleesim.EndedWithCancel
+			col.That(!cancelled, "%sthe callee's 487 was its own: the caller sent no CANCEL", pre)
+		}
 		return
 	}
 	// A ringing callee: never answered, and the caller gave up with a CANCEL.

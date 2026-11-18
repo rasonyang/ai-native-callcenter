@@ -4,6 +4,8 @@ package store
 
 import (
 	"encoding/json"
+	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
@@ -81,6 +83,68 @@ func TestACarriers408AfterRingingReadsAsNoAnswer(t *testing.T) {
 				t.Errorf("outcome = %s, want %s", got, tt.want)
 			}
 		})
+	}
+}
+
+// A far end that ends a ringing INVITE with a 487 of its own is reported as
+// ORIGINATOR_CANCEL. After ring progress it is the customer not answering, the
+// same as the 408 above; the side that ended the leg is read but decides
+// nothing, so a row written before it was kept reads the same.
+func TestAFarEnds487AfterRingingReadsAsNoAnswer(t *testing.T) {
+	start := time.Date(2026, 6, 1, 14, 0, 0, 0, time.UTC)
+	ring := FormatRingStartedAt(start.Add(time.Second))
+	tests := []struct {
+		name string
+		tech map[string]any
+		want campaign.Outcome
+	}{
+		{"as just assembled", map[string]any{CDRTechSIPStatus: 487, CDRTechRingStartedAt: ring, CDRTechEndedBy: "PEER"}, campaign.OutcomeNoAnswer},
+		{"as read back from jsonb", map[string]any{CDRTechSIPStatus: float64(487), CDRTechRingStartedAt: ring, CDRTechEndedBy: "PEER"}, campaign.OutcomeNoAnswer},
+		{"a row with no endedBy", map[string]any{CDRTechSIPStatus: float64(487), CDRTechRingStartedAt: ring}, campaign.OutcomeNoAnswer},
+		{"487 and the leg never rang", map[string]any{CDRTechSIPStatus: 487, CDRTechEndedBy: "PEER"}, campaign.OutcomeTransient},
+		{"rang and no status", map[string]any{CDRTechRingStartedAt: ring, CDRTechEndedBy: "PLATFORM"}, campaign.OutcomeTransient},
+		{"no tech at all", nil, campaign.OutcomeTransient},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cdr := CDR{CallID: uuid.Must(uuid.NewV7()), Status: CDRStatusNoAnswer, HangupCause: "ORIGINATOR_CANCEL",
+				EndedAt: start.Add(13 * time.Second), Tech: tt.tech}
+			if got := endingFromCDR(cdr).Outcome; got != tt.want {
+				t.Errorf("outcome = %s, want %s", got, tt.want)
+			}
+		})
+	}
+}
+
+// The warning of a cause the outcome table does not know names the call and
+// what the row's tech says: the far end's status, the ring and who ended it.
+//
+// Not parallel: it reads the default logger.
+func TestAnUnknownCausesWarningCarriesTheRowsFacts(t *testing.T) {
+	var buf syncBuffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&buf, nil)))
+	defer slog.SetDefault(prev)
+
+	cdr := CDR{CallID: uuid.Must(uuid.NewV7()), Status: CDRStatusNoAnswer, HangupCause: "ORIGINATOR_CANCEL",
+		Tech: map[string]any{CDRTechSIPStatus: float64(487), CDRTechEndedBy: "PEER"}}
+	if got := endingFromCDR(cdr).Outcome; got != campaign.OutcomeTransient {
+		t.Fatalf("outcome = %s, want TRANSIENT", got)
+	}
+	var found map[string]any
+	for _, line := range strings.Split(buf.String(), "\n") {
+		var rec map[string]any
+		if json.Unmarshal([]byte(line), &rec) == nil && rec["callId"] == cdr.CallID.String() {
+			found = rec
+		}
+	}
+	if found == nil {
+		t.Fatalf("no warning carries callId %s:\n%s", cdr.CallID, buf.String())
+	}
+	for k, v := range map[string]any{"hangupCause": "ORIGINATOR_CANCEL", "sipStatus": float64(487), "hasRingProgress": false, "endedBy": "PEER"} {
+		if found[k] != v {
+			t.Errorf("%s = %v, want %v", k, found[k], v)
+		}
 	}
 }
 

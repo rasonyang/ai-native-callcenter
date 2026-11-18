@@ -6,6 +6,8 @@ import (
 	"log/slog"
 	"slices"
 
+	"github.com/google/uuid"
+
 	"github.com/rasonyang/ai-native-callcenter/internal/obs"
 )
 
@@ -41,6 +43,14 @@ const (
 	CauseBotStartFailed = "BOT_START_FAILED"
 )
 
+// CauseOriginatorCancel is the switch's cause for a dialled leg whose INVITE
+// the far end ended with a final 487 Request Terminated of its own. The
+// switch uses the word for other endings too, so the cause alone does not say
+// whose ending it was. A leg this platform cancelled at its ring timeout is
+// NO_ANSWER and leaves no SIP status, so with a 487 the cause is the far
+// end's. Classify reads it with the status and the ring progress.
+const CauseOriginatorCancel = "ORIGINATOR_CANCEL"
+
 // BotReasonLegFailed is the CDR's userData.botReason of a call whose bot leg
 // never carried a conversation: refused, unreachable, or failed before media
 // (telephony.BotLegFailed). The switch's cause stays whatever it was.
@@ -50,6 +60,8 @@ const BotReasonLegFailed = "BOT_LEG_FAILED"
 // CDR (or of a job result for a call that never had one), reduced to what the
 // outcome depends on.
 type CallEnd struct {
+	// CallID is the call the facts are about, for the log.
+	CallID uuid.UUID
 	// HangupCause is the CDR's hangupCause, or the cause of a failed
 	// originate job.
 	HangupCause string
@@ -74,11 +86,22 @@ type CallEnd struct {
 	// HasRingProgress: the dialled leg sent a 180 or a 183 before it ended
 	// (tech.ringStartedAt).
 	HasRingProgress bool
+	// EndedBy is which side ended the dialled leg (tech.endedBy, PEER or
+	// PLATFORM); empty when the switch did not say. It is reported, never
+	// decided on: the cause and the status already tell the cases apart, on
+	// records written before the switch's word was kept too.
+	EndedBy string
 }
 
 // SIPStatusRequestTimeout is the SIP status a carrier sends when it gives up
 // on an unanswered call itself.
 const SIPStatusRequestTimeout = 408
+
+// SIPStatusRequestTerminated is the SIP status of an INVITE that ended before
+// an answer. Sent by the far end of its own accord, after ringing, it is the
+// far end ending an unanswered call; what made it do so (its own ring timer,
+// a callee who declined) cannot be told from this side.
+const SIPStatusRequestTerminated = 487
 
 // causeOutcomes is the cause to outcome table of design 10 section 7.2, for a
 // call the customer did not answer. It is data: one row per cause, one test
@@ -151,6 +174,10 @@ func CauseTable() map[string]Outcome {
 //     far end sent a SIP 408 after the leg rang (a carrier ending the call
 //     itself), and TRANSIENT otherwise: no ring progress, or no 408 (our own
 //     recovery's reap).
+//   - ORIGINATOR_CANCEL on a call nobody answered is NO_ANSWER when the far
+//     end ended the INVITE with a SIP 487 after the leg rang. Otherwise it is
+//     not a row: without ring progress or without the 487 it is the unknown
+//     cause below.
 //   - Otherwise the table decides, and a cause it lacks is TRANSIENT with a
 //     warning and a metric, bounded by maxSystemRetries.
 func Classify(e CallEnd) Outcome {
@@ -184,6 +211,16 @@ func Classify(e CallEnd) Outcome {
 		e.HasRingProgress && !e.IsPlacementFailure {
 		return OutcomeNoAnswer
 	}
+	// A far end that ends a ringing INVITE with a 487 of its own (no CANCEL
+	// is sent by either side) is reported as ORIGINATOR_CANCEL. When the far
+	// end's ring timer is shorter than ours, our own timeout (NO_ANSWER, no
+	// status) never fires. After ringing it is the customer not answering,
+	// exactly as the 408 above. Without ring progress nothing shows the phone
+	// was reached.
+	if e.HangupCause == CauseOriginatorCancel && e.SIPStatus == SIPStatusRequestTerminated &&
+		e.HasRingProgress && !e.IsPlacementFailure {
+		return OutcomeNoAnswer
+	}
 	mapped, isMapped := causeOutcomes[e.HangupCause]
 	if e.IsPlacementFailure {
 		if isMapped && customerSide[mapped] {
@@ -195,7 +232,8 @@ func Classify(e CallEnd) Outcome {
 		return mapped
 	}
 	slog.Warn("campaign attempt ended with a hangup cause the outcome table does not know; treating it as TRANSIENT",
-		"hangupCause", e.HangupCause)
+		"callId", e.CallID, "hangupCause", e.HangupCause, "sipStatus", e.SIPStatus,
+		"hasRingProgress", e.HasRingProgress, "endedBy", e.EndedBy)
 	obs.RecordCampaignUnmappedCause(e.HangupCause)
 	return OutcomeTransient
 }

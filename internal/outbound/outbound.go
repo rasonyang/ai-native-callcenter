@@ -253,9 +253,15 @@ func (s *Service) ringTimeout(requested time.Duration) (time.Duration, error) {
 	return d, nil
 }
 
-// ringTimeoutVar renders originate_timeout in whole seconds, rounded up.
+// ringTimeoutSec is the ring timeout in whole seconds, rounded up: the
+// originate_timeout the leg is sent with, and what the placement logs.
+func ringTimeoutSec(d time.Duration) int {
+	return int((d + time.Second - 1) / time.Second)
+}
+
+// ringTimeoutVar renders originate_timeout.
 func ringTimeoutVar(d time.Duration) string {
-	return strconv.Itoa(int((d + time.Second - 1) / time.Second))
+	return strconv.Itoa(ringTimeoutSec(d))
 }
 
 // continuation is what an originated leg does once somebody has answered it.
@@ -726,7 +732,7 @@ func (s *Service) Dial(ctx context.Context, req AgentDialRequest) (uuid.UUID, er
 		s.holdUnconfirmed(job, s.transferOnAnswer(callID, agentLeg.String(), destination))
 		s.log.Warn("click-to-dial unconfirmed: the switch did not confirm the originate; tracking it",
 			"callId", callID, "channelId", agentLeg, "agentExtension", agentExtension,
-			"destination", destination, "error", err)
+			"destination", destination, "ringTimeoutSec", ringTimeoutSec(ring), "error", err)
 		return callID, unconfirmedError(err)
 	}
 	if err != nil {
@@ -748,7 +754,7 @@ func (s *Service) Dial(ctx context.Context, req AgentDialRequest) (uuid.UUID, er
 	s.attachJob(job, jobID)
 
 	s.log.Info("click-to-dial placed", "callId", callID,
-		"agentExtension", agentExtension, "destination", destination)
+		"agentExtension", agentExtension, "destination", destination, "ringTimeoutSec", ringTimeoutSec(ring))
 	return callID, nil
 }
 
@@ -1027,7 +1033,8 @@ func (s *Service) PlaceAI(ctx context.Context, req AIDialRequest) (Placement, er
 		s.holdUnconfirmed(job, s.bridgeToBot(callID, customerLeg.String(), did.Number, language, req.To, did.IsRecordingEnabled,
 			campaignRef{campaignID: req.CampaignID, attemptID: req.AttemptID}))
 		s.log.Warn("ai outbound unconfirmed: the switch did not confirm the originate; tracking it",
-			"callId", callID, "channelId", customerLeg, "to", req.To, "did", did.Number, "error", err)
+			"callId", callID, "channelId", customerLeg, "to", req.To, "did", did.Number,
+			"ringTimeoutSec", ringTimeoutSec(ring), "error", err)
 		return Placement{CallID: callID}, unconfirmedError(err)
 	}
 	if err != nil {
@@ -1048,7 +1055,7 @@ func (s *Service) PlaceAI(ctx context.Context, req AIDialRequest) (Placement, er
 	s.attachJob(job, jobID) // after arming, for the same reason as click-to-dial
 
 	s.log.Info("ai outbound placed", "callId", callID,
-		"to", req.To, "did", did.Number, "language", language)
+		"to", req.To, "did", did.Number, "language", language, "ringTimeoutSec", ringTimeoutSec(ring))
 	return Placement{CallID: callID, JobID: jobID}, nil
 }
 

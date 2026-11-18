@@ -167,6 +167,10 @@ func TestExpectedOutcome(t *testing.T) {
 		}
 		return d
 	}
+	cancelled := func(d *calleesim.DialogRecord) *calleesim.DialogRecord {
+		d.End = &calleesim.EndRecord{Method: calleesim.EndedWithCancel, By: calleesim.EndedByCaller}
+		return d
+	}
 	for _, tc := range []struct {
 		name  string
 		cause string
@@ -179,6 +183,12 @@ func TestExpectedOutcome(t *testing.T) {
 		{"408 with no provisional", causeRingTimer, dlg(408), "TRANSIENT", true},
 		{"a timer expiry that is not a 408", causeRingTimer, dlg(504, 180), "TRANSIENT", true},
 		{"no dialog to judge by", causeRingTimer, nil, "", false},
+		{"the far end's own 487 after 180", causeFarEndTerminated, dlg(487, 180), "NO_ANSWER", true},
+		{"the far end's own 487 after 183", causeFarEndTerminated, dlg(487, 183), "NO_ANSWER", true},
+		{"the far end's own 487 with no provisional", causeFarEndTerminated, dlg(487), "TRANSIENT", true},
+		{"a 487 that answered our CANCEL", causeFarEndTerminated, cancelled(dlg(487, 180)), "TRANSIENT", true},
+		{"an ORIGINATOR_CANCEL that is not a 487", causeFarEndTerminated, dlg(480, 180), "TRANSIENT", true},
+		{"no dialog to judge the 487 by", causeFarEndTerminated, nil, "", false},
 		{"busy", "USER_BUSY", dlg(486, 180), "BUSY", true},
 		{"a cause the design does not list", "BEARER_CAPABILITY_NOT_AUTHORIZED", dlg(488), "", false},
 	} {

@@ -1547,7 +1547,7 @@ type CDR struct {
 	// TalkSec Seconds an agent had two-way media with the caller, measured from the bridges on the agent legs and unioned across them, so a call passed from one agent to another counts both stretches once. A leg that answered without a bridge — an auto-answer phone in front of nobody, a codec mismatch — contributes nothing. Hold counts as talk.
 	TalkSec int `json:"talkSec"`
 
-	// Tech Technical residue (switch causes and the like); never business data. On a call placed to an outside number, the carrier-facing leg adds sipStatus (a number: the SIP status the far end ended the call with, such as 408 for a carrier that ends an unanswered call itself, present only when the switch reported one) and ringStartedAt (an RFC 3339 UTC timestamp with fractional seconds: when that leg first sent a 180 or 183, present only when it did). The keys are open and may grow.
+	// Tech Technical residue (switch causes and the like); never business data. On a call placed to an outside number, the carrier-facing leg adds sipStatus (a number: the SIP status the far end ended the call with, such as 408 or 487 for a carrier that ends an unanswered call itself, present only when the switch reported one), ringStartedAt (an RFC 3339 UTC timestamp with fractional seconds: when that leg first sent a 180 or 183, present only when it did) and endedBy (which side ended that leg: PEER for its far end, as when the carrier ends a ringing call itself, or PLATFORM for this platform, as when its ring timeout cancels the call; present only when the switch said). The keys are open and may grow.
 	Tech     *map[string]interface{} `json:"tech,omitempty"`
 	ToNumber string                  `json:"toNumber"`
 
@@ -1709,7 +1709,7 @@ type Campaign struct {
 	// RetryPolicy What happens to a contact after an attempt ends without settling it. Two budgets are counted separately: maxAttempts is how many times the customer's phone may be rung; maxSystemRetries is how many times our own or the network's failures are retried, and those never use up maxAttempts.
 	RetryPolicy CampaignRetryPolicy `json:"retryPolicy"`
 
-	// RingTimeoutSec How long each attempt rings before giving up. Always below the originator's 60-second answer window.
+	// RingTimeoutSec How long each attempt rings before giving up. Every call of the campaign is placed with this value, whatever AICC_OUTBOUND_RING_TIMEOUT says: that setting is only the default of a call placed without a ring timeout of its own. Always below the originator's 60-second answer window.
 	RingTimeoutSec int `json:"ringTimeoutSec"`
 
 	// StartedAt Absent while DRAFT.
@@ -2094,7 +2094,7 @@ type CampaignWrite struct {
 	// RetryPolicy Omitted: the default policy, which GET /campaigns/settings states.
 	RetryPolicy *CampaignRetryPolicyWrite `json:"retryPolicy,omitempty"`
 
-	// RingTimeoutSec Defaults to 30 when omitted. At least 5 and strictly below the 60-second answer window, else CAMPAIGN_RING_TIMEOUT_TOO_LONG. GET /campaigns/settings states the limits.
+	// RingTimeoutSec Defaults to 30 when omitted. At least 5 and strictly below the 60-second answer window, else CAMPAIGN_RING_TIMEOUT_TOO_LONG. GET /campaigns/settings states the limits. Every call of the campaign rings for this value; AICC_OUTBOUND_RING_TIMEOUT does not apply to it.
 	RingTimeoutSec *int `json:"ringTimeoutSec,omitempty"`
 
 	// TimeZone IANA name, for example Asia/Shanghai or America/New_York.
