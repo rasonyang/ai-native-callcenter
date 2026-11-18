@@ -5,7 +5,29 @@ under one tag, `rasonyang/ai-native-callcenter` and `rasonyang/freeswitch-aicc`;
 run them together. From v0.2.0 on, the GitHub release of the same tag also
 carries the one-line installer's files.
 
-## Unreleased
+## v0.8.8 - 2026-11-18
+
+### Upgrade notes
+
+- No migration, and no application setting added, removed or changed in
+  default. The comment on `AICC_OUTBOUND_RING_TIMEOUT` in `.env.example` now
+  says that it is only the default of a call placed without a ring timeout of
+  its own; a campaign's calls ring for the campaign's `ringTimeoutSec`, as they
+  already did (#613).
+- API contract: wording only. The description of the CDR `tech` object names
+  its new `endedBy` key and the 487 status (`tech` is an open object, so the
+  schema gains no property), and the two descriptions of a campaign's
+  `ringTimeoutSec` say that every call of the campaign rings for that value
+  (#613). `make api-breaking BASE=v0.8.7` reports no breaking change and no
+  warning.
+- A campaign on a carrier that ends a ringing, unanswered call with a 487 of
+  its own now records those attempts as `NO_ANSWER`, where they were
+  `TRANSIENT`: they count against `maxAttempts`, and a run of them no longer
+  pauses the campaign (see Fixed, #613). Nothing needs to be configured.
+- Upgrade both images together, as always: they are published under one tag
+  and the deploy stack names both. The switch image has no change in this
+  release (unchanged since v0.8.2); its tag moves so that the pair still
+  matches.
 
 ### Added
 
@@ -13,8 +35,9 @@ carries the one-line installer's files.
   when the far end ended the carrier-facing leg, `PLATFORM` when this platform
   did (its ring timeout's CANCEL, for example), absent when the switch did not
   say. The log line of an AI outbound or click-to-dial placement carries
-  `ringTimeoutSec`, the ring timeout the call was placed with. A campaign's
-  calls always ring for the campaign's `ringTimeoutSec`;
+  `ringTimeoutSec`, the ring timeout the call was placed with. `.env.example`,
+  `deploy/carrier.md` and the contract now say what was already so: a
+  campaign's calls always ring for the campaign's `ringTimeoutSec`, and
   `AICC_OUTBOUND_RING_TIMEOUT` is only the default of a call placed without a
   ring timeout of its own (#613).
 
@@ -41,8 +64,8 @@ carries the one-line installer's files.
   phase. Up to four phrases count, with or without punctuation between them; a
   question mark or any other word makes it words. A caller who meant yes this
   way is asked again. On `openai`, where speech over the bot is held, such a
-  run is still answered as words (#607). An acknowledgement followed by a cut-off word
-  (「嗯，你。」) is still words (#600).
+  run is still answered as words (#607). An acknowledgement followed by a
+  cut-off word (「嗯，你。」) is still words (#600).
 - On the engines that cut the bot by themselves (qwen, grok, doubao, gateway),
   speech that cuts the opening line can no longer move the call when the
   engine's transcriber writes nothing for it, or nothing in time. Such words
