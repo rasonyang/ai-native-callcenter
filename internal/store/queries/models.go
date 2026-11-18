@@ -165,6 +165,7 @@ type CampaignContact struct {
 	LastCallID      *uuid.UUID         `json:"lastCallId"`
 	IsFrequencyHeld bool               `json:"isFrequencyHeld"`
 	IsDailyCapHeld  bool               `json:"isDailyCapHeld"`
+	RetryAt         pgtype.Timestamptz `json:"retryAt"`
 }
 
 type Cdr struct {

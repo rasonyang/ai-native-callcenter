@@ -48,7 +48,13 @@ func TestAPauseThatDoesNotLandStopsThePassAndIsRetriedByTheNext(t *testing.T) {
 	})
 	c := r.newCampaign("Pause fails once", nil)
 	r.importContacts(c, numbers("46", 20))
-	r.start(c)
+	// Started without r.start's extra wake: the start's own pass, which judges
+	// the armed contacts against the window (rearmWaiting) and dials them, is
+	// the first pass, and nothing asks for a second one.
+	if _, err := r.dialer().Start(context.Background(), c.ID); err != nil {
+		t.Fatal(err)
+	}
+	r.settle()
 
 	// The first pass: one refusal, one failed pause, and it stops. Left to loop
 	// this never returned.

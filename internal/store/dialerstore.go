@@ -128,11 +128,54 @@ func (d *DialerStore) Defer(ctx context.Context, ids []uuid.UUID, at []time.Time
 	return err
 }
 
-// RearmUntried makes the campaign's never-tried contacts due at now, so they
-// are judged against a calling window that has just changed.
-func (d *DialerStore) RearmUntried(ctx context.Context, campaignID uuid.UUID, now time.Time) error {
-	_, err := d.q.RearmUntriedContacts(ctx, queries.RearmUntriedContactsParams{CampaignID: campaignID, Now: ts(now)})
-	return err
+// Waiting pages the campaign's ACTIVE contacts that are due later than now and
+// carry no hold mark, in id order after afterID (uuid.Nil for the first page),
+// at most limit of them: what a re-arm judges again after a calling window or
+// the outer hours changed.
+func (d *DialerStore) Waiting(ctx context.Context, campaignID uuid.UUID, now time.Time,
+	afterID uuid.UUID, limit int) ([]campaign.Waiting, error) {
+	rows, err := d.q.ListWaitingContacts(ctx, queries.ListWaitingContactsParams{
+		CampaignID: campaignID, Now: ts(now), AfterID: afterID, RowLimit: int32(limit),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("waiting contacts of %s: %w", campaignID, err)
+	}
+	out := make([]campaign.Waiting, len(rows))
+	for i, r := range rows {
+		out[i] = campaign.Waiting{
+			ContactID: r.ID, TimeZone: deref(r.TimeZone), NextAttemptAt: r.NextAttemptAt.Time, RetryAt: timeOrNil(r.RetryAt),
+		}
+	}
+	return out, nil
+}
+
+// Rearm moves each judged contact to its new due time (at is parallel to
+// judged) and reports how many it moved. A contact whose due time, retry time
+// or marks are no longer what was judged (claimed for a dial, settled again,
+// held, finished) is left alone, and no contact's retry time or marks are
+// written.
+func (d *DialerStore) Rearm(ctx context.Context, judged []campaign.Waiting, at []time.Time) (int, error) {
+	if len(judged) != len(at) {
+		return 0, fmt.Errorf("rearm: %d contacts and %d times", len(judged), len(at))
+	}
+	if len(judged) == 0 {
+		return 0, nil
+	}
+	p := queries.RearmContactsParams{
+		Ids: make([]uuid.UUID, len(judged)), JudgedAts: make([]pgtype.Timestamptz, len(judged)),
+		RetryAts: make([]pgtype.Timestamptz, len(judged)), Ats: make([]pgtype.Timestamptz, len(judged)),
+	}
+	for i, w := range judged {
+		p.Ids[i], p.JudgedAts[i], p.Ats[i] = w.ContactID, ts(w.NextAttemptAt), ts(at[i])
+		if w.RetryAt != nil {
+			p.RetryAts[i] = ts(*w.RetryAt)
+		}
+	}
+	n, err := d.q.RearmContacts(ctx, p)
+	if err != nil {
+		return 0, fmt.Errorf("rearm contacts: %w", err)
+	}
+	return int(n), nil
 }
 
 // Pending says where the campaign's contact list stands at now.

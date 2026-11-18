@@ -70,14 +70,15 @@ func (d *Dialer) pass(ctx context.Context) {
 			}
 		}
 	}
-	for _, c := range running {
-		if d.rearm[c.ID] {
-			delete(d.rearm, c.ID)
-			if err := d.st.RearmUntried(ctx, c.ID, now); err != nil {
-				d.log.Error("dialer: cannot re-arm contacts", "campaignId", c.ID, "error", err)
-			}
+	if d.rearmAll {
+		// The dialer has just started: the outer hours may have changed with the
+		// restart, so every running campaign is judged again.
+		d.rearmAll = false
+		for _, c := range running {
+			d.rearm[c.ID] = uuid.Nil
 		}
 	}
+	d.rearmWaiting(ctx, running, now)
 
 	if d.ln != nil {
 		if limits, err := d.ln.DIDLimits(ctx); err != nil {
@@ -163,6 +164,114 @@ func (d *Dialer) pass(ctx context.Context) {
 // stoppedRetry is how long a campaign whose pause did not land waits before the
 // next pass tries again.
 const stoppedRetry = 5 * time.Second
+
+// rearmWaiting judges again the waiting contacts of the campaigns in d.rearm:
+// one whose calling window a PATCH changed, one that has just started or
+// resumed, and every running one when the dialer starts, so a window changed
+// while paused and a changed AICC_OUTBOUND_HOURS take effect too (design 10
+// section 8.1).
+//
+// A waiting contact is ACTIVE, due later than now, and carries no hold mark: a
+// contact that the frequency window or the daily dial cap moved keeps its time
+// and its mark, and admission judges the hold again when it is due. A contact
+// being dialled has no due time and is not touched. The new due time is the
+// later of now and the contact's retry time (the time its retry policy gave
+// it; none for a contact never tried), moved to the next opening of its
+// schedule in its own zone exactly as the settle moves a retry: never earlier
+// than its retry interval allows, never inside a closed window. It depends on
+// nothing but the contact, the schedule and now, so judging a contact again
+// changes nothing, and only a due time that differs is written. A window
+// narrowed under a contact moves it later, to the opening admission would
+// defer it to when it came due.
+//
+// The pace: one read takes cfg.rearmPage waiting contacts, and one pass makes
+// at most cfg.maxRearmPages reads across every campaign. The rest are judged
+// by the passes that follow at once, so a list of tens of thousands is never
+// held in memory and does not stall admission for long.
+//
+// A campaign that is not RUNNING is dropped from d.rearm: a PAUSED one is
+// judged when it resumes.
+func (d *Dialer) rearmWaiting(ctx context.Context, running []campaign.Campaign, now time.Time) {
+	if len(d.rearm) == 0 {
+		return
+	}
+	byID := make(map[uuid.UUID]campaign.Campaign, len(running))
+	for _, c := range running {
+		byID[c.ID] = c
+	}
+	pages := 0
+	for id, after := range d.rearm {
+		c, ok := byID[id]
+		if !ok {
+			delete(d.rearm, id)
+			continue
+		}
+		for {
+			if pages >= d.cfg.maxRearmPages {
+				d.isDirty = true // the rest in the pass that follows at once
+				return
+			}
+			pages++
+			last, err := d.judgePage(ctx, c, after, now)
+			if err != nil {
+				// The cursor stays: a later pass carries on from it.
+				d.log.Error("dialer: cannot judge the campaign's waiting contacts again", "campaignId", c.ID, "error", err)
+				break
+			}
+			if last == uuid.Nil {
+				delete(d.rearm, id)
+				break
+			}
+			after = last
+			d.rearm[id] = after
+		}
+	}
+}
+
+// judgePage judges the page of the campaign's waiting contacts that follows
+// the id after, and writes the due times that changed. It returns the last id
+// of a full page, uuid.Nil after the last page.
+func (d *Dialer) judgePage(ctx context.Context, c campaign.Campaign, after uuid.UUID, now time.Time) (uuid.UUID, error) {
+	waiting, err := d.st.Waiting(ctx, c.ID, now, after, d.cfg.rearmPage)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	var judged []campaign.Waiting
+	var ats []time.Time
+	for _, w := range waiting {
+		if at, ok := d.dueAgain(c, w, now); ok && !at.Equal(w.NextAttemptAt) {
+			judged, ats = append(judged, w), append(ats, at)
+		}
+	}
+	moved, err := d.st.Rearm(ctx, judged, ats)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	if moved > 0 {
+		d.log.Info("dialer: waiting contacts judged again against the calling schedule",
+			"campaignId", c.ID, "moved", moved)
+	}
+	if len(waiting) < d.cfg.rearmPage {
+		return uuid.Nil, nil
+	}
+	return waiting[len(waiting)-1].ContactID, nil
+}
+
+// dueAgain is when a waiting contact is due under its schedule as it stands:
+// the later of now and its retry time, moved to the schedule's next opening.
+// False when the schedule has no opening within reach: the contact keeps its
+// time. A contact with no schedule has no window applied, as at admission.
+func (d *Dialer) dueAgain(c campaign.Campaign, w campaign.Waiting, now time.Time) (time.Time, bool) {
+	at := now
+	if w.RetryAt != nil && w.RetryAt.After(now) {
+		at = *w.RetryAt
+	}
+	sched, ok := d.scheduleFor(c, campaign.Contact{TimeZone: w.TimeZone})
+	if !ok {
+		return at, true
+	}
+	return sched.NextOpen(at)
+}
 
 // admitOne tries to place one call for the campaign and reports whether it
 // made progress (placed one, or moved contacts out of the way).

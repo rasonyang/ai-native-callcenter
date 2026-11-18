@@ -202,6 +202,7 @@ final.
 | `attempts` | attempts that reached the customer; counted against `maxAttempts` (§7) |
 | `system_failures` | attempts that never reached the customer; counted against `maxSystemRetries` (§7) |
 | `next_attempt_at` | when it may be dialled next; NULL unless `ACTIVE` |
+| `retry_at` | the time the retry policy gave it: the last call's end plus the outcome's interval, before the calling window moved it into `next_attempt_at` (§7.3), which is never earlier. Written by the settle, NULL'd by the claim and by a void, left alone by every deferral (a calling window's, the frequency hold's, the daily cap's). NULL means no policy time (never tried, voided, in flight): due as soon as a window allows. NULL unless `ACTIVE`. The re-arm after a window change starts from it (§8.1). Migration 00050 gave each waiting contact with a history its due time at the upgrade, never earlier than its policy's. Not an API field |
 | `is_frequency_held` | true while `next_attempt_at` is where the cross-campaign frequency hold put it (§5.2); set only by that deferral and cleared by every other write of `next_attempt_at`. Read by the re-arm when the number is put on the list of test numbers (§3.4a) |
 | `is_daily_cap_held` | the same for the daily dial cap (§5.2): true while `next_attempt_at` is where the cap put it. At most one of the two marks is set (a CHECK); each is cleared by every write of `next_attempt_at` that is not its own deferral, and the re-arm lifts either |
 | `last_outcome` | from the latest attempt |
@@ -964,6 +965,25 @@ outside the window, and move to Tuesday 09:00.
 - A window is wall-clock time and may cross midnight (a range starting at 22:00 and ending at 02:00
   belongs to the day it starts on), if the outer hours allow it.
 - When a window closes, attempts in flight finish; no new one starts.
+- **A changed window is applied to the contacts already waiting (#616).** A contact's
+  `next_attempt_at` may be where a window put it (the settle moving a retry into the window, or
+  admission deferring a due contact to the next opening), so a window widened after it closed must
+  judge them again, or a campaign whose window was extended at 17:35 waits for the next morning.
+  The dialer re-arms a campaign when a PATCH changes its window while it is `RUNNING` (a window
+  sent again in another order normalises to the same one and is no change), when it starts or
+  resumes (so a window changed while `PAUSED` takes effect on resume), and for every `RUNNING`
+  campaign when the dialer starts (so a changed `AICC_OUTBOUND_HOURS` takes effect after the
+  restart). The re-arm takes each `ACTIVE` contact due later than now that carries neither hold
+  mark, and recomputes its due time in Go, in the contact's own zone, with the schedule admission
+  uses: the later of now and its `retry_at`, moved to the schedule's next opening, as the settle
+  moves a retry. So no retry interval is shortened, nobody is due inside a closed window, and
+  only a time that differs is written (a guarded batch: a contact claimed, settled again or held
+  meanwhile is left alone). A narrowed window may move a contact later, to the opening admission
+  would defer it to anyway. A contact the frequency window or the daily cap holds keeps its time
+  and mark; admission judges the hold again when it is due. A contact being dialled has no due
+  time and is not touched. The list is read 500 contacts at a time, at most 20 reads per pass;
+  the passes that follow at once finish it. `activity` and `nextDialAt` are computed after the
+  re-arm in the same pass, so they follow the change without a restart.
 - Daylight saving: boundaries are computed for each day with `time.LoadLocation`, never by adding
   24 h.
 
@@ -1465,6 +1485,14 @@ Added by this design:
   so after delisting; the outcome summary with `isTestNumber` equals the filtered listings.
 - **Outer hours:** a `calling_window` outside them is refused on create and on change; narrowing
   the outer hours still binds an existing campaign at admission.
+- **Window widened after it closed (#616):** window MON–FRI 09:00–17:30 in Shanghai becomes
+  09:00–18:00 at 17:35: a contact never tried and a 15-minute `NO_ANSWER` retry from 17:10 are
+  due at once; a 30-minute retry from 17:20 is due 17:50; a 60-minute `BUSY` from 17:25 keeps
+  tomorrow 09:00; a frequency hold and a daily-cap hold keep their times and marks; a contact in
+  Los Angeles keeps its own zone's opening; `EXHAUSTED` and `DNC` contacts are not written. The
+  same change made while `PAUSED` takes effect on resume. Adding a day, adding a range and
+  widening a window across midnight bring waiting contacts forward to the new opening; the same
+  window in another order re-arms nothing; wider outer hours take effect when the dialer starts.
 - **PATCH while running:** a locked field is refused; a new `maxConcurrent` affects only later
   admissions.
 - **Ring timeout** at or above `AnswerWindow` is refused.

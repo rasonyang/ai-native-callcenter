@@ -91,8 +91,11 @@ func (s *simStore) HeldByFrequency(context.Context, uuid.UUID, time.Time, time.D
 func (s *simStore) Defer(context.Context, []uuid.UUID, []time.Time, campaign.HoldKind) error {
 	return nil
 }
-func (s *simStore) RearmUntried(context.Context, uuid.UUID, time.Time) error {
-	return nil
+func (s *simStore) Waiting(context.Context, uuid.UUID, time.Time, uuid.UUID, int) ([]campaign.Waiting, error) {
+	return nil, nil
+}
+func (s *simStore) Rearm(context.Context, []campaign.Waiting, []time.Time) (int, error) {
+	return 0, nil
 }
 func (s *simStore) Pending(context.Context, uuid.UUID, time.Time) (campaign.Pending, error) {
 	return campaign.Pending{ActiveTotal: 1, AllTotal: 1, DueNow: 1}, nil

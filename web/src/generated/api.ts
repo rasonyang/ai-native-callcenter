@@ -1478,7 +1478,7 @@ export interface paths {
         head?: never;
         /**
          * Change a campaign
-         * @description See CampaignPatch for which fields may change in which status. A field the status locks answers 409 CAMPAIGN_FIELD_LOCKED with params.fields; a changed callingWindow is held to the outer calling hours again, and a changed didId or ringTimeoutSec to the rules of create. The change applies to later admissions: a window narrowed on a RUNNING campaign stops new calls outside it at once, and calls already in flight finish. Needs campaigns:write.
+         * @description See CampaignPatch for which fields may change in which status. A field the status locks answers 409 CAMPAIGN_FIELD_LOCKED with params.fields; a changed callingWindow is held to the outer calling hours again, and a changed didId or ringTimeoutSec to the rules of create. The change applies to later admissions: a window narrowed on a RUNNING campaign stops new calls outside it at once, and calls already in flight finish. A changed window is also applied to the contacts already waiting, so a window widened after it closed dials them again at once: each pending contact is due at the first moment the new window allows and its retry interval has passed, never earlier, and a contact held by the cross-campaign frequency window or the daily dial cap stays held. nextDialAt and activity follow with the dialer's next pass, so they are read with a later GET; the response to this request may still carry the earlier ones. On a PAUSED campaign the change takes effect when it is resumed. Needs campaigns:write.
          */
         patch: operations["updateCampaign"];
         trace?: never;
@@ -1534,7 +1534,7 @@ export interface paths {
         put?: never;
         /**
          * Resume a campaign
-         * @description PAUSED to RUNNING, whatever paused it, and the pause reason is cleared. Any other status is 409 CAMPAIGN_INVALID_TRANSITION. Racing requests are decided by the database: of two simultaneous starts, or a start and a cancel, exactly one wins and the other is 409. Needs campaigns:write. A deployment that cannot place an outbound call at all (`AICC_OUTBOUND_ENDPOINT` empty) answers 409 OUTBOUND_NOT_CONFIGURED and the campaign stays PAUSED, rather than reporting RUNNING a campaign the dialer would pause again on its first attempt. `deploy/carrier.md` says how to set it.
+         * @description PAUSED to RUNNING, whatever paused it, and the pause reason is cleared. A calling window changed while the campaign was paused applies to its waiting contacts from the resume on, as a change on a RUNNING campaign does (updateCampaign). Any other status is 409 CAMPAIGN_INVALID_TRANSITION. Racing requests are decided by the database: of two simultaneous starts, or a start and a cancel, exactly one wins and the other is 409. Needs campaigns:write. A deployment that cannot place an outbound call at all (`AICC_OUTBOUND_ENDPOINT` empty) answers 409 OUTBOUND_NOT_CONFIGURED and the campaign stays PAUSED, rather than reporting RUNNING a campaign the dialer would pause again on its first attempt. `deploy/carrier.md` says how to set it.
          */
         post: operations["resumeCampaign"];
         delete?: never;

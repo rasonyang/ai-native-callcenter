@@ -67,7 +67,8 @@ LIMIT sqlc.arg('row_limit');
 -- '' sets neither; the other mark is always cleared, so a contact carries at most
 -- one and listing a number can tell a hold from the campaign's own retry time.
 -- Never earlier, and never a contact that was claimed for a dial in the
--- meantime.
+-- meantime. retry_at, the time the retry policy gave, is left as it is: a
+-- deferral says when the contact may be dialled, not what its policy asked.
 -- name: DeferContacts :execrows
 UPDATE campaign_contacts c
 SET next_attempt_at = v.at,
@@ -99,15 +100,38 @@ FROM (SELECT unnest(sqlc.arg('numbers')::text[]) AS number_e164,
              unnest(sqlc.arg('day_starts')::timestamptz[]) AS day_start) v
 WHERE NOT EXISTS (SELECT 1 FROM test_numbers t WHERE t.number_e164 = v.number_e164);
 
--- A calling window or the outer hours changed: contacts that have never been
--- tried were deferred to the old window's opening, so they are due again now
--- and are judged against the new one. A contact with a history keeps the retry
--- time its policy gave it.
--- name: RearmUntriedContacts :execrows
-UPDATE campaign_contacts
-SET next_attempt_at = sqlc.arg('now')::timestamptz, is_frequency_held = false, is_daily_cap_held = false, updated_at = now()
+-- A calling window or the outer hours may have changed: a page, by id, of the
+-- campaign's contacts that wait for a later time and that no hold moved (a
+-- contact carrying is_frequency_held or is_daily_cap_held keeps its time; the
+-- admission judges the hold again when it is due). The dialer judges each one
+-- again in Go, in the contact's own zone, from retry_at, the time its retry
+-- policy gave it (NULL: none). A contact being dialled has no due time and is
+-- not listed.
+-- name: ListWaitingContacts :many
+SELECT id, time_zone, next_attempt_at::timestamptz AS next_attempt_at, retry_at
+FROM campaign_contacts
 WHERE campaign_id = sqlc.arg('campaign_id') AND status = 'ACTIVE'
-  AND last_outcome IS NULL AND next_attempt_at > sqlc.arg('now')::timestamptz;
+  AND next_attempt_at > sqlc.arg('now')::timestamptz
+  AND NOT is_frequency_held AND NOT is_daily_cap_held
+  AND id > sqlc.arg('after_id')::uuid
+ORDER BY id
+LIMIT sqlc.arg('row_limit');
+
+-- Writes the due times the dialer judged for waiting contacts (ids, the due
+-- time and retry time each was judged from, and its new due time, as parallel
+-- arrays). A contact that moved in the meantime (claimed, settled again by a
+-- revised attempt, held, finished) is left alone: its row no longer matches
+-- what was judged. retry_at and the marks are not written.
+-- name: RearmContacts :execrows
+UPDATE campaign_contacts c
+SET next_attempt_at = v.at, updated_at = now()
+FROM (SELECT unnest(sqlc.arg('ids')::uuid[]) AS id,
+             unnest(sqlc.arg('judged_ats')::timestamptz[]) AS judged_at,
+             unnest(sqlc.arg('retry_ats')::timestamptz[]) AS retry_at,
+             unnest(sqlc.arg('ats')::timestamptz[]) AS at) AS v
+WHERE c.id = v.id AND c.status = 'ACTIVE'
+  AND c.next_attempt_at = v.judged_at AND c.retry_at IS NOT DISTINCT FROM v.retry_at
+  AND NOT c.is_frequency_held AND NOT c.is_daily_cap_held;
 
 -- Where a campaign stands: how many contacts are still ACTIVE (including those
 -- being dialled), how many are due, and when the next one will be.
@@ -137,7 +161,8 @@ WHERE c.id = sqlc.arg('contact_id')
 -- campaigns that the frequency window or the daily dial cap deferred
 -- (is_frequency_held and is_daily_cap_held, set only by those holds' own
 -- deferral) are due again. A contact waiting on its campaign's retry policy
--- carries no mark and keeps its time, as does one being dialled.
+-- carries no mark and keeps its time, as does one being dialled. retry_at is
+-- not written.
 -- name: RearmHeldContacts :execrows
 UPDATE campaign_contacts c
 SET next_attempt_at = sqlc.arg('now')::timestamptz, is_frequency_held = false, is_daily_cap_held = false, updated_at = now()
@@ -184,7 +209,7 @@ LIMIT sqlc.arg('row_limit');
 -- now so that, when the call ends, no retry follows.
 -- name: MarkDialingContactsDNC :execrows
 UPDATE campaign_contacts c
-SET status = 'DNC', next_attempt_at = NULL, is_frequency_held = false, is_daily_cap_held = false, updated_at = now()
+SET status = 'DNC', next_attempt_at = NULL, retry_at = NULL, is_frequency_held = false, is_daily_cap_held = false, updated_at = now()
 WHERE c.status = 'ACTIVE' AND c.next_attempt_at IS NULL
   AND EXISTS (SELECT 1 FROM dnc_numbers d WHERE d.number_e164 = c.number_e164)
   AND EXISTS (SELECT 1 FROM campaign_attempts a

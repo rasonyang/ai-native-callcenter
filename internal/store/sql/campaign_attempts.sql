@@ -5,10 +5,11 @@
 
 -- The write-ahead step, part one: take the contact out of the due pool. The row
 -- count says whether it was still dialable; the attempt insert that follows,
--- in the same transaction, says whether its number was free.
+-- in the same transaction, says whether its number was free. The retry time is
+-- spent: the attempt's settle writes the next one.
 -- name: ClaimContactForDial :one
 UPDATE campaign_contacts
-SET next_attempt_at = NULL, is_frequency_held = false, is_daily_cap_held = false, updated_at = now()
+SET next_attempt_at = NULL, retry_at = NULL, is_frequency_held = false, is_daily_cap_held = false, updated_at = now()
 WHERE id = $1 AND status = 'ACTIVE'
 RETURNING campaign_id, number_e164;
 
@@ -70,12 +71,15 @@ SET state = 'FINISHED', outcome = $2, hangup_cause = $3, talk_sec = $4,
 WHERE id = $1;
 
 -- The contact after its latest attempt settled: counters, fate and schedule.
+-- retry_at is the time the retry policy gave, before the calling window moved
+-- it into next_attempt_at; both are NULL unless the contact stays ACTIVE.
 -- A recorded lead is kept (copied only when this attempt recorded one); the
 -- last attempt and its call are always this one, so after a retry that
 -- recorded no lead they name a later call than the lead's.
 -- name: SettleCampaignContact :exec
 UPDATE campaign_contacts
-SET attempts = $2, system_failures = $3, status = $4, next_attempt_at = $5, is_frequency_held = false, is_daily_cap_held = false,
+SET attempts = $2, system_failures = $3, status = $4, next_attempt_at = $5,
+    retry_at = sqlc.narg('retry_at')::timestamptz, is_frequency_held = false, is_daily_cap_held = false,
     last_outcome = $6, last_attempt_id = sqlc.arg('last_attempt_id')::uuid,
     last_call_id = sqlc.arg('last_call_id')::uuid,
     lead_intent = coalesce(sqlc.narg('lead_intent')::text, lead_intent),
@@ -105,9 +109,11 @@ DELETE FROM campaign_attempts
 WHERE call_id = $1 AND state = 'DIALING'
 RETURNING campaign_contact_id;
 
+-- A voided attempt never happened: the contact is due again with no retry time
+-- of its own.
 -- name: MakeContactDue :execrows
 UPDATE campaign_contacts
-SET next_attempt_at = $2, is_frequency_held = false, is_daily_cap_held = false, updated_at = now()
+SET next_attempt_at = $2, retry_at = NULL, is_frequency_held = false, is_daily_cap_held = false, updated_at = now()
 WHERE id = $1 AND status = 'ACTIVE' AND next_attempt_at IS NULL;
 
 -- A campaign's finished attempts, newest first: what the breakers read.

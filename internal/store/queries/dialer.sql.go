@@ -152,7 +152,8 @@ type DeferContactsParams struct {
 // ” sets neither; the other mark is always cleared, so a contact carries at most
 // one and listing a number can tell a hold from the campaign's own retry time.
 // Never earlier, and never a contact that was claimed for a dial in the
-// meantime.
+// meantime. retry_at, the time the retry policy gave, is left as it is: a
+// deferral says when the contact may be dialled, not what its policy asked.
 func (q *Queries) DeferContacts(ctx context.Context, arg DeferContactsParams) (int64, error) {
 	result, err := q.db.Exec(ctx, deferContacts, arg.Hold, arg.Ids, arg.Ats)
 	if err != nil {
@@ -222,7 +223,7 @@ func (q *Queries) DialsTodayByNumber(ctx context.Context, arg DialsTodayByNumber
 }
 
 const dueCampaignContacts = `-- name: DueCampaignContacts :many
-SELECT c.id, c.campaign_id, c.number_e164, c.number_raw, c.time_zone, c.slots, c.status, c.attempts, c.system_failures, c.next_attempt_at, c.last_outcome, c.lead_intent, c.lead_notes, c.created_at, c.updated_at, c.last_attempt_id, c.last_call_id, c.is_frequency_held, c.is_daily_cap_held FROM campaign_contacts c
+SELECT c.id, c.campaign_id, c.number_e164, c.number_raw, c.time_zone, c.slots, c.status, c.attempts, c.system_failures, c.next_attempt_at, c.last_outcome, c.lead_intent, c.lead_notes, c.created_at, c.updated_at, c.last_attempt_id, c.last_call_id, c.is_frequency_held, c.is_daily_cap_held, c.retry_at FROM campaign_contacts c
 WHERE c.campaign_id = $1
   AND c.status = 'ACTIVE'
   AND c.next_attempt_at <= $2::timestamptz
@@ -288,6 +289,7 @@ func (q *Queries) DueCampaignContacts(ctx context.Context, arg DueCampaignContac
 			&i.LastCallID,
 			&i.IsFrequencyHeld,
 			&i.IsDailyCapHeld,
+			&i.RetryAt,
 		); err != nil {
 			return nil, err
 		}
@@ -330,7 +332,7 @@ func (q *Queries) DueDNCContacts(ctx context.Context, rowLimit int32) ([]uuid.UU
 }
 
 const earliestPendingContact = `-- name: EarliestPendingContact :one
-SELECT id, campaign_id, number_e164, number_raw, time_zone, slots, status, attempts, system_failures, next_attempt_at, last_outcome, lead_intent, lead_notes, created_at, updated_at, last_attempt_id, last_call_id, is_frequency_held, is_daily_cap_held FROM campaign_contacts
+SELECT id, campaign_id, number_e164, number_raw, time_zone, slots, status, attempts, system_failures, next_attempt_at, last_outcome, lead_intent, lead_notes, created_at, updated_at, last_attempt_id, last_call_id, is_frequency_held, is_daily_cap_held, retry_at FROM campaign_contacts
 WHERE campaign_id = $1 AND status = 'ACTIVE' AND next_attempt_at IS NOT NULL
 ORDER BY next_attempt_at, id
 LIMIT 1
@@ -359,6 +361,7 @@ func (q *Queries) EarliestPendingContact(ctx context.Context, campaignID uuid.UU
 		&i.LastCallID,
 		&i.IsFrequencyHeld,
 		&i.IsDailyCapHeld,
+		&i.RetryAt,
 	)
 	return i, err
 }
@@ -608,9 +611,71 @@ func (q *Queries) ListRunningCampaigns(ctx context.Context) ([]ListRunningCampai
 	return items, nil
 }
 
+const listWaitingContacts = `-- name: ListWaitingContacts :many
+SELECT id, time_zone, next_attempt_at::timestamptz AS next_attempt_at, retry_at
+FROM campaign_contacts
+WHERE campaign_id = $1 AND status = 'ACTIVE'
+  AND next_attempt_at > $2::timestamptz
+  AND NOT is_frequency_held AND NOT is_daily_cap_held
+  AND id > $3::uuid
+ORDER BY id
+LIMIT $4
+`
+
+type ListWaitingContactsParams struct {
+	CampaignID uuid.UUID          `json:"campaignId"`
+	Now        pgtype.Timestamptz `json:"now"`
+	AfterID    uuid.UUID          `json:"afterId"`
+	RowLimit   int32              `json:"rowLimit"`
+}
+
+type ListWaitingContactsRow struct {
+	ID            uuid.UUID          `json:"id"`
+	TimeZone      *string            `json:"timeZone"`
+	NextAttemptAt pgtype.Timestamptz `json:"nextAttemptAt"`
+	RetryAt       pgtype.Timestamptz `json:"retryAt"`
+}
+
+// A calling window or the outer hours may have changed: a page, by id, of the
+// campaign's contacts that wait for a later time and that no hold moved (a
+// contact carrying is_frequency_held or is_daily_cap_held keeps its time; the
+// admission judges the hold again when it is due). The dialer judges each one
+// again in Go, in the contact's own zone, from retry_at, the time its retry
+// policy gave it (NULL: none). A contact being dialled has no due time and is
+// not listed.
+func (q *Queries) ListWaitingContacts(ctx context.Context, arg ListWaitingContactsParams) ([]ListWaitingContactsRow, error) {
+	rows, err := q.db.Query(ctx, listWaitingContacts,
+		arg.CampaignID,
+		arg.Now,
+		arg.AfterID,
+		arg.RowLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListWaitingContactsRow{}
+	for rows.Next() {
+		var i ListWaitingContactsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.TimeZone,
+			&i.NextAttemptAt,
+			&i.RetryAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const markDialingContactsDNC = `-- name: MarkDialingContactsDNC :execrows
 UPDATE campaign_contacts c
-SET status = 'DNC', next_attempt_at = NULL, is_frequency_held = false, is_daily_cap_held = false, updated_at = now()
+SET status = 'DNC', next_attempt_at = NULL, retry_at = NULL, is_frequency_held = false, is_daily_cap_held = false, updated_at = now()
 WHERE c.status = 'ACTIVE' AND c.next_attempt_at IS NULL
   AND EXISTS (SELECT 1 FROM dnc_numbers d WHERE d.number_e164 = c.number_e164)
   AND EXISTS (SELECT 1 FROM campaign_attempts a
@@ -647,6 +712,43 @@ func (q *Queries) PauseCampaignFor(ctx context.Context, arg PauseCampaignForPara
 	return result.RowsAffected(), nil
 }
 
+const rearmContacts = `-- name: RearmContacts :execrows
+UPDATE campaign_contacts c
+SET next_attempt_at = v.at, updated_at = now()
+FROM (SELECT unnest($1::uuid[]) AS id,
+             unnest($2::timestamptz[]) AS judged_at,
+             unnest($3::timestamptz[]) AS retry_at,
+             unnest($4::timestamptz[]) AS at) AS v
+WHERE c.id = v.id AND c.status = 'ACTIVE'
+  AND c.next_attempt_at = v.judged_at AND c.retry_at IS NOT DISTINCT FROM v.retry_at
+  AND NOT c.is_frequency_held AND NOT c.is_daily_cap_held
+`
+
+type RearmContactsParams struct {
+	Ids       []uuid.UUID          `json:"ids"`
+	JudgedAts []pgtype.Timestamptz `json:"judgedAts"`
+	RetryAts  []pgtype.Timestamptz `json:"retryAts"`
+	Ats       []pgtype.Timestamptz `json:"ats"`
+}
+
+// Writes the due times the dialer judged for waiting contacts (ids, the due
+// time and retry time each was judged from, and its new due time, as parallel
+// arrays). A contact that moved in the meantime (claimed, settled again by a
+// revised attempt, held, finished) is left alone: its row no longer matches
+// what was judged. retry_at and the marks are not written.
+func (q *Queries) RearmContacts(ctx context.Context, arg RearmContactsParams) (int64, error) {
+	result, err := q.db.Exec(ctx, rearmContacts,
+		arg.Ids,
+		arg.JudgedAts,
+		arg.RetryAts,
+		arg.Ats,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const rearmHeldContacts = `-- name: RearmHeldContacts :execrows
 UPDATE campaign_contacts c
 SET next_attempt_at = $1::timestamptz, is_frequency_held = false, is_daily_cap_held = false, updated_at = now()
@@ -663,33 +765,10 @@ WHERE ca.id = c.campaign_id AND ca.status = 'RUNNING'
 // campaigns that the frequency window or the daily dial cap deferred
 // (is_frequency_held and is_daily_cap_held, set only by those holds' own
 // deferral) are due again. A contact waiting on its campaign's retry policy
-// carries no mark and keeps its time, as does one being dialled.
+// carries no mark and keeps its time, as does one being dialled. retry_at is
+// not written.
 func (q *Queries) RearmHeldContacts(ctx context.Context, now pgtype.Timestamptz) (int64, error) {
 	result, err := q.db.Exec(ctx, rearmHeldContacts, now)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
-}
-
-const rearmUntriedContacts = `-- name: RearmUntriedContacts :execrows
-UPDATE campaign_contacts
-SET next_attempt_at = $1::timestamptz, is_frequency_held = false, is_daily_cap_held = false, updated_at = now()
-WHERE campaign_id = $2 AND status = 'ACTIVE'
-  AND last_outcome IS NULL AND next_attempt_at > $1::timestamptz
-`
-
-type RearmUntriedContactsParams struct {
-	Now        pgtype.Timestamptz `json:"now"`
-	CampaignID uuid.UUID          `json:"campaignId"`
-}
-
-// A calling window or the outer hours changed: contacts that have never been
-// tried were deferred to the old window's opening, so they are due again now
-// and are judged against the new one. A contact with a history keeps the retry
-// time its policy gave it.
-func (q *Queries) RearmUntriedContacts(ctx context.Context, arg RearmUntriedContactsParams) (int64, error) {
-	result, err := q.db.Exec(ctx, rearmUntriedContacts, arg.Now, arg.CampaignID)
 	if err != nil {
 		return 0, err
 	}
