@@ -47,7 +47,8 @@ type Store interface {
 	Due(ctx context.Context, campaignID uuid.UUID, now time.Time, frequency time.Duration, limit int) ([]campaign.Contact, error)
 	HeldByFrequency(ctx context.Context, campaignID uuid.UUID, now time.Time, frequency time.Duration, limit int) ([]campaign.Held, error)
 	Defer(ctx context.Context, ids []uuid.UUID, at []time.Time, hold campaign.HoldKind) error
-	RearmUntried(ctx context.Context, campaignID uuid.UUID, now time.Time) error
+	Waiting(ctx context.Context, campaignID uuid.UUID, now time.Time, afterID uuid.UUID, limit int) ([]campaign.Waiting, error)
+	Rearm(ctx context.Context, judged []campaign.Waiting, at []time.Time) (int, error)
 	Pending(ctx context.Context, campaignID uuid.UUID, now time.Time) (campaign.Pending, error)
 	EarliestPending(ctx context.Context, campaignID uuid.UUID) (*campaign.Contact, error)
 	FrequencyHold(ctx context.Context, contactID uuid.UUID, now time.Time, frequency time.Duration) (*time.Time, error)
@@ -155,6 +156,10 @@ type Config struct {
 	DialTimeout time.Duration
 	// MaxBatch bounds the contacts fetched at once. Default 200.
 	MaxBatch int
+	// rearmPage and maxRearmPages pace the re-arm of waiting contacts (see
+	// rearmWaiting): contacts read at once, and reads per pass across every
+	// campaign. Defaults 500 and 20. Unexported; tests shrink them.
+	rearmPage, maxRearmPages int
 }
 
 func (c Config) withDefaults() Config {
@@ -181,6 +186,12 @@ func (c Config) withDefaults() Config {
 	}
 	if c.MaxBatch <= 0 {
 		c.MaxBatch = 200
+	}
+	if c.rearmPage <= 0 {
+		c.rearmPage = 500
+	}
+	if c.maxRearmPages <= 0 {
+		c.maxRearmPages = 20
 	}
 	return c
 }
@@ -253,10 +264,16 @@ type Dialer struct {
 	// yet entered the answer-rate window (see CapacityStats).
 	samples []rangSample
 	// limits is the DIDs' outbound line limits, read once per pass.
-	limits   map[string]int
-	halted   map[uuid.UUID]bool      // paused by a breaker this pass, not yet re-read
-	since    map[uuid.UUID]time.Time // breaker run starts
-	rearm    map[uuid.UUID]bool
+	limits map[string]int
+	halted map[uuid.UUID]bool      // paused by a breaker this pass, not yet re-read
+	since  map[uuid.UUID]time.Time // breaker run starts
+	// rearm holds the campaigns whose waiting contacts are to be judged again
+	// against their calling schedule (see rearmWaiting), each with the last
+	// contact id judged so far (uuid.Nil: from the start). rearmAll asks for
+	// every RUNNING campaign: set when the dialer starts, so a changed
+	// AICC_OUTBOUND_HOURS takes effect.
+	rearm    map[uuid.UUID]uuid.UUID
+	rearmAll bool
 	warnedCC map[uuid.UUID]bool // campaigns already warned about a national dial fallback
 	progress map[uuid.UUID]campaign.Progress
 	schedule map[string]campaign.Schedule
@@ -302,11 +319,11 @@ func New(cfg Config, d Deps) *Dialer {
 		halted:    map[uuid.UUID]bool{},
 		stopped:   map[uuid.UUID]bool{},
 		since:     map[uuid.UUID]time.Time{},
-		rearm:     map[uuid.UUID]bool{},
+		rearm:     map[uuid.UUID]uuid.UUID{},
 		warnedCC:  map[uuid.UUID]bool{},
 		progress:  map[uuid.UUID]campaign.Progress{},
 		schedule:  map[string]campaign.Schedule{},
-		isDirty:   true, dncDirty: true, testDirty: true,
+		isDirty:   true, dncDirty: true, testDirty: true, rearmAll: true,
 	}
 	if x.isLive == nil {
 		x.isLive = func(uuid.UUID) bool { return false }
@@ -363,12 +380,15 @@ func (d *Dialer) SlotFreed() { d.post(wakeMsg{}) }
 // Wake asks for a fresh look at everything.
 func (d *Dialer) Wake() { d.post(wakeMsg{}) }
 
-// Updated implements campaign.Observer: a PATCH may have moved a calling
-// window, so the never-tried contacts that were deferred to the old window's
-// opening are judged again.
+// Updated implements campaign.Observer: a PATCH that changed the calling
+// window has the campaign's waiting contacts judged again against the new one
+// (rearmWaiting), so a window widened after it closed dials them as soon as
+// their retry intervals allow. A window sent again in another order is no
+// change. The actor does it only while the campaign is RUNNING; a PAUSED one is
+// judged again when it resumes.
 func (d *Dialer) Updated(before, after campaign.Campaign) {
 	d.touch(after.ID)
-	if before.Status == campaign.StatusRunning && windowKey(before) != windowKey(after) {
+	if windowKey(before) != windowKey(after) {
 		d.post(wakeMsg{rearmFor: after.ID})
 		return
 	}
@@ -451,6 +471,8 @@ func (d *Dialer) began(id uuid.UUID) {
 	d.dncDirty = true
 	// A number may have been listed while the campaign was not running.
 	d.testDirty = true
+	// Its calling window may have changed while it was paused.
+	d.rearm[id] = uuid.Nil
 }
 
 func (d *Dialer) move(ctx context.Context, f func(context.Context) (campaign.Campaign, error)) (campaign.Campaign, error) {
@@ -595,7 +617,9 @@ func (d *Dialer) handle(ctx context.Context, m any) {
 			d.testDirty = true
 		}
 		if m.rearmFor != uuid.Nil {
-			d.rearm[m.rearmFor] = true
+			// From the start: what was judged against the old window is
+			// judged again.
+			d.rearm[m.rearmFor] = uuid.Nil
 		}
 	}
 }

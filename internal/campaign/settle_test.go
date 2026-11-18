@@ -222,6 +222,51 @@ func TestARetryOutsideTheWindowMovesToTheNextWindowStart(t *testing.T) {
 	}
 }
 
+// The settle keeps the time the retry policy gave apart from the window's move
+// (#616): RetryAt is the call's end plus the interval, NextAttemptAt that time
+// moved into the window. A re-arm after the window is widened starts from
+// RetryAt, so it must not be the window's opening.
+func TestTheSettleKeepsThePolicyTimeApartFromTheWindowsMove(t *testing.T) {
+	const zone = "Asia/Shanghai"
+	s := sched(t, zone, []string{"MON", "TUE", "WED", "THU", "FRI"}, "08:00-21:00", "09:00", "17:30")
+	tue := func(hhmm string) time.Time { return at(t, zone, "2026-06-02 "+hhmm) }
+	policy := DefaultRetryPolicy()
+	policy.IntervalSec[OutcomeNoAnswer] = 30 * 60
+	policy.IntervalSec[OutcomeBusy] = 60 * 60
+	tests := []struct {
+		what      string
+		outcome   Outcome
+		counters  Counters
+		finished  time.Time
+		wantRetry time.Time
+		wantNext  time.Time
+	}{
+		{"inside the window: one time", OutcomeNoAnswer, Counters{1, 0}, tue("16:00"), tue("16:30"), tue("16:30")},
+		{"past the close: moved, the policy's time kept", OutcomeNoAnswer, Counters{1, 0}, tue("17:20"), tue("17:50"), at(t, zone, "2026-06-03 09:00")},
+		{"busy past the close", OutcomeBusy, Counters{1, 0}, tue("17:25"), tue("18:25"), at(t, zone, "2026-06-03 09:00")},
+		{"a system failure's backoff too", OutcomeTransient, Counters{0, 1}, tue("17:28"), tue("17:33"), at(t, zone, "2026-06-03 09:00")},
+	}
+	for _, tt := range tests {
+		got := Settle(policy, tt.counters, tt.outcome, "", tt.finished, s)
+		if got.Status != ContactActive || got.NextAttemptAt == nil || got.RetryAt == nil {
+			t.Fatalf("%s: %+v, want ACTIVE with a next attempt and a retry time", tt.what, got)
+		}
+		if !got.RetryAt.Equal(tt.wantRetry) || !got.NextAttemptAt.Equal(tt.wantNext) {
+			t.Errorf("%s: retry %v next %v, want retry %v next %v", tt.what,
+				got.RetryAt.In(s.Zone), got.NextAttemptAt.In(s.Zone), tt.wantRetry, tt.wantNext)
+		}
+	}
+	// A settlement that ends the contact has neither.
+	for _, o := range []Outcome{OutcomeAnswered, OutcomeInvalidNumber, OutcomeDNCSkipped} {
+		if got := Settle(policy, Counters{}.Add(o), o, "", tue("10:00"), s); got.RetryAt != nil || got.NextAttemptAt != nil {
+			t.Errorf("%s: retry %v next %v, want neither", o, got.RetryAt, got.NextAttemptAt)
+		}
+	}
+	if got := Settle(policy, Counters{3, 0}, OutcomeNoAnswer, "", tue("10:00"), s); got.Status != ContactExhausted || got.RetryAt != nil {
+		t.Errorf("budget spent: %+v, want EXHAUSTED and no retry time", got)
+	}
+}
+
 func TestContactsInDifferentZonesAreRescheduledIntoTheirOwnWindows(t *testing.T) {
 	policy := DefaultRetryPolicy()
 	w := CallingWindow{Days: allDays, Ranges: []TimeRange{{"09:00", "18:00"}}}
@@ -277,6 +322,13 @@ func TestSettlementInvariantsOverRandomHistories(t *testing.T) {
 
 			if (status == ContactActive) != (got.NextAttemptAt != nil) {
 				t.Fatalf("history %d: status %s with next %v", h, status, got.NextAttemptAt)
+			}
+			if (got.RetryAt != nil) != (got.NextAttemptAt != nil) {
+				t.Fatalf("history %d: retry %v with next %v", h, got.RetryAt, got.NextAttemptAt)
+			}
+			if got.RetryAt != nil && (got.NextAttemptAt.Before(*got.RetryAt) || !got.RetryAt.After(now)) {
+				t.Fatalf("history %d: retry %v, next %v after the call ended %v; want end < retry <= next",
+					h, got.RetryAt, got.NextAttemptAt, now)
 			}
 			if got.NextAttemptAt != nil {
 				if got.NextAttemptAt.Before(now) {

@@ -85,7 +85,7 @@ const claimContactForDial = `-- name: ClaimContactForDial :one
 
 
 UPDATE campaign_contacts
-SET next_attempt_at = NULL, is_frequency_held = false, is_daily_cap_held = false, updated_at = now()
+SET next_attempt_at = NULL, retry_at = NULL, is_frequency_held = false, is_daily_cap_held = false, updated_at = now()
 WHERE id = $1 AND status = 'ACTIVE'
 RETURNING campaign_id, number_e164
 `
@@ -100,7 +100,8 @@ type ClaimContactForDialRow struct {
 // sections 3.3, 5.3 and 5.4).
 // The write-ahead step, part one: take the contact out of the due pool. The row
 // count says whether it was still dialable; the attempt insert that follows,
-// in the same transaction, says whether its number was free.
+// in the same transaction, says whether its number was free. The retry time is
+// spent: the attempt's settle writes the next one.
 func (q *Queries) ClaimContactForDial(ctx context.Context, id uuid.UUID) (ClaimContactForDialRow, error) {
 	row := q.db.QueryRow(ctx, claimContactForDial, id)
 	var i ClaimContactForDialRow
@@ -294,7 +295,7 @@ func (q *Queries) LockAttemptByCall(ctx context.Context, callID uuid.UUID) (Camp
 }
 
 const lockCampaignContact = `-- name: LockCampaignContact :one
-SELECT id, campaign_id, number_e164, number_raw, time_zone, slots, status, attempts, system_failures, next_attempt_at, last_outcome, lead_intent, lead_notes, created_at, updated_at, last_attempt_id, last_call_id, is_frequency_held, is_daily_cap_held FROM campaign_contacts WHERE id = $1 FOR UPDATE
+SELECT id, campaign_id, number_e164, number_raw, time_zone, slots, status, attempts, system_failures, next_attempt_at, last_outcome, lead_intent, lead_notes, created_at, updated_at, last_attempt_id, last_call_id, is_frequency_held, is_daily_cap_held, retry_at FROM campaign_contacts WHERE id = $1 FOR UPDATE
 `
 
 func (q *Queries) LockCampaignContact(ctx context.Context, id uuid.UUID) (CampaignContact, error) {
@@ -320,13 +321,14 @@ func (q *Queries) LockCampaignContact(ctx context.Context, id uuid.UUID) (Campai
 		&i.LastCallID,
 		&i.IsFrequencyHeld,
 		&i.IsDailyCapHeld,
+		&i.RetryAt,
 	)
 	return i, err
 }
 
 const makeContactDue = `-- name: MakeContactDue :execrows
 UPDATE campaign_contacts
-SET next_attempt_at = $2, is_frequency_held = false, is_daily_cap_held = false, updated_at = now()
+SET next_attempt_at = $2, retry_at = NULL, is_frequency_held = false, is_daily_cap_held = false, updated_at = now()
 WHERE id = $1 AND status = 'ACTIVE' AND next_attempt_at IS NULL
 `
 
@@ -335,6 +337,8 @@ type MakeContactDueParams struct {
 	NextAttemptAt pgtype.Timestamptz `json:"nextAttemptAt"`
 }
 
+// A voided attempt never happened: the contact is due again with no retry time
+// of its own.
 func (q *Queries) MakeContactDue(ctx context.Context, arg MakeContactDueParams) (int64, error) {
 	result, err := q.db.Exec(ctx, makeContactDue, arg.ID, arg.NextAttemptAt)
 	if err != nil {
@@ -418,12 +422,13 @@ func (q *Queries) SetAttemptLead(ctx context.Context, arg SetAttemptLeadParams) 
 
 const settleCampaignContact = `-- name: SettleCampaignContact :exec
 UPDATE campaign_contacts
-SET attempts = $2, system_failures = $3, status = $4, next_attempt_at = $5, is_frequency_held = false, is_daily_cap_held = false,
-    last_outcome = $6, last_attempt_id = $7::uuid,
-    last_call_id = $8::uuid,
-    lead_intent = coalesce($9::text, lead_intent),
-    lead_notes = CASE WHEN $9::text IS NULL THEN lead_notes
-                      ELSE $10::text END,
+SET attempts = $2, system_failures = $3, status = $4, next_attempt_at = $5,
+    retry_at = $7::timestamptz, is_frequency_held = false, is_daily_cap_held = false,
+    last_outcome = $6, last_attempt_id = $8::uuid,
+    last_call_id = $9::uuid,
+    lead_intent = coalesce($10::text, lead_intent),
+    lead_notes = CASE WHEN $10::text IS NULL THEN lead_notes
+                      ELSE $11::text END,
     updated_at = now()
 WHERE id = $1
 `
@@ -435,6 +440,7 @@ type SettleCampaignContactParams struct {
 	Status         string             `json:"status"`
 	NextAttemptAt  pgtype.Timestamptz `json:"nextAttemptAt"`
 	LastOutcome    *string            `json:"lastOutcome"`
+	RetryAt        pgtype.Timestamptz `json:"retryAt"`
 	LastAttemptID  uuid.UUID          `json:"lastAttemptId"`
 	LastCallID     uuid.UUID          `json:"lastCallId"`
 	LeadIntent     *string            `json:"leadIntent"`
@@ -442,6 +448,8 @@ type SettleCampaignContactParams struct {
 }
 
 // The contact after its latest attempt settled: counters, fate and schedule.
+// retry_at is the time the retry policy gave, before the calling window moved
+// it into next_attempt_at; both are NULL unless the contact stays ACTIVE.
 // A recorded lead is kept (copied only when this attempt recorded one); the
 // last attempt and its call are always this one, so after a retry that
 // recorded no lead they name a later call than the lead's.
@@ -453,6 +461,7 @@ func (q *Queries) SettleCampaignContact(ctx context.Context, arg SettleCampaignC
 		arg.Status,
 		arg.NextAttemptAt,
 		arg.LastOutcome,
+		arg.RetryAt,
 		arg.LastAttemptID,
 		arg.LastCallID,
 		arg.LeadIntent,

@@ -9,12 +9,26 @@ carries the one-line installer's files.
 
 ### Upgrade notes
 
-- No migration, and no application setting added, removed or changed in
-  default. The number lookups use indexes that already exist.
+- Migration 00050 runs at startup. It adds `campaign_contacts.retry_at`, the
+  time a contact's retry policy gave it, kept apart from the time a calling
+  window moved it to. A contact that was already waiting for a retry at the
+  upgrade gets its due time at that moment, which is never earlier than its
+  policy's: a window changed after the upgrade cannot shorten its interval, and
+  at worst it waits for the time it was already due at. A contact never tried
+  needs none. It is not an API field.
 - API contract: additive only. `listCampaignContacts` and
   `listCampaignAttempts` gain an optional `phoneNumber` query parameter (#617).
   `make api-breaking BASE=v0.8.8` reports no breaking change; oasdiff lists the
-  two parameters as `new-optional-request-parameter`.
+  two parameters as `new-optional-request-parameter`. The descriptions of
+  `updateCampaign` and `resumeCampaign` now say that a changed calling window
+  is applied to the contacts already waiting, on a paused campaign from the
+  resume on.
+- No application setting added, removed or changed in default. The number
+  lookups use indexes that already exist.
+- After the upgrade, and after every restart, the dialer judges the waiting
+  contacts of every running campaign against the calling hours once, so a
+  changed `AICC_OUTBOUND_HOURS` takes effect without waiting for the old
+  hours' next opening.
 
 ### Added
 
@@ -48,6 +62,21 @@ carries the one-line installer's files.
   press Enter. The search is kept in the address with the tab's other filters,
   so Back from a call record and a reload return to it, and it clears with one
   click. On Leads, Export follows the search as it follows the intent (#617).
+
+### Fixed
+
+- A campaign whose calling window is widened after it closed dials again at
+  once. A window ending at 17:30 and changed to end at 18:00 at 17:35 left the
+  campaign waiting for the next morning, because the contacts already tried
+  stayed at the old window's opening; only the contacts never tried were moved.
+  Every waiting contact is now judged again from the time its retry policy gave
+  it: it is due at the first moment the new window allows once its retry
+  interval has passed, never earlier, in its own time zone. A contact held by
+  the frequency window or the daily dial cap stays held, a contact being dialled
+  is left to its call, and `nextDialAt` and `activity` follow without a restart. A window
+  changed while the campaign is paused takes effect when it is resumed, which
+  it did not before, and a change of `AICC_OUTBOUND_HOURS` when the application
+  restarts. A window sent again in another order is no change (#616).
 
 ## v0.8.8 - 2026-11-18
 

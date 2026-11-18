@@ -73,6 +73,12 @@ type Settlement struct {
 	// NextAttemptAt is when the contact may be dialled again; nil unless the
 	// contact is ACTIVE.
 	NextAttemptAt *time.Time
+	// RetryAt is the time the retry policy gave: the call's end plus the
+	// outcome's interval, before the schedule moved it. NextAttemptAt is never
+	// earlier. Nil unless the contact is ACTIVE. Kept apart so that a calling
+	// window changed later can judge the contact again from its policy, never
+	// shortening its interval (design 10 section 8.1).
+	RetryAt *time.Time
 }
 
 // Settle decides a contact's fate after an attempt ended with outcome.
@@ -98,7 +104,8 @@ type Settlement struct {
 //     EXHAUSTED;
 //   - otherwise it stays ACTIVE, due at finishedAt plus the outcome's
 //     interval (the transient backoff for TRANSIENT and ORIGINATE_FAILED,
-//     counted by system_failures) and moved into the schedule.
+//     counted by system_failures) and moved into the schedule. RetryAt keeps
+//     the time before the move.
 func Settle(p RetryPolicy, c Counters, o Outcome, lead LeadIntent, finishedAt time.Time, s Schedule) Settlement {
 	switch {
 	case lead == LeadDoNotCall:
@@ -135,11 +142,12 @@ func Settle(p RetryPolicy, c Counters, o Outcome, lead LeadIntent, finishedAt ti
 		return Settlement{Status: ContactExhausted, Reason: SettleNotRetried}
 	}
 
-	due := finishedAt.Add(wait)
+	retry := finishedAt.Add(wait)
+	due := retry
 	if open, ok := s.NextOpen(due); ok {
 		due = open
 	}
-	return Settlement{Status: ContactActive, Reason: SettleRetry, NextAttemptAt: &due}
+	return Settlement{Status: ContactActive, Reason: SettleRetry, NextAttemptAt: &due, RetryAt: &retry}
 }
 
 // Wait is the delay before retry number n (1 for the first): BaseSec times

@@ -385,13 +385,16 @@ func (f attemptFinisher) apply(ctx context.Context, q *queries.Queries, att quer
 		notes := deref(att.LeadNotes)
 		leadNotes = &notes
 	}
-	var next pgtype.Timestamptz
+	var next, retry pgtype.Timestamptz
 	if settled.NextAttemptAt != nil {
 		next = pgtype.Timestamptz{Time: *settled.NextAttemptAt, Valid: true}
 	}
+	if settled.RetryAt != nil {
+		retry = pgtype.Timestamptz{Time: *settled.RetryAt, Valid: true}
+	}
 	if err := q.SettleCampaignContact(ctx, queries.SettleCampaignContactParams{
 		ID: contact.ID, Attempts: int32(counters.Attempts), SystemFailures: int32(counters.SystemFailures),
-		Status: string(settled.Status), NextAttemptAt: next, LastOutcome: textPtr(string(e.Outcome)),
+		Status: string(settled.Status), NextAttemptAt: next, RetryAt: retry, LastOutcome: textPtr(string(e.Outcome)),
 		LastAttemptID: att.ID, LastCallID: att.CallID,
 		LeadIntent: leadIntent, LeadNotes: leadNotes,
 	}); err != nil {

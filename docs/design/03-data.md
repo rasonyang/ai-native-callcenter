@@ -293,6 +293,8 @@ webhook_subscriptions(…) / webhook_deliveries(…)                  -- 00026; 
 --                                          calls by; not backfilled (10 §3.2, §3.5, §5.2)
 --   cdrs.campaign_id (00039), dids.max_outbound_channels (00040)   (10 §3.5, §6.6)
 --   campaign_contacts.last_attempt_id / last_call_id (00042)        (10 §3.2, §14)
+--   campaign_contacts.retry_at (00050)      the retry policy's time, kept apart from the window's move, so a
+--                                           widened window is applied without shortening an interval (10 §3.2, §8.1)
 ```
 
 ## 3. CDR semantics (from cti-server, extended)

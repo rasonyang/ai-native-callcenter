@@ -89,6 +89,19 @@ type Held struct {
 	LastTouch time.Time
 }
 
+// Waiting is an ACTIVE contact due later than now that no hold moved: what the
+// dialer judges again when a calling window or the outer hours may have
+// changed.
+type Waiting struct {
+	ContactID uuid.UUID
+	// TimeZone is the contact's own zone; empty means the campaign's.
+	TimeZone      string
+	NextAttemptAt time.Time
+	// RetryAt is the time the contact's retry policy gave it; nil when it has
+	// none (never tried, or its last attempt was voided).
+	RetryAt *time.Time
+}
+
 // Pending is where a campaign's contact list stands.
 type Pending struct {
 	// ActiveTotal counts ACTIVE contacts, those being dialled included.
