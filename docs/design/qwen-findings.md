@@ -816,7 +816,8 @@ the decision below — one function tool). **MEASURED:**
   fallback.
 - `session.created` reports `input_audio_transcription.model
   gummy-realtime-v1` as a session default; the caller's words are transcribed
-  unprompted. The separate transcription service
+  unprompted (the default model varies per session, and the call's language can
+  be named without a model: W-Q19, #602). The separate transcription service
   (`internal/transcribe`, `qwen-audio-3.0-asr-flash-streaming`) was not changed
   and not re-probed.
 
@@ -2008,3 +2009,35 @@ Eleven calls on flash, 95002, with this change deployed and provider events at D
 - Call 6 shows a pause inside the sentence being taken as a turn; the call still ended at the whole sentence.
 
 The en half (95001: "Wrong number, sorry.", "Sorry, I called by mistake.", "Oh, I dialled the wrong number.", "I was trying to reach someone else.", and "Is this the right number for billing?", which must not end the call) waits with the other en live rounds.
+
+## W-Q19: a one-syllable reply transcribed in another language, and the transcription language qwen accepts (#602, 2026-11-18)
+
+**The problem.** On `qwen-audio-3.1-realtime-flash`, on zh flows, the caller transcript the realtime session returns came back in Korean for short replies on 2 of 7 answered outbound calls on a production line (2026-11-17): a lone 「嗯」 as `음. `, a short reply as `왜니? `. The acknowledgement and greeting classifiers (`internal/aicall/backchannel.go`, design 11) match per-language lists, so they missed both, and the CDR transcript is in the wrong language. The GA dialect already sends `audio.input.transcription.language` (`buildSessionUpdate`, `transcriptionLanguage`), but only when `TranscribeModel` is set. Qwen is the only `styleBeta` profile, has no `TranscribeModel`, and its Beta branch sent no transcription field, so the vendor guessed the language per utterance.
+
+**The documentation gap.** The public DashScope Omni-Realtime documentation lists only `input_audio_transcription.model` (named there as the fixed `qwen3-asr-flash-realtime`). `language` is documented only for the vendor's LiveTranslate and standalone ASR products, not for this session.
+
+**The probe** (`TestLiveQwenTranscriptionLanguage`, `internal/provider/live_transcription_language_test.go`; flash, 8 sessions, owner-approved). One raw WebSocket session per arm, 20 ms frames at real time, four clips made with macOS `say` (嗯 and 喂 with Tingting zh_CN, 음 with Yuna ko_KR, うん with Kyoko ja_JP), each followed by silence. The sessions ran three arms: A, today's session.update with no transcription field; B, `{"model": <the model session.created reported>, "language": "zh"}`; C, `{"language": "zh"}` alone, sent right after the dial before `session.created` as the product does, followed by an instructions-only mid-call `session.update` (the shape `Realtime.UpdateInstructions` sends for Beta). The shipped test names its arms `none` (A) and `product` (C), both built by `buildSessionUpdate`.
+
+| Session | zh 嗯 | zh 喂 | ko 음 | ja うん |
+|---|---|---|---|---|
+| A run1 | 嗯。 | `Wait. ` | `#うん。` | うん。 |
+| B run1 | 嗯。 | 喂。 | 嗯。 | うん。 |
+| A#1 run2 | 嗯。 | 喂。 | `#うん。` | うん。 |
+| B#2 run2 (gummy) | 嗯。 | 喂。 | 嗯。 | うん。 |
+| B#3 run2 | 嗯。 | 喂。 | 嗯。 | うん。 |
+| A#4 run2 | 嗯。 | `Wait. ` | `#うん。` | うん。 |
+| C#1 run3 | 嗯。 | 喂。 | 嗯。 | 嗯。 |
+| C#2 run3 | 嗯。 | 喂。 | 嗯。 | うん。 |
+
+**Findings.**
+
+- **The default transcriber varies.** `session.created` reported `input_audio_transcription: {"model":"fun-asr"}` in 7 of 8 sessions and `{"model":"gummy-realtime-v1"}` in 1 (the 2026-09-24 record had gummy-realtime-v1 on plus). The product sends its `session.update` right after the dial, before `session.created`, so it cannot name the model.
+- **The language alone is accepted and merges.** Arm A echoed `{"model":"fun-asr"}`. Arm B was accepted and echoed with the language. Arm C, `{"language":"zh"}` with no model, was accepted with no error and echoed `{"language":"zh","model":"fun-asr"}`: merged into the session's default model, transcription kept. An instructions-only mid-call `session.update` was echoed with `language` still there. No `error` or `.failed` event in any session.
+- **Effect.** The Korean 음 came back as 嗯 in 5 of 5 sessions with the language and as `#うん。` in 3 of 3 without. The zh 喂 was never mis-transcribed with it (without it: `Wait. ` in 2 of 3). In some A sessions the streamed `.delta` events showed Hangul `음` in `stash` before `completed` rewrote it.
+- **A bias, not a script filter.** The ja clip stayed うん in 7 of 8 sessions, 4 of 5 of them with the language; arm C#1 rewrote it as 嗯. The hint moves the guess towards the call's language and does not forbid the other scripts.
+
+**The decision** (option 1 of the issue). `Profile.AcceptsTranscriptionLanguage` (true on qwen only): the opening `session.update` carries `input_audio_transcription: {"language": <call language>}` and no model, for `zh-CN` as `zh`. Nothing is sent when the call has no language. Optional like the temperature: the reduced retry after a rejection drops it, and mid-call updates stay instructions-only. The same trait in the GA dialect sends `audio.input.transcription = {"language": …}` when no model is named; no GA profile sets it. Option 2 of the issue, treating a transcript whose script does not match the call's language as unclassified, is not taken: it waits for real calls on this change.
+
+**The shipped payload, once** (same day, `AICC_PROBE_ARMS=product`, one session). The opening `session.update` built by `buildSessionUpdate` was accepted: `session.created` `{"model":"fun-asr"}`, `session.updated` `{"language":"zh","model":"fun-asr"}`, and the same after the instructions-only update. The four clips came back as 嗯。, 喂。, 嗯。 and 嗯。. The streamed `stash` showed `Wait` under 喂 and `음` under the Korean clip before `completed` wrote them in Chinese; the client reads a partial's `delta` field, which qwen's partials do not carry (they carry `text` and `stash`), so only the completed transcript reaches a classifier.
+
+**Not covered.** No telephone call was placed: 8 kHz telephone audio and a human 嗯 were not measured, only clean synthesized 16 kHz clips. A human caller and a plus model were not run. How often the hint helps in production is not known from 8 sessions.

@@ -259,3 +259,79 @@ func TestTheSessionUpdateCarriesTheFlowsTemperatureOnlyWhereItIsAccepted(t *test
 		t.Error("AcceptsTemperature is not qwen only")
 	}
 }
+
+// transcriptionOf returns what a session.update carries for the caller's
+// transcription in this profile's dialect, and whether it carries any.
+func transcriptionOf(update map[string]any) (map[string]any, bool) {
+	session, _ := update["session"].(map[string]any)
+	if audio, ok := session["audio"].(map[string]any); ok {
+		input, _ := audio["input"].(map[string]any)
+		got, isPresent := input["transcription"].(map[string]any)
+		return got, isPresent
+	}
+	got, isPresent := session["input_audio_transcription"].(map[string]any)
+	return got, isPresent
+}
+
+// #602: qwen names no transcription model (the default varies per session and
+// session.created arrives after the opening update), but the call's language
+// alone is sent, so a one-syllable reply is not written in another language.
+func TestQwenSessionUpdateNamesTheCallsLanguageAndNoModel(t *testing.T) {
+	qwen := &Realtime{profile: QwenProfile()}
+	for _, tc := range []struct{ language, want string }{
+		{"zh-CN", "zh"},
+		{"zh", "zh"},
+		{"en", "en"},
+		{"en_US", "en"},
+	} {
+		got, isPresent := transcriptionOf(qwen.buildSessionUpdate(SessionConfig{Language: tc.language}, false))
+		if !isPresent || len(got) != 1 || got["language"] != tc.want {
+			t.Errorf("language %q: input_audio_transcription = %v, want exactly {language: %q}", tc.language, got, tc.want)
+		}
+	}
+	if _, isPresent := transcriptionOf(qwen.buildSessionUpdate(SessionConfig{}, false)); isPresent {
+		t.Error("an empty call language still sent a transcription field")
+	}
+	if _, isPresent := transcriptionOf(qwen.buildSessionUpdate(SessionConfig{Language: "zh-CN"}, true)); isPresent {
+		t.Error("the reduced retry still sent the transcription language")
+	}
+
+	off := QwenProfile()
+	off.AcceptsTranscriptionLanguage = false
+	if _, isPresent := transcriptionOf((&Realtime{profile: off}).buildSessionUpdate(SessionConfig{Language: "zh-CN"}, false)); isPresent {
+		t.Error("a Beta profile without the trait sent a transcription field")
+	}
+}
+
+// The trait means the same in the GA dialect: no model named, the language
+// alone. With a model named, the existing path is unchanged.
+func TestGASessionUpdateTranscriptionLanguageTrait(t *testing.T) {
+	profile := GrokProfile()
+	if profile.TranscribeModel != "" {
+		t.Fatalf("grok names a transcription model: %q", profile.TranscribeModel)
+	}
+	if _, isPresent := transcriptionOf((&Realtime{profile: profile}).buildSessionUpdate(SessionConfig{Language: "zh-CN"}, false)); isPresent {
+		t.Error("a GA profile without the trait and without a model sent a transcription field")
+	}
+	profile.AcceptsTranscriptionLanguage = true
+	client := &Realtime{profile: profile}
+	got, isPresent := transcriptionOf(client.buildSessionUpdate(SessionConfig{Language: "zh-CN"}, false))
+	if !isPresent || len(got) != 1 || got["language"] != "zh" {
+		t.Errorf("audio.input.transcription = %v, want exactly {language: zh}", got)
+	}
+	if _, isPresent := transcriptionOf(client.buildSessionUpdate(SessionConfig{Language: "zh-CN"}, true)); isPresent {
+		t.Error("the reduced GA retry still sent the transcription language")
+	}
+
+	named := &Realtime{profile: OpenAIProfile()}
+	got, _ = transcriptionOf(named.buildSessionUpdate(SessionConfig{Language: "zh-CN"}, false))
+	if got["model"] != OpenAIProfile().TranscribeModel || got["language"] != "zh" {
+		t.Errorf("a named model changed: %v", got)
+	}
+
+	if !QwenProfile().AcceptsTranscriptionLanguage || OpenAIProfile().AcceptsTranscriptionLanguage ||
+		GatewayProfile().AcceptsTranscriptionLanguage || GrokProfile().AcceptsTranscriptionLanguage ||
+		DoubaoProfile().AcceptsTranscriptionLanguage {
+		t.Error("AcceptsTranscriptionLanguage is not qwen only")
+	}
+}

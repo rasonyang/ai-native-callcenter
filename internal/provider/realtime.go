@@ -1520,6 +1520,11 @@ func (r *Realtime) buildSessionUpdate(cfg SessionConfig, isReduced bool) map[str
 				transcription["language"] = language
 			}
 			input["transcription"] = transcription
+		} else if r.profile.AcceptsTranscriptionLanguage && !isReduced {
+			// No model named: the language alone (#602, qwen-findings W-Q19).
+			if language := transcriptionLanguage(cfg.Language); language != "" {
+				input["transcription"] = map[string]any{"language": language}
+			}
 		}
 		output := map[string]any{"format": audioFormatPayload(outputName, outputRate)}
 		if voice != "" {
@@ -1548,6 +1553,15 @@ func (r *Realtime) buildSessionUpdate(cfg SessionConfig, isReduced bool) map[str
 	// session at the provider's default beats a caller with no bot.
 	if r.profile.AcceptsTemperature && cfg.Temperature != nil && !isReduced {
 		session["temperature"] = *cfg.Temperature
+	}
+	// The call's language alone, no model: the session's default transcriber
+	// varies and a one-syllable reply came back in Korean without it (#602,
+	// qwen-findings W-Q19). Optional like the temperature: the reduced retry
+	// drops it, and a mid-call update never carries it.
+	if r.profile.AcceptsTranscriptionLanguage && r.profile.TranscribeModel == "" && !isReduced {
+		if language := transcriptionLanguage(cfg.Language); language != "" {
+			session["input_audio_transcription"] = map[string]any{"language": language}
+		}
 	}
 	return map[string]any{"type": "session.update", "session": session}
 }
