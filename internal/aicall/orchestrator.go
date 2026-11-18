@@ -1012,7 +1012,7 @@ func (o *Orchestrator) answerToolCall(ctx context.Context, event Event, batch *t
 	isWordless := isWordlessHangup(event, runtime, actions)
 	node := runtime.Engine().NodeID()
 	var output, moved string
-	isGuardRefusal := false
+	isGuardRefusal, isReplayOwed := false, false
 	switch {
 	case o.refusesHangup(event, guard, runtime, actions, log):
 		// The response was answering the caller: the answer plays on, and
@@ -1020,16 +1020,17 @@ func (o *Orchestrator) answerToolCall(ctx context.Context, event Event, batch *t
 		// is sent quietly with its other text (closeToolBatch).
 		output = runtime.RefuseWhileAnswering(event.ToolName, true)
 		isGuardRefusal = true
-	case event.cut != nil && runtime.CanMoveOnTool(event.ToolName) && session.cutVerdictOf(event.cut).refusesMove():
+	case event.cut != nil && runtime.CanMoveOnTool(event.ToolName) &&
+		o.refusesOnCut(event, session, runtime, actions, &output, &isReplayOwed, log):
 		// The engine cut the bot for a bare acknowledgement, or the opening
-		// for a greeting, and this response answers it: a tool that would move
-		// the call is refused as a conversation, and a tool that only reads is
-		// not (docs/design/11). The verdict is known here (the case matched),
-		// so the second read does not wait.
-		if session.cutVerdictOf(event.cut) == cutVerdictGreeting {
-			output = runtime.RefuseAsGreeting(event.ToolName)
-		} else {
-			output = runtime.RefuseAsAcknowledgement(event.ToolName)
+		// for a greeting or for words no transcript made known, and this
+		// response answers it: a tool that would move the call is refused as a
+		// conversation, and a tool that only reads is not (docs/design/11).
+		// A cut of the opening that the wait settled is said again here, once
+		// the refusal is answered, as when the final lands while the call
+		// waits: no transcript will bring it to the drive loop (#610).
+		if isReplayOwed {
+			defer o.sayOpeningAgain(event.cut, session, runtime, actions, log)
 		}
 	default:
 		output, moved = o.dispatch(ctx, event, batch, session, runtime, actions, log)
@@ -1953,15 +1954,72 @@ func (o *Orchestrator) sessionConfig(session provider.SessionConfig, isEndingArm
 	}
 }
 
-// sayOpeningAgain says the opening line once more after a greeting cut it
-// (docs/design/11-backchannels.md): only while the call is still in its entry
-// phase and no ending is armed or under way, and only once per call.
+// refusesOnCut judges a tool that could move the call, made in the response
+// that answers a cut the engine made by itself, by the verdict on the words
+// that cut (docs/design/11-backchannels.md), waiting for it up to
+// cutVerdictWait. A bare acknowledgement, a greeting over the opening, or words
+// over the opening that no transcript made known (#610) refuse it as a
+// conversation; it reports whether it did, with the refusal in output. Where
+// the verdict owes the opening once more, the refusal says so when the opening
+// is said again: it was asked for on this cut, or can still be (the call is in
+// its entry phase, no ending is armed or under way, and it has not been said
+// again). Words not known are refused only together with that remedy;
+// otherwise the tool runs as it always did. isReplayOwed says the caller is to
+// say the opening again once the refusal is answered: the wait settled the
+// cut, and no transcript will. One line says what was decided.
+func (o *Orchestrator) refusesOnCut(event Event, session *Session, runtime *flow.Runtime,
+	actions *callActions, output *string, isReplayOwed *bool, log *slog.Logger) bool {
+
+	cut := event.cut
+	verdict, waited, isExpired := session.cutVerdictOf(cut)
+	isOwed, isAsked := session.openingReplayOf(cut)
+	isSaidAgain := isOwed && (isAsked || o.canSayOpeningAgain(session, runtime, actions))
+	isRefused := verdict.refusesMove()
+	if verdict == cutVerdictWordsUnknown && !isSaidAgain {
+		isRefused = false
+	}
+	playedMs := int64(-1)
+	if cut.event.Played >= 0 {
+		playedMs = cut.event.Played.Milliseconds()
+	}
+	log.Info("a tool that could move the call answers a cut the engine made",
+		"tool", event.ToolName, "turn", event.Turn, "verdict", verdict.String(),
+		"isOpening", cut.isOpening, "playedMs", playedMs, "waitedMs", waited.Milliseconds(),
+		"isRefused", isRefused, "isOpeningSaidAgain", isSaidAgain)
+	if !isRefused {
+		return false
+	}
+	switch verdict {
+	case cutVerdictGreeting:
+		*output = runtime.RefuseAsGreeting(event.ToolName)
+	case cutVerdictWordsUnknown:
+		*output = runtime.RefuseAsUnheardOpening(event.ToolName)
+		*isReplayOwed = isExpired
+	default:
+		*output = runtime.RefuseAsAcknowledgement(event.ToolName, isSaidAgain)
+	}
+	return true
+}
+
+// canSayOpeningAgain reports whether sayOpeningAgain would say the opening now:
+// the call is still in its entry phase, no ending is armed or under way, and the
+// opening has not been said again this call.
+func (o *Orchestrator) canSayOpeningAgain(session *Session, runtime *flow.Runtime, actions *callActions) bool {
+	return runtime.Engine().NodeID() == runtime.Engine().Spec().InitialNode &&
+		!actions.IsEndingUnderway() && !session.isOpeningSaidAgain()
+}
+
+// sayOpeningAgain says the opening line once more after a greeting cut it,
+// words no transcript made known, or an acknowledgement before its final
+// sentence (docs/design/11-backchannels.md, #610): only
+// while the call is still in its entry phase and no ending is armed or under
+// way, and only once per call.
 func (o *Orchestrator) sayOpeningAgain(cut *openCut, session *Session, runtime *flow.Runtime,
 	actions *callActions, log *slog.Logger) {
 
 	if runtime.Engine().NodeID() != runtime.Engine().Spec().InitialNode || actions.IsEndingUnderway() {
-		log.Info("a greeting cut the opening, but the call has moved on; not said again",
-			"node", runtime.Engine().NodeID())
+		log.Info("the opening was cut, but the call has moved on; not said again",
+			"node", runtime.Engine().NodeID(), "verdict", session.verdictName(cut))
 		session.clearOpeningOwed()
 		return
 	}

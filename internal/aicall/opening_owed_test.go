@@ -251,10 +251,13 @@ func TestTheOpeningIsNotSaidAgainOnceTheCallHasMovedOnOrIsEnding(t *testing.T) {
 	t.Run("the flow left the entry phase", func(t *testing.T) {
 		r := newOpeningRig(t)
 		r.botSpeaksUntilCut(t, "u1")
+		r.started() // the response that answers the cut calls nothing
+		r.ended()
+		// A later response is past the cut's window: its move runs, whatever
+		// the verdict. (A cut of the opening with no verdict in time no longer
+		// runs as it always did, #610.)
 		r.started()
 		r.toolCall("fc_1", "classify", `{"value":"maybe"}`)
-		waitFor(t, "the tool call to wait for the verdict", func() bool { return len(r.wait.waits()) == 1 })
-		r.wait.expire() // no verdict in time: it runs as it always did
 		r.ended()
 		r.awaitResult(t)
 		if r.node() != "plain" {

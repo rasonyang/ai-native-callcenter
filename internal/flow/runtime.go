@@ -523,14 +523,22 @@ func (r *Runtime) CanMoveOnTool(name string) bool {
 // tells the model so, and the current phase's instruction as the way on. It
 // runs nothing and changes no state, so the tool can be called again once the
 // caller has answered. Read-only lookups are not refused by this; the caller
-// asks CanMoveOnTool first.
-func (r *Runtime) RefuseAsAcknowledgement(name string) string {
+// asks CanMoveOnTool first. isOpeningSaidAgain says the acknowledgement cut the
+// opening before the caller heard it and the opening is said to them again
+// (#610): the model is told so, and to wait for their answer to it.
+func (r *Runtime) RefuseAsAcknowledgement(name string, isOpeningSaidAgain bool) string {
 	r.log.Info("tool refused: the caller only acknowledged, it is not an answer",
-		"tool", name, "node", r.engine.NodeID())
+		"tool", name, "node", r.engine.NodeID(), "isOpeningSaidAgain", isOpeningSaidAgain)
 	reason := "the caller only acknowledged what was said (a short \"mm-hmm\" or \"okay\"); " +
 		"that is not an answer, so " + name + " was not carried out"
+	if isOpeningSaidAgain {
+		reason += ". The opening is said to them again; wait for their answer to it"
+	}
 	if r.engine.Lang() == LangZH {
 		reason = "来电者只是应了一声(如“嗯”“好的”),并没有回答问题,所以没有执行 " + name
+		if isOpeningSaidAgain {
+			reason += "。开场白会再对他说一遍,等对方回答之后再继续"
+		}
 	}
 	return Failed(reason, r.phasePreamble()+r.engine.Instruction()).asToolOutput()
 }
@@ -547,6 +555,24 @@ func (r *Runtime) RefuseAsGreeting(name string) string {
 		"so " + name + " was not carried out. The opening is said to them again; wait for their answer to it"
 	if r.engine.Lang() == LangZH {
 		reason = "来电者只是接起电话打了个招呼(如“喂”“你好”),并没有回答问题,所以没有执行 " + name +
+			"。开场白会再对他说一遍,等对方回答之后再继续"
+	}
+	return Failed(reason, r.phasePreamble()+r.engine.Instruction()).asToolOutput()
+}
+
+// RefuseAsUnheardOpening is RefuseAsGreeting for a caller who spoke over the
+// bot's opening line before hearing it, with words no transcript made known
+// (#610): nothing says they answered anything, so the tool is refused as a
+// conversation, ok=0, with the phase's instruction as the way on. The opening
+// is said again to the caller, so the model is told to wait for their answer.
+func (r *Runtime) RefuseAsUnheardOpening(name string) string {
+	r.log.Info("tool refused: the caller spoke over the opening and their words are not known",
+		"tool", name, "node", r.engine.NodeID())
+	reason := "the caller spoke over the opening before hearing it, and their words were not caught; " +
+		"that is not an answer, so " + name + " was not carried out. " +
+		"The opening is said to them again; wait for their answer to it"
+	if r.engine.Lang() == LangZH {
+		reason = "来电者在开场白还没听完时开口了,没有听清说了什么,不能当作回答,所以没有执行 " + name +
 			"。开场白会再对他说一遍,等对方回答之后再继续"
 	}
 	return Failed(reason, r.phasePreamble()+r.engine.Instruction()).asToolOutput()

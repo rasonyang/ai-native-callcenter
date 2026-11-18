@@ -32,6 +32,21 @@ carries the one-line installer's files.
   way is asked again. On `openai`, where speech over the bot is held, such a
   run is still answered as words (#607). An acknowledgement followed by a cut-off word
   (「嗯，你。」) is still words (#600).
+- On the engines that cut the bot by themselves (qwen, grok, doubao, gateway),
+  speech that cuts the opening line can no longer move the call when the
+  engine's transcriber writes nothing for it, or nothing in time. Such words
+  were taken for an answer: on a call that listens first, a 「好」 said over the
+  start of the opening, before its offer was heard, let the model record
+  agreement and move the call to its terminal phase, and the call's transcript
+  kept no trace of the words. A tool that would move the call is now refused
+  and the opening is said again from its start, as for a greeting over it.
+  An acknowledgement such as 「好」 that cuts the opening is treated the same
+  way: the tool is refused as before, and now the opening is also said again
+  instead of leaving the model to carry on without the offer, unless the
+  acknowledgement fell in the opening's last sentence. Once the opening has
+  been said again, such words are judged as before. The log now notes a blank
+  transcript of words that cut the bot, and what was decided whenever a tool
+  that could move the call answers a cut (#610).
 
 ## v0.8.7 - 2026-11-17
 

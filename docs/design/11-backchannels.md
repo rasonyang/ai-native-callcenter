@@ -65,8 +65,10 @@ Case and punctuation fold. One phrase repeated up to three times is still one
 - `ack`: a whole acknowledgement. On a partial the caller may still add words,
   so the session keeps holding; on a final it decides.
 
-An empty final is `content` (a cough takes the floor, as today). An empty
-partial is no information. The function is pure and off the frame path.
+An empty final is `content` (a cough takes the floor, as today), except on a
+cut of the opening (see "Words not known, and acknowledgements, over the
+opening"). An empty partial is no information. The function is pure and off the
+frame path.
 
 ## The trait
 
@@ -155,9 +157,10 @@ a. Flow. If the verdict is `ack`, a tool call in the response that answers the
    the model the caller only acknowledged, and the phase's instruction; nothing
    runs and no state changes. Read-only tools and tools with no move are
    untouched. A call that arrives before the verdict waits for it, at most
-   1000 ms, and with no verdict runs as it always did. The window is the first
-   response after the cut. A "嗯" said when nothing was playing is never
-   affected, because no cut is recorded for it.
+   1000 ms, and with no verdict runs as it always did, except after a cut of
+   the opening (#610, below). The window is the first response after the cut.
+   A "嗯" said when nothing was playing is never affected, because no cut is
+   recorded for it.
    On a cut, a run of acknowledgements is `ack` too (`isAckRun`, #600): the
    whole final, punctuation and spaces dropped, is one to four phrases of the
    list and nothing else, different ones allowed, in any split (嗯，可以;
@@ -237,8 +240,85 @@ happened, so the damage is limited afterwards.
   opening, so a greeting that cuts the replay is refused a moving tool but gets
   no third telling.
 - No replay when the flow has left the entry phase, when an ending is armed or
-  under way, or when the words were not a greeting. An opening cut before it
-  played in full is always owed; there is no "counts as said" estimate for it.
+  under way, or when the words were words (an acknowledgement, and words no
+  transcript makes known, are replayed too: #610, below). An opening cut before
+  it played in full stays owed; only an acknowledgement in its final sentence
+  counts it as heard (#610).
+
+### Words not known, and acknowledgements, over the opening (#610)
+
+Seen in production on qwen flash with `isCallerFirst`: the opening is generated
+in full while it is held for the callee, so speech in its first seconds is the
+session's own cut over the finished opening's tail. A 「好」 cut it 2.8 s into an
+11 s line, the engine's transcriber wrote nothing for it (a blank `.completed`),
+and the blank final was judged `content` without a log line. The orchestrator
+records no transcript row for empty text, so the call kept no trace of the
+words, and the model, which had heard them, called its agreement tool and moved
+the call.
+
+On the engines that cut by themselves, a cut of the opening (turn 1, its replay,
+or any cut while it is owed) whose words no transcript makes known is judged as
+a greeting is (`cutVerdictWordsUnknown`):
+
+- The words are not known when the cut's final transcript is blank
+  (`judgeCut`), or when no final has come by the end of the wait a moving tool
+  makes (`cutVerdictOf`). The wait then settles the cut: a transcript that
+  arrives later is the caller's words as ever and judges nothing.
+- A moving tool made in the response that answers the cut is refused as a
+  conversation (`Runtime.RefuseAsUnheardOpening`, en and zh: the caller's words
+  were not caught, the opening is said to them again, wait for their answer),
+  and the opening is said again through `Session.SayOpeningAgain` under its
+  rules. A blank final asks for it as a greeting's final does; a wait that runs
+  out asks for it once the refusal is answered.
+- Only while the opening can still be said again: not yet said again this call,
+  the flow in its entry phase, no ending armed or under way. Otherwise the tool
+  runs as it always did. Once the opening has been said again, or while an
+  ending is armed, the session judges the cut as before (a blank final is
+  `content`, a wait that runs out settles nothing), as on any other turn; the
+  flow's phase and an ending decided otherwise (the time limit, a handover)
+  are the orchestrator's to judge, so there the verdict stays words unknown and
+  the decision line says the tool was not refused. A refusal without the
+  replay would leave the model only to ask again, on an engine whose
+  transcriber has just dropped the callee's word, for as long as the callee
+  talks over the bot. A greeting or an acknowledgement, which rest on words,
+  still refuse over the replay.
+- Cuts of any other turn are unchanged, and so is openai: its hold has the
+  words before anything is cut.
+
+An acknowledgement over the opening is the same harm with the words known. On a
+live qwen call after the change above, 「好。」 cut the opening early, the
+agreement tool was refused, and the opening was not said again: the model
+improvised a greeting of its own and the offer was never heard. Owner decision:
+on the engines that cut by themselves, an acknowledgement (a run of them
+included, #600) that cuts the opening, or any turn while it is owed, owes the
+opening once more, as a greeting does:
+
+- A moving tool made in the response that answers the cut is refused as an
+  acknowledgement (`Runtime.RefuseAsAcknowledgement`), and the reason tells the
+  model the opening is said again and to wait for the answer to it.
+- The final transcript's event carries the cut, so the opening is said again
+  through `Session.SayOpeningAgain` under its rules whether or not the reply
+  calls a tool, the reply muted as for a greeting. The acknowledgement leaves
+  the opening owed until then (`noteCutVerdict`).
+- Except in the final sentence: a cut of the opening line's own turn, made
+  after it finished generating, that falls in its final sentence by the
+  estimate #465 makes for an armed closing line (`cutInFinalSentence`: the
+  sentence's share of the text, plus `finalSentenceSlack`, on the rendered
+  opening) is heard as the end of it. Nothing is said again, the tool is
+  refused as an acknowledgement as before, and the opening is no longer owed. A
+  one-sentence opening has no final sentence to date, so an acknowledgement
+  anywhere in it owes the replay; a cut of an opening still being generated, or
+  of another turn while it is owed, is never dated. The exception is for
+  acknowledgements only: a greeting or words not known over the final sentence
+  are replayed as above.
+- Once the opening has been said again, or while an ending is armed, an
+  acknowledgement over it is what it was before: refused, no second telling.
+
+Logged: a blank final on any cut ("the final transcript of the words that cut
+the bot is blank", with `turn`, `isOpening`, `verdict`), a wait that settles a
+cut of the opening, and one line whenever a moving tool answers a cut ("a tool
+that could move the call answers a cut the engine made": `tool`, `turn`,
+`verdict`, `isOpening`, `playedMs`, `waitedMs`, `isRefused`).
 
 ### The opening stays owed
 
@@ -255,8 +335,9 @@ and was judged against that one. So the opening is owed at call level:
   it when no cut judges those words (the cut was superseded, or another
   utterance's final): the mark stands in for the cut. Once per call stays.
 - The mark clears when the opening has been asked for again, when a final
-  transcript has words (anything that is not a greeting, an acknowledgement
-  included), when a later turn with audio, neither muted nor cut, has played to the
+  transcript has words (anything that is not a greeting; an acknowledgement
+  only when it does not owe the replay, #610), when a later turn with audio,
+  neither muted nor cut, has played to the
   caller in full (`PLAYBACK_DONE`), or when the flow leaves the entry phase or an
   ending is under way.
 
@@ -275,8 +356,9 @@ and was judged against that one. So the opening is owed at call level:
   it when no cut judges those words (the cut was superseded, or another
   utterance's final): the mark stands in for the cut. Once per call stays.
 - The mark clears when the opening has been asked for again, when a final
-  transcript has words (anything that is not a greeting, an acknowledgement
-  included), when a later turn with audio, neither muted nor cut, has played to the
+  transcript has words (anything that is not a greeting; an acknowledgement
+  only when it does not owe the replay, #610), when a later turn with audio,
+  neither muted nor cut, has played to the
   caller in full (`PLAYBACK_DONE`), or when the flow leaves the entry phase or an
   ending is under way.
 
@@ -322,3 +404,11 @@ and was judged against that one. So the opening is owed at call level:
   (`TestLiveQwenCutOpener/.../hello`).
 - A greeting that lands before the opening's response has been created at all
   (turn 0) is an ordinary turn.
+- Words over the opening that no transcript makes known are refused only while
+  the opening can still be said again: over its replay they let a moving tool
+  run, as on any other turn (#610).
+- An acknowledgement in the opening's final sentence is dated from the text's
+  share, not from the audio; on a line spoken at an uneven pace the estimate can
+  be off by the slack it allows (#610).
+- A callee whose real answer over the opening the transcriber dropped is asked
+  again, after hearing the opening once more.
