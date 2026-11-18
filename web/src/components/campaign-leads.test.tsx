@@ -84,7 +84,7 @@ function renderLeads() {
   const tree = root.addChildren([
     createRoute({
       getParentRoute: () => root, path: '/admin/campaigns/$campaignId',
-      component: () => <CampaignLeads campaign={campaign} />,
+      component: () => <CampaignLeads campaign={campaign} intent="HIGH" page={0} onChange={() => {}} />,
     }),
     createRoute({ getParentRoute: () => root, path: '/admin/cdr/$callId', component: () => null }),
   ])

@@ -36,7 +36,7 @@ describe('the attempts list', () => {
           ? { items: [attempt(1, { isTestNumber: true }), attempt(2, {})], total: 2 }
           : undefined,
     })
-    renderWithProviders(<AttemptsTab campaign={campaign} />)
+    renderWithProviders(<AttemptsTab campaign={campaign} view={{ page: 0 }} onView={() => {}} />)
     const mine = (await screen.findByText('+8613800000001')).closest('tr') as HTMLElement
     const other = screen.getByText('+8613800000002').closest('tr') as HTMLElement
     expect(within(mine).getByText(i18n.t('campaign.testNumber'))).toBeTruthy()

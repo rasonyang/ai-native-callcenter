@@ -1,5 +1,4 @@
 import { Link } from '@tanstack/react-router'
-import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { Pager } from '@/components/pager'
@@ -21,11 +20,17 @@ const PAGE_SIZE = 50
  * that call filed, resolved with GET /callbacks?callId= and never by phone
  * number, which one customer's several calls and campaigns share. The status
  * is text only: working a callback is an agent's job on their own screen.
+ *
+ * The intent and the page (counted from 0) are the caller's, which keeps them
+ * in the address.
  */
-export function CampaignLeads({ campaign }: { campaign: Campaign }) {
+export function CampaignLeads({ campaign, intent, page, onChange }: {
+  campaign: Campaign
+  intent: CampaignLeadIntent
+  page: number
+  onChange: (next: { intent: CampaignLeadIntent; page: number }) => void
+}) {
   const { t } = useTranslation()
-  const [intent, setIntent] = useState<CampaignLeadIntent>('HIGH')
-  const [page, setPage] = useState(0)
   const { data, isPending, isError, error } = useCampaignContacts(campaign.id, {
     leadIntent: intent,
     limit: PAGE_SIZE,
@@ -39,10 +44,7 @@ export function CampaignLeads({ campaign }: { campaign: Campaign }) {
         <Select
           ariaLabel={t('campaign.leadIntent')}
           value={intent}
-          onChange={(next) => {
-            setIntent(next as CampaignLeadIntent)
-            setPage(0)
-          }}
+          onChange={(next) => onChange({ intent: next as CampaignLeadIntent, page: 0 })}
           options={LEAD_INTENTS.map((s) => ({ value: s, label: t(`campaign.intents.${s}`) }))}
         />
       </div>
@@ -79,7 +81,12 @@ export function CampaignLeads({ campaign }: { campaign: Campaign }) {
           ))}
         </TBody>
       </DataTable>
-      <Pager page={page} pageSize={PAGE_SIZE} total={data?.total ?? 0} onPage={setPage} />
+      <Pager
+        page={page}
+        pageSize={PAGE_SIZE}
+        total={data?.total ?? 0}
+        onPage={(next) => onChange({ intent, page: next })}
+      />
     </>
   )
 }
