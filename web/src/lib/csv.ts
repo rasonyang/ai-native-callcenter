@@ -10,6 +10,10 @@
  *
  * It is a single pass over the string with no per-character allocation, so a
  * list of tens of thousands of rows parses in a few milliseconds.
+ *
+ * The writer is plain RFC 4180. What a spreadsheet would make of a cell is the
+ * caller's to decide, cell by cell: guardFormula for free text, asText for a
+ * value that must stay text (a phone number).
  */
 
 import type { Table, TableRecord } from './table'
@@ -156,4 +160,33 @@ export function toCsv(rows: string[][], options: { delimiter?: string; bom?: boo
   const delimiter = options.delimiter ?? ','
   const body = rows.map((row) => row.map((cell) => quote(cell, delimiter)).join(delimiter)).join('\r\n')
   return (options.bom === false ? '' : '﻿') + body + '\r\n'
+}
+
+// --- Cells a spreadsheet must not reinterpret ---------------------------------
+
+/**
+ * A value that starts like a formula: =, +, - or @ first, or after leading
+ * whitespace, or a leading tab or carriage return (a spreadsheet may skip
+ * those and read what follows).
+ */
+const FORMULA_START = /^(?:[\t\r]|\s*[=+\-@])/
+
+/**
+ * A free-text value written so that a spreadsheet shows it and never runs it:
+ * one that starts like a formula gets a leading apostrophe, the OWASP
+ * convention for CSV injection. Anything else is returned as it is.
+ */
+export function guardFormula(value: string): string {
+  return FORMULA_START.test(value) ? `'${value}` : value
+}
+
+/**
+ * A value a spreadsheet must keep as text, such as a phone number: a leading
+ * tab makes it text, so a leading 0 stays and a long number is not turned
+ * into scientific notation. The tab is whitespace, so this application's own
+ * import, which trims every cell, reads the value back unchanged. Use it only
+ * for values that cannot themselves be formulas.
+ */
+export function asText(value: string): string {
+  return value === '' ? '' : `\t${value}`
 }

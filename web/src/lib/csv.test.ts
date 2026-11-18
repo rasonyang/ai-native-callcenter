@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { parseCsv, sniffDelimiter, toCsv } from './csv'
+import { asText, guardFormula, parseCsv, sniffDelimiter, toCsv } from './csv'
 
 describe('the CSV reader', () => {
   it('reads a plain file', () => {
@@ -148,5 +148,67 @@ describe('the CSV writer', () => {
   it('leads with a byte order mark so a spreadsheet reads UTF-8', () => {
     expect(toCsv([['a']]).charCodeAt(0)).toBe(0xfeff)
     expect(toCsv([['a']], { bom: false })).toBe('a\r\n')
+  })
+
+  it('quotes a cell with a comma, a double quote or a line break, and doubles the quotes', () => {
+    const text = toCsv([['note'], ['Li, Wei'], ['the "gold" plan'], ['first\nsecond'], ['cr\rhere']], { bom: false })
+    expect(text).toBe('note\r\n"Li, Wei"\r\n"the ""gold"" plan"\r\n"first\nsecond"\r\n"cr\rhere"\r\n')
+  })
+
+  it('ends every record with CRLF and writes a header with no rows as a file of one line', () => {
+    expect(toCsv([['number', 'leadIntent']])).toBe('\uFEFFnumber,leadIntent\r\n')
+  })
+
+  it('writes enum values and RFC 3339 times exactly as given, unquoted', () => {
+    const text = toCsv([['leadIntent', 'createdAt'], ['DO_NOT_CALL', '2026-11-18T09:30:00+08:00']], { bom: false })
+    expect(text).toBe('leadIntent,createdAt\r\nDO_NOT_CALL,2026-11-18T09:30:00+08:00\r\n')
+  })
+
+  it('keeps Chinese text as it is, and it reads back through the BOM', () => {
+    const rows = [['leadNotes'], ['王伟想了解套餐，下周回电'], ['李娜 “金卡” 用户']]
+    const text = toCsv(rows)
+    // A full-width comma and curly quotes are text, not CSV syntax.
+    expect(text).toBe('\uFEFFleadNotes\r\n王伟想了解套餐，下周回电\r\n李娜 “金卡” 用户\r\n')
+    const table = parseCsv(text)
+    expect([table.header, ...table.rows.map((r) => r.cells)]).toEqual(rows)
+  })
+})
+
+describe('spreadsheet-safe cells', () => {
+  it('puts an apostrophe before free text a spreadsheet would run as a formula', () => {
+    expect(guardFormula('=HYPERLINK("http://example.invalid","x")')).toBe(`'=HYPERLINK("http://example.invalid","x")`)
+    expect(guardFormula('@SUM(A1:A2)')).toBe(`'@SUM(A1:A2)`)
+    expect(guardFormula('-2+3')).toBe(`'-2+3`)
+    expect(guardFormula('+1 wants a call back')).toBe(`'+1 wants a call back`)
+  })
+
+  it('guards a formula behind a leading tab, carriage return or spaces too', () => {
+    expect(guardFormula('\t=1+1')).toBe(`'\t=1+1`)
+    expect(guardFormula('\r=1+1')).toBe(`'\r=1+1`)
+    expect(guardFormula('  =1+1')).toBe(`'  =1+1`)
+    expect(guardFormula('\tplain')).toBe(`'\tplain`)
+  })
+
+  it('leaves ordinary text, enum values, ids and an empty cell alone', () => {
+    for (const value of ['Wants the offer', '王伟', 'HIGH', '0199f3a2-7c41-7d22-9b1e-000000001001', '', 'a=b', 'x-y', 'a@b']) {
+      expect(guardFormula(value)).toBe(value)
+    }
+  })
+
+  it('writes a guarded cell that reads back with its apostrophe and nothing lost', () => {
+    const rows = [['leadNotes'], [guardFormula('=cmd|" /C calc"!A0')], [guardFormula('-, "dash"\nnext')]]
+    const table = parseCsv(toCsv(rows))
+    expect(table.rows.map((r) => r.cells[0])).toEqual([`'=cmd|" /C calc"!A0`, `'-, "dash"\nnext`])
+  })
+
+  it('writes a phone number as text with a leading tab, which a trimmed read drops again', () => {
+    expect(asText('01060000000')).toBe('\t01060000000')
+    expect(asText('')).toBe('')
+    const text = toCsv([['number'], [asText('01060000000')], [asText('+447700900123')]], { bom: false })
+    // A padded cell is quoted, so the tab is inside the field and never a delimiter.
+    expect(text).toBe('number\r\n"\t01060000000"\r\n"\t+447700900123"\r\n')
+    const cells = parseCsv(text).rows.map((r) => r.cells[0])
+    expect(cells).toEqual(['\t01060000000', '\t+447700900123'])
+    expect(cells.map((c) => c.trim())).toEqual(['01060000000', '+447700900123'])
   })
 })

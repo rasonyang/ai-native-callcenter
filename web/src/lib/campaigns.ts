@@ -91,6 +91,9 @@ export interface ContactFilter {
   offset?: number
 }
 
+/** Which contacts a list shows, without the page: what a tab and its export share. */
+export type ContactQuery = Omit<ContactFilter, 'limit' | 'offset'>
+
 export interface AttemptFilter {
   contactId?: string
   outcome?: CampaignOutcome
@@ -118,9 +121,10 @@ export const campaignApi = {
   pause: (id: string) => request<Campaign>(`/campaigns/${id}/pause`, { method: 'POST' }),
   resume: (id: string) => request<Campaign>(`/campaigns/${id}/resume`, { method: 'POST' }),
   cancel: (id: string) => request<Campaign>(`/campaigns/${id}/cancel`, { method: 'POST' }),
-  contacts: (id: string, filter: ContactFilter) =>
+  contacts: (id: string, filter: ContactFilter, signal?: AbortSignal) =>
     request<components['schemas']['CampaignContactList']>(
       `/campaigns/${id}/contacts${query({ ...filter })}`,
+      { signal },
     ),
   importContacts: (id: string, contacts: CampaignContactRow[]) =>
     request<CampaignImportResult>(`/campaigns/${id}/contacts`, {

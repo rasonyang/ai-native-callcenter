@@ -1031,6 +1031,14 @@
     "callback": "Callback",
     "noContacts": "No contacts match.",
     "noLeads": "No leads with this intent yet.",
+    "export": {
+      "start": "Export",
+      "hint": "Download every lead the current filter matches, all pages, as a CSV file",
+      "starting": "Exporting…",
+      "progress": "Exporting {{done}} of {{total}}",
+      "cancel": "Cancel export",
+      "failed": "The export stopped and no file was saved: {{reason}}"
+    },
     "noAttempts": "No attempts yet.",
     "outcome": "Outcome",
     "allOutcomes": "All outcomes",

@@ -1027,6 +1027,14 @@
     "callback": "回电",
     "noContacts": "没有符合条件的联系人。",
     "noLeads": "暂时没有这种意向的线索。",
+    "export": {
+      "start": "导出",
+      "hint": "将当前筛选条件下的全部线索（所有页）下载为 CSV 文件",
+      "starting": "正在导出…",
+      "progress": "正在导出 {{done}} / {{total}}",
+      "cancel": "取消导出",
+      "failed": "导出已中止，未保存文件：{{reason}}"
+    },
     "noAttempts": "还没有呼叫记录。",
     "outcome": "结果",
     "allOutcomes": "全部结果",

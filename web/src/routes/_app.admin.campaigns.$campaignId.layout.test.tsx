@@ -135,6 +135,8 @@ function render(
   data: {
     campaign?: Campaign; contacts?: CampaignContact[]; attempts?: CampaignAttempt[]
     summary?: CampaignOutcomeSummary
+    /** Answers the leads export's pages (limit=1000), by offset. */
+    exportPage?: (offset: number) => unknown
   } = {},
 ) {
   const detail = data.campaign ?? campaign()
@@ -146,8 +148,12 @@ function render(
       if (method !== 'GET') return undefined
       if (path === `/campaigns/${CAMPAIGN_ID}`) return detail
       if (path.startsWith(`/campaigns/${CAMPAIGN_ID}/contacts`)) {
+        const params = new URLSearchParams(path.split('?')[1])
+        if (data.exportPage && params.get('limit') === '1000') {
+          return data.exportPage(Number(params.get('offset') ?? 0))
+        }
         // The leads tab asks for one intent at a time.
-        const intent = new URLSearchParams(path.split('?')[1]).get('leadIntent')
+        const intent = params.get('leadIntent')
         const items = intent ? contactRows.filter((row) => row.leadIntent === intent) : contactRows
         return { items, total: items.length === contactRows.length ? 120 : items.length }
       }
@@ -392,6 +398,40 @@ describe('campaign detail, leads tab', () => {
     await drawn()
     await openTab(user, 'campaign.tabs.leads')
     await screen.findAllByText(i18n.t('campaign.openCall'))
+    await expectLayout(ctx)
+  })
+})
+
+describe('campaign detail, leads export', () => {
+  // The toolbar while a long export runs: the progress, in the largest
+  // counts, and Cancel beside the intent filter. The second page never comes.
+  layoutTest('campaigns/$campaignId leads (export running)', async (ctx) => {
+    const { user } = render({
+      exportPage: (offset) =>
+        offset === 0
+          ? { items: [contact(1, { leadIntent: 'HIGH', lastCallId: null })], total: 99999999 }
+          : new Promise(() => {}),
+    })
+    await drawn()
+    await openTab(user, 'campaign.tabs.leads')
+    await user.click(await screen.findByRole('button', { name: i18n.t('campaign.export.start') }))
+    await screen.findByRole('button', { name: i18n.t('campaign.export.cancel') })
+    await screen.findByText(i18n.t('campaign.export.progress', { done: 1, total: 99999999 }))
+    await expectLayout(ctx)
+  })
+
+  // A failed page: the refusal is a line under the toolbar, and no file.
+  layoutTest('campaigns/$campaignId leads (export failed)', async (ctx) => {
+    const { user } = render({
+      exportPage: () =>
+        new Response(JSON.stringify({ error: { code: 'INTERNAL', message: 'failed' } }), {
+          status: 500, headers: { 'content-type': 'application/json' },
+        }),
+    })
+    await drawn()
+    await openTab(user, 'campaign.tabs.leads')
+    await user.click(await screen.findByRole('button', { name: i18n.t('campaign.export.start') }))
+    await screen.findByRole('alert')
     await expectLayout(ctx)
   })
 })
