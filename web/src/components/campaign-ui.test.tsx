@@ -358,7 +358,7 @@ describe('the campaign list', () => {
     await screen.findByText('Spring renewals')
     const row = screen.getByRole('row', { name: /Spring renewals/ })
     expect(within(row).getByText('已暂停')).toBeInTheDocument()
-    expect(within(row).getByText(/语音服务商故障/)).toBeInTheDocument()
+    expect(within(row).getByText('· 已自动暂停：实时模型服务商限额已满或不可用')).toBeInTheDocument()
   })
 })
 

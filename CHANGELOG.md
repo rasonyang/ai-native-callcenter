@@ -78,6 +78,17 @@ carries the one-line installer's files.
   it did not before, and a change of `AICC_OUTBOUND_HOURS` when the application
   restarts. A window sent again in another order is no change (#616).
 
+### Changed
+
+- A campaign the provider breaker paused no longer says the "voice provider is
+  failing", which operators read as the phone line. The console now says the
+  realtime model provider's quota is reached, or it is unavailable, and that the
+  usual cause is its per-minute quota (tokens or connections), which clears
+  within a minute; an invalid API key or a network fault does the same. It asks
+  the operator to lower the campaign's maximum concurrent calls or raise the
+  quota before resuming. Text only, in English and Chinese: the
+  `PROVIDER_FAILURE` pause reason is unchanged (#628).
+
 ## v0.8.8 - 2026-11-18
 
 ### Upgrade notes

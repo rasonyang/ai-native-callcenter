@@ -152,7 +152,7 @@ describe('the sentence a campaign state reads as', () => {
     expect(trunk.isBreakerPause).toBe(true)
     expect(trunk.line).toBe('Paused · Paused automatically: the trunk is failing')
     expect(provider.isBreakerPause).toBe(true)
-    expect(provider.line).toContain('语音服务商')
+    expect(provider.line).toBe('已暂停 · 已自动暂停：实时模型服务商限额已满或不可用')
   })
 
   it('treats a missing outbound endpoint as a pause that needs a person', () => {
