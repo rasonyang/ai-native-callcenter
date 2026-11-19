@@ -130,6 +130,9 @@ type openCut struct {
 	// isReplayAsked says the opening was asked for again on this cut's verdict
 	// (SayOpeningAgain).
 	isReplayAsked bool
+	// isWaitOver says a tool call waited cutVerdictWait for the verdict and no
+	// final came: the lead guard (#612) does not wait for it again.
+	isWaitOver bool
 }
 
 // backchannelState is everything the session keeps for backchannels. mu is
@@ -206,6 +209,8 @@ func (b *backchannelState) remove(u *utterance) {
 // onSpeechStarted handles the provider reporting that the caller started to
 // speak.
 func (s *Session) onSpeechStarted(itemID string) {
+	// First: a barge-in flushes the audio the utterance's start is dated by.
+	s.noteCallerStarted(itemID)
 	if !s.isHolding() {
 		// Without the control the engine has cut the bot already, or will. An
 		// open cut that does not know its utterance yet learns it here.
@@ -318,6 +323,7 @@ func (s *Session) actOnStop(u *utterance) {
 	s.mu.Lock()
 	s.timer.onSpeechStopped()
 	s.mu.Unlock()
+	s.noteCallerAnswerAsked(u.itemID)
 	if err := s.turns.AnswerCallerTurn(u.itemID); err != nil {
 		s.log.Warn("could not ask for the caller's turn", "itemId", u.itemID, "error", err)
 	}
@@ -325,6 +331,7 @@ func (s *Session) actOnStop(u *utterance) {
 
 // onSpeechStopped handles the provider reporting the end of an utterance.
 func (s *Session) onSpeechStopped(itemID string) {
+	s.noteCallerStopped(itemID)
 	if !s.isHolding() {
 		s.mu.Lock()
 		s.timer.onSpeechStopped()
@@ -348,6 +355,7 @@ func (s *Session) onSpeechStopped(itemID string) {
 		s.mu.Lock()
 		s.timer.onSpeechStopped()
 		s.mu.Unlock()
+		s.noteCallerAnswerAsked(itemID)
 		if err := s.turns.AnswerCallerTurn(itemID); err != nil {
 			s.log.Warn("could not ask for the caller's turn", "itemId", itemID, "error", err)
 		}
@@ -373,6 +381,7 @@ func (s *Session) onInputTranscript(event provider.Event) {
 	} else {
 		openingCut = s.noteCutVerdict(event)
 	}
+	s.noteCallerFinal(event.ItemID, event.Text, isBackchannel)
 	if isBackchannel {
 		// Recorded as the caller's words, flagged; nothing else hears it: not
 		// the turn timer (#448's cue), not the flow, not the dead-air watch.
@@ -504,6 +513,10 @@ func (s *Session) openCut(cut Event) {
 		s.bc.owedAfterTurn = max(s.bc.owedAfterTurn, cut.Turn)
 	}
 	next := &openCut{event: cut, isOpening: isOpening, isOpeningLine: isOpeningLine, done: make(chan struct{})}
+	if isOpening {
+		// The lead guard's record of who spoke over the opening (#612).
+		s.noteOpeningCut(next)
+	}
 	// The utterance that cut is the latest one the provider named, unless its
 	// transcript is already in (then it was an earlier utterance, and the next
 	// speech start is this one).
@@ -735,6 +748,7 @@ func (s *Session) cutVerdictOf(cut *openCut) (verdict cutVerdict, waited time.Du
 			}
 			s.bc.mu.Lock()
 			verdict = cut.verdict
+			cut.isWaitOver = verdict == cutVerdictUnknown
 			s.bc.mu.Unlock()
 			if verdict != cutVerdictUnknown {
 				// A final judged it as the wait ran out.
@@ -792,6 +806,7 @@ func (s *Session) onGreetingCap(u *utterance) {
 	u.state = utteranceDeclined
 	u.stopCap = nil
 	s.bc.mu.Unlock()
+	s.noteCallerDeclined(u.itemID)
 	s.log.Info("a greeting over the opening had no final transcript by the second cap; declined, the opening goes on",
 		"itemId", u.itemID, "capMs", holdCap.Milliseconds())
 	if err := s.turns.DeclineCallerTurn(u.itemID); err != nil {

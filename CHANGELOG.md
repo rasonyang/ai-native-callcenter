@@ -65,6 +65,23 @@ carries the one-line installer's files.
 
 ### Fixed
 
+- A callee who refused the offer is no longer recorded as interested. A tool
+  call that would record a `HIGH` or `MEDIUM` lead (a move into a phase that
+  declares one, or `record_lead` with one) is now judged before it runs, on
+  every engine. It is refused as a conversation, and no lead is written, when
+  the callee's words it answers began before they had heard the opening to its
+  final sentence (the opening is then said again, once per call), or when the
+  transcript of those words is only a refusal ("不要不要", "不需要，谢谢",
+  "no thanks"). When that transcript is not in yet the call waits for it, for a
+  bounded moment; if none comes, or it is blank, the call is refused once and
+  the bot asks the callee to confirm, and its next call for the same answer
+  runs. A classification tool is judged by the move its value makes, so a
+  decline is never held up. A question or any other word is not a refusal, and
+  `leadIntent` keeps its meaning when the call runs. Each judged call is
+  logged without the callee's words and counted in
+  `aicc_bot_lead_guard_total{reason,provider}`. The isolated e2e stack's mock
+  provider can now play the callee's words (`HEAR`), and its C01 script hears
+  an agreement before it records its lead (#612).
 - A campaign whose calling window is widened after it closed dials again at
   once. A window ending at 17:30 and changed to end at 18:00 at 17:35 left the
   campaign waiting for the next morning, because the contacts already tried

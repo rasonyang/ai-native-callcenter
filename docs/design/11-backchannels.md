@@ -176,6 +176,11 @@ a. Flow. If the verdict is `ack`, a tool call in the response that answers the
    A greeting that cut the opening line (see "Greetings over the opening") is
    judged the same way: the tool is refused with its own reason (the caller only
    said hello as they picked up), and the opening is said again.
+   A tool that would record the customer's interest and that these limits let
+   through (words, or no verdict in time) is judged next by the lead guard
+   (#612, design 02 section 6): words that began before the opening's final
+   sentence refuse it whatever their verdict, on every engine, and the opening
+   is said again under the same once-per-call budget.
 b. Closing line. A cut that landed on an armed closing line that had finished
    generating was counted as the first interruption before the verdict existed.
    When the verdict arrives as `ack` the cut becomes the second-interruption

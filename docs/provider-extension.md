@@ -394,6 +394,23 @@ needs nothing for it. `hangup` also takes a required `reason` (`flow.HangupReaso
 its schema in `session.update` is no longer an empty object; nothing about it
 is provider-specific.
 
+A tool call that would record a customer's interest is judged on the caller's words before it runs (issue
+[#612](https://github.com/rasonyang/ai-native-callcenter/issues/612), `internal/aicall/lead_guard.go`). No
+protocol names on a tool call the caller item it answers, so the session links them itself
+(`internal/aicall/caller_turns.go`): the call answers the latest caller utterance that had ended
+(`EventTypeSpeechStopped`) when its response began (`EventTypeResponseStarted`), or on a client that
+controls interruption the latest whose turn was asked for (`AnswerCallerTurn`); its final transcript
+(`EventTypeInputTranscript`, `IsFinal`) is matched by `ItemID` when the speech events and the transcript
+carry the same one, else to the oldest utterance still waiting for one. A new client emits, in wire
+order, `SPEECH_STARTED` before anything the speech causes, `SPEECH_STOPPED` before the response that
+answers it starts, and the final transcript whenever it comes (the guard waits up to a second for it),
+with the same item id on all three where the wire has one; doubao sends none and its final comes before
+the speech stops, which works as well. A client that reports transcripts and no speech events has each
+final taken as an utterance of its own. One that reports neither has the call's first such call
+refused and every later one let through: it is not a trait to set. The opening's timing is judged from the
+speech start against the audio the session queued, and from a cut the engine reports itself just before
+the speech start; nothing about it is provider-specific.
+
 ### A tool result that asks for no turn (`QuietToolAnswerer`)
 
 `VoiceSession.SendToolResult` always asks the model for the turn that answers the

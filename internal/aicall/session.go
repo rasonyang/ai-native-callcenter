@@ -153,6 +153,13 @@ type Event struct {
 	// orchestrator in this package reads it.
 	soFar responseSoFar
 
+	// answered, on a TOOL_CALL, is the caller utterance the call's response
+	// answers (caller_turns.go), nil when the caller had said nothing it could;
+	// calledAt is when the call arrived. Read at emit, like cut. Only the
+	// orchestrator in this package reads them (the lead guard, #612).
+	answered *callerTurn
+	calledAt time.Time
+
 	// IsInterrupted marks a TURN_DONE whose turn was cut short — by the
 	// caller, by a keypress, or to make room for another turn. Such a turn
 	// never reaches PLAYBACK_DONE, and what it produced is not a line anybody
@@ -285,6 +292,11 @@ type Session struct {
 	bc        backchannelState
 	holdAfter func(d time.Duration, f func()) (stop func() bool)
 	cutWait   func(d time.Duration) <-chan time.Time
+	// ct is the call's recent caller utterances, for the lead guard
+	// (caller_turns.go); finalWait is the clock of its wait for a final
+	// transcript, nil for the real one. A test sets it before Start.
+	ct        callerTurns
+	finalWait func(d time.Duration) <-chan time.Time
 	uplink    *media.Converter
 	// uplinkSilence is the fill frame for a slot with no caller audio, in the
 	// provider's input format.
@@ -401,6 +413,9 @@ type Session struct {
 	turnText          []byte
 	turnTextHasDeltas bool
 	turnToolCalls     int
+	// turnAnswers is the caller utterance the turn in progress answers, set by
+	// beginTurn (caller_turns.go); nil when there is none.
+	turnAnswers *callerTurn
 	// isAsideOwed says SpeakAside asked for a line and no turn has started
 	// since; asideTurn is the turn that said the latest aside, zero for none.
 	// See SpeakAside.
@@ -1308,6 +1323,7 @@ func (s *Session) handleModelEvent(event provider.Event) {
 			Type: EventTypeToolCall, ToolCallID: event.ToolCallID,
 			ToolName: event.ToolName, ToolArgs: event.ToolArgs,
 			Turn: turn, cut: s.cutFor(turn), soFar: soFar,
+			answered: s.callerTurnAnswered(), calledAt: time.Now(),
 		})
 
 	case provider.EventTypeError:
@@ -1616,6 +1632,7 @@ func (s *Session) beginTurn(isSpokenLine, isLineAskedAgain bool) {
 	s.turnText = s.turnText[:0]
 	s.turnTextHasDeltas = false
 	s.turnToolCalls = 0
+	s.turnAnswers = s.answeredCallerTurnLocked()
 	if s.isReplayOwed && isSpokenLine {
 		s.isReplayOwed = false
 		s.replayTurn = s.turnSeq
