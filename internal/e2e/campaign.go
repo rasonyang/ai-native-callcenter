@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -342,6 +343,13 @@ func scriptProblems(cs Case, s *mockprovider.Script) []string {
 	}
 	if cs.Lead != "" && (lead < 0 || lead+1 >= len(s.Steps) || s.Steps[lead+1].Op != mockprovider.OpAwaitToolResult) {
 		problems = append(problems, fmt.Sprintf("%s: script %q does not record_lead %s with the case's notes and await the result", cs.ID, s.Name, cs.Lead))
+	}
+	// The platform judges a HIGH or MEDIUM lead against the callee's words the
+	// call answers (#612): with none heard it is refused, and the case's lead is
+	// never written.
+	if lead > 0 && (cs.Lead == "HIGH" || cs.Lead == "MEDIUM") &&
+		!slices.ContainsFunc(s.Steps[:lead], func(st mockprovider.Step) bool { return st.Op == mockprovider.OpHear }) {
+		problems = append(problems, fmt.Sprintf("%s: script %q records a %s lead without hearing the callee first (HEAR)", cs.ID, s.Name, cs.Lead))
 	}
 	byCallee := false
 	for _, st := range cs.Steps {

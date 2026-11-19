@@ -999,6 +999,12 @@ const hangupCauseMediaOrProvider = "MEDIA_OR_PROVIDER_FAILURE"
 // (flow.Runtime.refuseHangupReason: FLOW_INSTRUCTED only where the phase lets
 // the flow order a hangup, #553). One that had no words to judge and runs is
 // counted by what the caller last said (wordless_hangup.go).
+//
+// A call that would record the customer's interest (flow.Runtime.
+// ClaimsInterest) is judged next, by the lead guard (#612, lead_guard.go): the
+// timing of the caller words it answers against the opening, then those words'
+// final transcript, waited for if need be. Refused, nothing runs and no lead is
+// written; the refusal asks for a turn like any other answer.
 func (o *Orchestrator) answerToolCall(ctx context.Context, event Event, batch *toolBatch,
 	guard *answerGuard, session *Session, runtime *flow.Runtime, actions *callActions,
 	recorder *callRecorder, log *slog.Logger) {
@@ -1013,6 +1019,7 @@ func (o *Orchestrator) answerToolCall(ctx context.Context, event Event, batch *t
 	node := runtime.Engine().NodeID()
 	var output, moved string
 	isGuardRefusal, isReplayOwed := false, false
+	var replay *openCut
 	switch {
 	case o.refusesHangup(event, guard, runtime, actions, log):
 		// The response was answering the caller: the answer plays on, and
@@ -1031,6 +1038,21 @@ func (o *Orchestrator) answerToolCall(ctx context.Context, event Event, batch *t
 		// waits: no transcript will bring it to the drive loop (#610).
 		if isReplayOwed {
 			defer o.sayOpeningAgain(event.cut, session, runtime, actions, log)
+		}
+	case runtime.ClaimsInterest(event.ToolName, event.ToolArgs):
+		// A call that would record the customer's interest is judged on the
+		// timing and the words of the caller utterance it answers (#612,
+		// lead_guard.go), before anything runs. Refused, it is a conversation;
+		// under guard A the opening is said again once the refusal is answered,
+		// as on a cut the wait settled.
+		var isRefused bool
+		output, replay, isRefused = o.refusesInterest(event, &guard.interest, session, runtime, actions, log)
+		if !isRefused {
+			output, moved = o.dispatch(ctx, event, batch, session, runtime, actions, log)
+			break
+		}
+		if replay != nil {
+			defer o.sayOpeningAgain(replay, session, runtime, actions, log)
 		}
 	default:
 		output, moved = o.dispatch(ctx, event, batch, session, runtime, actions, log)

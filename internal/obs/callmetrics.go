@@ -52,6 +52,7 @@ var (
 	botUnbacked        metric.Int64Counter
 	botClaimCues       metric.Int64Counter
 	botWordlessHangups metric.Int64Counter
+	botLeadGuard       metric.Int64Counter
 	botFirstMedia      metric.Int64Histogram
 	botFirstAudio      metric.Int64Histogram
 	botCallerFirstWait metric.Int64Histogram
@@ -176,6 +177,16 @@ func init() {
 			"to judge here, so this is how often a hangup it cannot see follows a question. "+
 			"Read from the caller's transcript, so a signal rather than proof. On doubao a "+
 			"tool call is a turn of its own, so every hangup there counts."))
+	botLeadGuard, _ = meter.Int64Counter("aicc_bot_lead_guard_total",
+		metric.WithDescription("Tool calls that would record a customer's interest (a move "+
+			"into a phase that declares a HIGH or MEDIUM lead, or record_lead with one), as the "+
+			"lead guard judged them before they ran, by reason and provider. Refused: "+
+			"OPENING_UNHEARD (the caller's words began before they had heard the opening to "+
+			"its final sentence), DECLINED (the final transcript was only refusal phrases), "+
+			"NO_FINAL (none within the wait), BLANK_FINAL, NO_CALLER_TURN (the caller had "+
+			"said nothing). Ran: WORDS (any other words), UNCONFIRMED (words not known, let "+
+			"through: a later response on the same caller turn, or an ending under way). Read "+
+			"from the caller's transcript, so a signal rather than proof."))
 	botClaimCues, _ = meter.Int64Counter("aicc_bot_claim_cues_total",
 		metric.WithDescription("Cues the platform sent after a bot turn claimed a lookup, "+
 			"transfer or message no tool call backed, by claim, provider, trigger "+
@@ -593,6 +604,40 @@ func RecordWordlessHangup(reason, callerTurn, provider string) {
 	botWordlessHangups.Add(context.Background(), 1, metric.WithAttributes(
 		attribute.String("reason", reason), attribute.String("caller_turn", callerTurn),
 		attribute.String("provider", provider)))
+}
+
+// What the lead guard concluded about a call that would record a customer's
+// interest (RecordLeadGuard, #612).
+const (
+	// LeadGuardWords: the caller's words were no refusal; the call ran.
+	LeadGuardWords = "WORDS"
+	// LeadGuardOpeningUnheard: the words began before the caller had heard the
+	// opening to its final sentence; refused.
+	LeadGuardOpeningUnheard = "OPENING_UNHEARD"
+	// LeadGuardDeclined: the final transcript was only refusal phrases;
+	// refused.
+	LeadGuardDeclined = "DECLINED"
+	// LeadGuardNoFinal: no final transcript within the wait; refused.
+	LeadGuardNoFinal = "NO_FINAL"
+	// LeadGuardBlankFinal: the final transcript was blank; refused.
+	LeadGuardBlankFinal = "BLANK_FINAL"
+	// LeadGuardNoCallerTurn: the caller had said nothing the call could answer;
+	// refused.
+	LeadGuardNoCallerTurn = "NO_CALLER_TURN"
+	// LeadGuardUnconfirmed: words not known, and the call ran: refused once
+	// already for the same caller turn, or the call's ending is under way.
+	LeadGuardUnconfirmed = "UNCONFIRMED"
+)
+
+// RecordLeadGuard counts one call the lead guard judged (#612), by what it
+// concluded (LeadGuard*). Every judged call counts once, refused or not, so the
+// share refused per reason can be read per engine.
+func RecordLeadGuard(reason, provider string) {
+	if botLeadGuard == nil {
+		return
+	}
+	botLeadGuard.Add(context.Background(), 1, metric.WithAttributes(
+		attribute.String("reason", reason), attribute.String("provider", provider)))
 }
 
 // Outcome values of a claim cue (RecordClaimCue).

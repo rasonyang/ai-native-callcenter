@@ -41,7 +41,13 @@ import (
 // What happens in between that drops it is in answerGuard.
 //
 // The guard judges the bot's own words and never the caller's: what the
-// caller meant is not something to work out from a transcript. Its evidence is
+// caller meant is not something to work out from a transcript. That rule is the
+// hangup's, and it stands. One guard departs from it, for its own tools only:
+// a call that would record the customer's interest is refused when the
+// caller's final transcript is only a refusal, or is not known (#612,
+// lead_guard.go; owner decision 2026-11-19), because a lead's transcripts
+// carried the refusal and a wrong HIGH costs a callback to someone who said
+// no. Its evidence is
 // the response's transcript as it stood when the call arrived on the wire
 // (Event.soFar, read at emit like the cut of #403). Its blind spot is a
 // response whose call arrives before any of its words: there is nothing to
@@ -88,6 +94,10 @@ type answerGuard struct {
 	// wordless_hangup.go). drive gives it the provider's name and the call's
 	// log.
 	wordless wordlessHangups
+	// interest is the lead guard's state (#612, lead_guard.go): a separate
+	// guard, which judges the caller's words, kept here because drive hands
+	// both to answerToolCall together.
+	interest interestGuard
 	// anythingElse is the turn whose answer the owed cue follows, and the
 	// phase it was given in; turn zero is none. It is for the next dead air
 	// only, and is dropped before it by anything that makes the answer not the

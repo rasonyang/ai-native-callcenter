@@ -332,3 +332,43 @@ func TestAWordlessHangupIsCountedByReasonCallerTurnAndProvider(t *testing.T) {
 		}
 	}
 }
+
+func TestALeadGuardVerdictIsCountedByReasonAndProvider(t *testing.T) {
+	reader := useTestReader()
+	read := func() map[string]int64 {
+		var rm metricdata.ResourceMetrics
+		if err := reader.Collect(context.Background(), &rm); err != nil {
+			t.Fatal(err)
+		}
+		out := map[string]int64{}
+		for _, sm := range rm.ScopeMetrics {
+			for _, m := range sm.Metrics {
+				if m.Name != "aicc_bot_lead_guard_total" {
+					continue
+				}
+				for _, dp := range m.Data.(metricdata.Sum[int64]).DataPoints {
+					reason, _ := dp.Attributes.Value("reason")
+					provider, _ := dp.Attributes.Value("provider")
+					out[reason.AsString()+"/"+provider.AsString()] += dp.Value
+				}
+			}
+		}
+		return out
+	}
+	before := read()
+	RecordLeadGuard(LeadGuardDeclined, "qwen")
+	RecordLeadGuard(LeadGuardDeclined, "qwen")
+	RecordLeadGuard(LeadGuardOpeningUnheard, "qwen")
+	RecordLeadGuard(LeadGuardWords, "openai")
+	after := read()
+	for key, want := range map[string]int64{
+		"DECLINED/qwen":        2,
+		"OPENING_UNHEARD/qwen": 1,
+		"WORDS/openai":         1,
+		"NO_FINAL/qwen":        0,
+	} {
+		if got := after[key] - before[key]; got != want {
+			t.Errorf("%s gained %d, want %d (before %v, after %v)", key, got, want, before, after)
+		}
+	}
+}

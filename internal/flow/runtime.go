@@ -512,9 +512,109 @@ func (r *Runtime) refuseFlowInstructed(phase string) string {
 }
 
 // CanMoveOnTool is Engine.CanMoveOnTool for a tool the phase allows. A tool the
-// phase refuses never moves anything.
+// phase refuses never moves anything. It is an upper bound that also holds for
+// refusal tools and hangup; the narrower question of a move that records the
+// customer's interest is ClaimsInterest.
 func (r *Runtime) CanMoveOnTool(name string) bool {
 	return r.IsToolAllowed(name) && r.engine.CanMoveOnTool(name)
+}
+
+// ClaimsInterest reports whether a tool call, if it ran now, would record that
+// the customer is interested (#612): a move into a phase that declares a HIGH
+// or MEDIUM lead (judged in the batch's phase like any move: for a slot tool
+// the move this call's value makes, for any other tool a rule that could lead
+// there, Engine.CanMoveIntoInterest), or record_lead with intent HIGH or MEDIUM where Dispatch would
+// run it (offered on this call, and the current phase declares no lead of its
+// own). The application judges such a call against the caller's words before
+// it runs; anything else, a move into a LOW, NONE or DO_NOT_CALL phase, a
+// refusal tool or hangup, is not asked about. A declared lead is written only
+// on a campaign call, but the move is judged on every call: the phase's
+// declaration says what entering it means. It reads and changes nothing.
+func (r *Runtime) ClaimsInterest(name, arguments string) bool {
+	if name == ToolRecordLead {
+		intent := strings.ToUpper(strings.TrimSpace(stringArg(parseArguments(arguments), "intent")))
+		return r.IsToolAllowed(name) && !r.IsLeadSetByPhase() && IsInterestIntent(intent)
+	}
+	if !r.IsToolAllowed(name) || !r.engine.CanMoveIntoInterest(name) {
+		return false
+	}
+	// A slot tool's result is known before it runs: the move this call would
+	// make decides, so a "decline" of the same tool whose "agree" leads into a
+	// HIGH phase is not asked about. Any other tool's result is the backend's
+	// or the call's, and a rule that could lead into such a phase is enough.
+	tool, ok := r.engine.Spec().Tools[name]
+	if !ok || tool.Kind != ToolKindSlot || slices.Contains(BuiltinToolNames, name) {
+		return true
+	}
+	args := parseArguments(arguments)
+	value, err := cleanSlotValue(tool, args[slotToolValueArg])
+	slot := tool.Slot
+	if err != nil {
+		slot = ""
+	}
+	return r.engine.wouldMoveIntoInterest(name, args, map[string]any{"ok": boolAsFlag(err == nil)}, slot, value)
+}
+
+// RefuseAsUnheardOffer is the answer to a tool that would record the
+// customer's interest (ClaimsInterest) when the caller's words began before
+// they had heard the opening to its final sentence (#612): a callee cannot
+// agree to an offer they have not heard. A refusal as a conversation, ok=0,
+// with the phase's instruction as the way on; it runs nothing. isOpeningSaidAgain
+// says the opening is said to them again, so the model waits for their answer
+// to it; otherwise it is told to make sure they have heard the offer first. It
+// logs nothing: the caller, which judged the call, logs the decision.
+func (r *Runtime) RefuseAsUnheardOffer(name string, isOpeningSaidAgain bool) string {
+	reason := "the caller spoke over the opening before hearing it to the end, so they have not heard " +
+		"the offer and what they said is not an answer to it; " + name + " was not carried out"
+	if isOpeningSaidAgain {
+		reason += ". The opening is said to them again; wait for their answer to it"
+	} else {
+		reason += ". Make sure they have heard the offer, and wait for their answer to it"
+	}
+	if r.engine.Lang() == LangZH {
+		reason = "来电者在开场白还没听完时就开口了,还没听到完整的内容,说的话不能当作对它的回答,所以没有执行 " + name
+		if isOpeningSaidAgain {
+			reason += "。开场白会再对他说一遍,等对方回答之后再继续"
+		} else {
+			reason += "。先确认对方听清了内容,等对方回答之后再继续"
+		}
+	}
+	return Failed(reason, r.phasePreamble()+r.engine.Instruction()).asToolOutput()
+}
+
+// RefuseAsDeclined is the answer to a tool that would record the customer's
+// interest when the caller's words it answered were only a refusal ("不要不要",
+// "no thanks", #612): a refusal as a conversation, ok=0, with the phase's
+// instruction as the way on; nothing runs and no lead is written. The model is
+// told to answer a refusal, and to ask the caller to say so if it believes they
+// did agree, so a misjudged "no" costs one exchange. It logs nothing.
+func (r *Runtime) RefuseAsDeclined(name string) string {
+	reason := "the caller's last words were only a refusal (such as \"no thanks\"), not an agreement, so " +
+		name + " was not carried out. Answer them as someone who has declined; if you believe they did " +
+		"mean yes, ask them to say so"
+	if r.engine.Lang() == LangZH {
+		reason = "来电者刚才说的只是拒绝(如“不要”“不用了”),不是同意,所以没有执行 " + name +
+			"。按对方拒绝来回应;如果你认为对方其实是同意,请对方明确说一下"
+	}
+	return Failed(reason, r.phasePreamble()+r.engine.Instruction()).asToolOutput()
+}
+
+// RefuseAsUnconfirmed is the answer to a tool that would record the customer's
+// interest when nothing the caller said confirms it: the words it answered were
+// not caught (no final transcript in time, a blank one, or no caller words at
+// all, #612). A refusal as a conversation, ok=0, with the phase's instruction
+// as the way on; nothing runs. The model is told to have the caller confirm and
+// to call the tool again once they have: the application lets the next such
+// call for the same caller turn through, so a transcriber that dropped a real
+// yes costs one exchange. It logs nothing.
+func (r *Runtime) RefuseAsUnconfirmed(name string) string {
+	reason := "the caller's answer was not caught, so nothing they said confirms it and " + name +
+		" was not carried out. Ask them to confirm, and call " + name + " again once they have"
+	if r.engine.Lang() == LangZH {
+		reason = "没有听清来电者的回答,没有任何话能确认这一点,所以没有执行 " + name +
+			"。请对方确认一下,对方确认后再调用 " + name
+	}
+	return Failed(reason, r.phasePreamble()+r.engine.Instruction()).asToolOutput()
 }
 
 // RefuseAsAcknowledgement is the answer to a tool that could move the call when

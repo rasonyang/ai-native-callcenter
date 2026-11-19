@@ -46,6 +46,7 @@ func TestProviderScenarioRefusals(t *testing.T) {
 	flow := []byte(`{"initialNode":"a","nodes":{"a":{"instruction":{"en":"x E2E script: {slots.userData.e2eScript}.","zh":"y E2E script: {slots.userData.e2eScript}."}}}}`)
 	good := `{"scripts":[
 		{"name":"lead","instructionsContain":"E2E script: C01_LEAD_HIGH.","steps":[
+			{"op":"HEAR","text":"Yes, call me back."},
 			{"op":"CALL_TOOL","toolName":"record_lead","args":{"intent":"HIGH","notes":"e2e C01: the customer asked to be called back"}},
 			{"op":"AWAIT_TOOL_RESULT"},{"op":"END_SESSION"}]},
 		{"name":"default","steps":[{"op":"SPEAK","durationSec":1}]}]}`
@@ -65,6 +66,8 @@ func TestProviderScenarioRefusals(t *testing.T) {
 			{"name":"default","steps":[{"op":"SPEAK","durationSec":1},{"op":"CALL_TOOL","toolName":"hangup"}]}]}`, string(flow), "neither call a tool"},
 		"wrong notes": {strings.Replace(good, "asked to be called back", "said no", 1), string(flow), "does not record_lead"},
 		"never ends":  {strings.Replace(good, `{"op":"AWAIT_TOOL_RESULT"},{"op":"END_SESSION"}`, `{"op":"AWAIT_TOOL_RESULT"}`, 1), string(flow), "must end the call"},
+		// The platform refuses a HIGH lead the callee's words do not back (#612).
+		"hears nothing": {strings.Replace(good, `{"op":"HEAR","text":"Yes, call me back."},`, `{"op":"SPEAK","durationSec":1},`, 1), string(flow), "without hearing the callee"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			sc, err := mockprovider.ParseScenario([]byte(tc.scenario))

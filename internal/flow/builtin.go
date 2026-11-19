@@ -38,6 +38,15 @@ const (
 // LeadIntents is the closed set of record_lead intents.
 var LeadIntents = []string{LeadHigh, LeadMedium, LeadLow, LeadNone, LeadDoNotCall}
 
+// IsInterestIntent reports whether a lead intent says the customer is
+// interested: HIGH (wants the offer) or MEDIUM (interested, undecided). A tool
+// that would record one is judged against the caller's words before it runs
+// (Runtime.ClaimsInterest, #612). intent is compared as given; callers
+// normalise it first.
+func IsInterestIntent(intent string) bool {
+	return intent == LeadHigh || intent == LeadMedium
+}
+
 // Hangup reasons, the values hangup's reason argument accepts (#484). The model
 // says why it ends the call, in one of these words. The reason is an audit of
 // that choice, kept in the log and the call's record; it claims nothing about
