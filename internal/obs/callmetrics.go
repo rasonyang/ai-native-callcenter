@@ -182,7 +182,7 @@ func init() {
 			"into a phase that declares a HIGH or MEDIUM lead, or record_lead with one), as the "+
 			"lead guard judged them before they ran, by reason and provider. Refused: "+
 			"OPENING_UNHEARD (the caller's words began before they had heard the opening to "+
-			"its final sentence), DECLINED (the final transcript was only refusal phrases), "+
+			"its final clause), DECLINED (the final transcript was only refusal phrases), "+
 			"NO_FINAL (none within the wait), BLANK_FINAL, NO_CALLER_TURN (the caller had "+
 			"said nothing). Ran: WORDS (any other words), UNCONFIRMED (words not known, let "+
 			"through: a later response on the same caller turn, or an ending under way). Read "+
@@ -612,7 +612,7 @@ const (
 	// LeadGuardWords: the caller's words were no refusal; the call ran.
 	LeadGuardWords = "WORDS"
 	// LeadGuardOpeningUnheard: the words began before the caller had heard the
-	// opening to its final sentence; refused.
+	// opening to its final clause; refused.
 	LeadGuardOpeningUnheard = "OPENING_UNHEARD"
 	// LeadGuardDeclined: the final transcript was only refusal phrases;
 	// refused.

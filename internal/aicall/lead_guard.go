@@ -21,7 +21,7 @@ import (
 // every engine, by two rules:
 //
 //   - A, the timing. If the caller words it answers began before the caller
-//     had heard the opening to its final sentence (the opening line, its
+//     had heard the opening to its final clause (the opening line, its
 //     replay, or while a cut opening is owed; caller_turns.go), it is refused
 //     as a conversation, whatever the words were: a callee cannot agree to an
 //     offer they have not heard. That holds in whichever response the call
@@ -29,7 +29,13 @@ import (
 //     words: the cut refusals see only the first, and a cut judged as words
 //     not even that. The opening is said again on #610's budget,
 //     once per call (Session.SayOpeningAgain); once that is spent, the tool is
-//     refused and nothing is said again.
+//     refused and nothing is said again. The final clause, the text after the
+//     opening's last stop or comma, is the one #610 dates an acknowledgement's
+//     cut by (cutInFinalClause), at the speech start and at the cut alike. Not
+//     the final sentence (#598): on an opening of a short greeting and one
+//     long sentence carrying the offer and its question, words early in that
+//     sentence would pass as said after the opening, with only the greeting
+//     heard.
 //   - B, the caller's words. The final transcript of the utterance the tool
 //     answered is waited for, at most leadFinalWait and not at all when it is
 //     in (qwen delivers it 0.2 to 0.5 s after the call). A final made only of

@@ -557,12 +557,13 @@ func (r *Runtime) ClaimsInterest(name, arguments string) bool {
 
 // RefuseAsUnheardOffer is the answer to a tool that would record the
 // customer's interest (ClaimsInterest) when the caller's words began before
-// they had heard the opening to its final sentence (#612): a callee cannot
-// agree to an offer they have not heard. A refusal as a conversation, ok=0,
-// with the phase's instruction as the way on; it runs nothing. isOpeningSaidAgain
-// says the opening is said to them again, so the model waits for their answer
-// to it; otherwise it is told to make sure they have heard the offer first. It
-// logs nothing: the caller, which judged the call, logs the decision.
+// they had heard the opening to its final clause (#612, #598): a callee
+// cannot agree to an offer they have not heard. A refusal as a conversation,
+// ok=0, with the phase's instruction as the way on; it runs nothing.
+// isOpeningSaidAgain says the opening is said to them again, so the model
+// waits for their answer to it; otherwise it is told to make sure they have
+// heard the offer first. It logs nothing: the caller, which judged the call,
+// logs the decision.
 func (r *Runtime) RefuseAsUnheardOffer(name string, isOpeningSaidAgain bool) string {
 	reason := "the caller spoke over the opening before hearing it to the end, so they have not heard " +
 		"the offer and what they said is not an answer to it; " + name + " was not carried out"

@@ -179,7 +179,8 @@ a. Flow. If the verdict is `ack`, a tool call in the response that answers the
    A tool that would record the customer's interest and that these limits let
    through (words, or no verdict in time) is judged next by the lead guard
    (#612, design 02 section 6): words that began before the opening's final
-   sentence refuse it whatever their verdict, on every engine, and the opening
+   clause, dated as the acknowledgement's cut is below (`cutInFinalClause`,
+   #598), refuse it whatever their verdict, on every engine, and the opening
    is said again under the same once-per-call budget.
 b. Closing line. A cut that landed on an armed closing line that had finished
    generating was counted as the first interruption before the verdict existed.
@@ -318,7 +319,9 @@ opening once more, as a greeting does:
   The clause and not the sentence (#598, owner decision): an opening may be a
   short greeting and then one long sentence that carries the whole offer and
   ends in the question, and an acknowledgement early in that sentence has
-  heard none of the offer. The closing line keeps its final sentence (#465).
+  heard none of the offer. The lead guard's timing rule (#612) dates caller
+  words over the opening by the same clause, at their speech start and at the
+  cut. The closing line keeps its final sentence (#465).
   An opening with no separator is one clause, so an acknowledgement anywhere
   in it owes the replay; a cut of an opening still being generated, or of
   another turn while it is owed, is never dated. The exception is for
