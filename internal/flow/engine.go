@@ -210,6 +210,60 @@ func (e *Engine) CanMoveOnTool(tool string) bool {
 	return false
 }
 
+// CanMoveIntoInterest reports whether a result of the tool could move the call
+// into a phase that declares a HIGH or MEDIUM lead (Node.Lead,
+// IsInterestIntent): CanMoveOnTool narrowed to the rules whose target declares
+// one. Like CanMoveOnTool it reads the rules alone, not their conditions, so it
+// is an upper bound, and it reads and changes nothing. A tool whose moves lead
+// only to phases with no lead, or with LOW, NONE or DO_NOT_CALL, is false: the
+// guard that asks (#612) is for a move that says the customer agreed.
+func (e *Engine) CanMoveIntoInterest(tool string) bool {
+	if e.current.IsTerminal {
+		return false
+	}
+	from := e.toolPhase()
+	rules := append(slices.Clone(from.Transitions), e.spec.Global.Transitions...)
+	for _, rule := range rules {
+		if !rule.matches(EventTypeToolResult, tool) || rule.Target == from.id || rule.Target == e.current.id {
+			continue
+		}
+		if e.isInterestPhase(rule.Target) {
+			return true
+		}
+	}
+	return false
+}
+
+// wouldMoveIntoInterest predicts, for a tool whose result is known before it
+// runs (a slot tool), whether the call would move into a phase that declares a
+// HIGH or MEDIUM lead: RecordSlot (when slot is not empty) and OnToolResult are
+// run on a copy of the engine, conditions and all, and the phase the copy
+// enters is looked at. Nothing of this engine changes, no phase is entered for
+// real (no lead is recorded) and nothing is logged. One classification tool
+// whose "agree" leads into a HIGH phase and whose "decline" into a NONE one is
+// then judged by the move this call makes, not by the rules it has.
+func (e *Engine) wouldMoveIntoInterest(tool string, args, result map[string]any, slot, value string) bool {
+	scratch := *e
+	scratch.slots = maps.Clone(e.slots)
+	scratch.collected = make(map[string][]string, len(e.collected))
+	for name, values := range e.collected {
+		scratch.collected[name] = slices.Clone(values)
+	}
+	scratch.onEnter = nil
+	scratch.log = slog.New(slog.DiscardHandler)
+	if slot != "" {
+		scratch.RecordSlot(slot, value)
+	}
+	moved := scratch.OnToolResult(tool, args, result)
+	return moved != "" && e.isInterestPhase(moved)
+}
+
+// isInterestPhase reports whether the phase declares a HIGH or MEDIUM lead.
+func (e *Engine) isInterestPhase(id string) bool {
+	node, ok := e.spec.Node(id)
+	return ok && node.Lead != nil && IsInterestIntent(node.Lead.Intent)
+}
+
 // Instruction is what the model should be doing now, with collected values
 // substituted in.
 func (e *Engine) Instruction() string {
