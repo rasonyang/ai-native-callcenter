@@ -5,7 +5,7 @@ under one tag, `rasonyang/ai-native-callcenter` and `rasonyang/freeswitch-aicc`;
 run them together. From v0.2.0 on, the GitHub release of the same tag also
 carries the one-line installer's files.
 
-## Unreleased
+## v0.8.9 - 2026-11-19
 
 ### Upgrade notes
 
@@ -16,19 +16,52 @@ carries the one-line installer's files.
   policy's: a window changed after the upgrade cannot shorten its interval, and
   at worst it waits for the time it was already due at. A contact never tried
   needs none. It is not an API field.
-- API contract: additive only. `listCampaignContacts` and
-  `listCampaignAttempts` gain an optional `phoneNumber` query parameter (#617).
-  `make api-breaking BASE=v0.8.8` reports no breaking change; oasdiff lists the
-  two parameters as `new-optional-request-parameter`. The descriptions of
-  `updateCampaign` and `resumeCampaign` now say that a changed calling window
-  is applied to the contacts already waiting, on a paused campaign from the
-  resume on.
 - No application setting added, removed or changed in default. The number
   lookups use indexes that already exist.
-- After the upgrade, and after every restart, the dialer judges the waiting
-  contacts of every running campaign against the calling hours once, so a
-  changed `AICC_OUTBOUND_HOURS` takes effect without waiting for the old
-  hours' next opening.
+- API contract: additive only. `listCampaignContacts` and
+  `listCampaignAttempts` gain an optional `phoneNumber` query parameter (#617).
+  `make api-breaking BASE=v0.8.8` reports no breaking change and no warning
+  ("No breaking changes to report, but the specs are different"); `oasdiff
+  changelog` lists only the two parameters, as
+  `new-optional-request-parameter`. The descriptions of `updateCampaign` and
+  `resumeCampaign` now say that a changed calling window is applied to the
+  contacts already waiting, on a paused campaign from the resume on.
+- A changed calling window is now applied to every waiting contact of the
+  campaign, the ones already tried included (#616). A window widened after it
+  closed makes a running campaign dial again at once, each contact no earlier
+  than its retry interval allows; a window changed on a paused campaign takes
+  effect when it is resumed. After the upgrade, and after every restart, the
+  dialer judges the waiting contacts of every running campaign against the
+  calling hours once, so a changed `AICC_OUTBOUND_HOURS` takes effect without
+  waiting for the old hours' next opening.
+- **Some agreements are confirmed once more, and a refusal records no lead**
+  (#612). A tool call that would record a `HIGH` or `MEDIUM` lead is now
+  checked against the callee's words before it runs, on every engine and on any
+  call whose flow records one (in the demo seed, `campaign_lead_followup`).
+  Nothing configures it. It is refused as a conversation, and no lead is
+  written, when the callee's words began before they had heard the opening to
+  its final sentence (the opening is said again, once per call), when the
+  transcript of those words is only a refusal, or, once per caller turn, when
+  no transcript of them came in time, it was blank, or the callee had said
+  nothing yet; the model is then told to ask the callee to confirm, and its
+  next call for the same answer runs. Expect fewer `HIGH` and `MEDIUM` leads
+  from callees who refused, and on some calls one more confirming question
+  before the lead. Write a flow's opening so that its final sentence is the
+  offer or the question an agreement answers: words over an earlier part of it
+  never record interest, and in an opening of one sentence that is any word
+  before its end. The new counter `aicc_bot_lead_guard_total{reason,provider}`
+  counts every judged call by its reason. A mock-provider scenario of your own
+  for the isolated e2e stack that records a `HIGH` or `MEDIUM` lead needs a
+  `HEAR` step before it; the e2e driver now rejects one without.
+- The console's notice for a campaign the provider breaker paused reads
+  differently in English and Chinese: it names the realtime model provider's
+  quota instead of a failing "voice provider", and asks the operator to lower
+  the campaign's maximum concurrent calls or raise the quota before resuming
+  (#628). The pause reason `PROVIDER_FAILURE` and the contract are unchanged.
+- Upgrade both images together, as always: they are published under one tag
+  and the deploy stack names both. The switch image has no change in this
+  release (unchanged since v0.8.2); its tag moves so that the pair still
+  matches.
 
 ### Added
 
@@ -73,11 +106,13 @@ carries the one-line installer's files.
   final sentence (the opening is then said again, once per call), or when the
   transcript of those words is only a refusal ("不要不要", "不需要，谢谢",
   "no thanks"). When that transcript is not in yet the call waits for it, for a
-  bounded moment; if none comes, or it is blank, the call is refused once and
-  the bot asks the callee to confirm, and its next call for the same answer
-  runs. A classification tool is judged by the move its value makes, so a
-  decline is never held up. A question or any other word is not a refusal, and
-  `leadIntent` keeps its meaning when the call runs. Each judged call is
+  bounded moment; if none comes, if it is blank, or if the callee has said
+  nothing yet, the call is refused once and the bot asks the callee to confirm,
+  and its next call for the same answer runs. Over an ending already under way
+  only a refusal or an opening not yet heard refuses it. A classification tool
+  is judged by the move its value makes, so a decline is never held up. A
+  question or any other word is not a refusal, and `leadIntent` keeps its
+  meaning when the call runs. Each judged call is
   logged without the callee's words and counted in
   `aicc_bot_lead_guard_total{reason,provider}`. The isolated e2e stack's mock
   provider can now play the callee's words (`HEAR`), and its C01 script hears
@@ -90,10 +125,11 @@ carries the one-line installer's files.
   it: it is due at the first moment the new window allows once its retry
   interval has passed, never earlier, in its own time zone. A contact held by
   the frequency window or the daily dial cap stays held, a contact being dialled
-  is left to its call, and `nextDialAt` and `activity` follow without a restart. A window
-  changed while the campaign is paused takes effect when it is resumed, which
-  it did not before, and a change of `AICC_OUTBOUND_HOURS` when the application
-  restarts. A window sent again in another order is no change (#616).
+  is left to its call, and `nextDialAt` and `activity` follow on the dialer's
+  next pass, without a restart. A window changed while the campaign is paused
+  takes effect when it is resumed, which it did not before, and a change of
+  `AICC_OUTBOUND_HOURS` when the application restarts. A window sent again in
+  another order is no change (#616).
 
 ### Changed
 
