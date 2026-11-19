@@ -209,6 +209,16 @@ describe('campaign detail header', () => {
     await expectLayout(ctx)
   })
 
+  // The provider breaker's title is the longest pause title, and it is also
+  // the header's state line.
+  layoutTest('campaigns/$campaignId header (provider breaker pause)', async (ctx) => {
+    render({ campaign: campaign({ status: 'PAUSED', pauseReason: 'PROVIDER_FAILURE', activity: undefined }) })
+    await drawn()
+    await screen.findByText(i18n.t('campaign.pauseReasons.PROVIDER_FAILURE'))
+    await waitForRows(5)
+    await expectLayout(ctx)
+  })
+
   layoutTest('campaigns/$campaignId header (200-character name, no spaces)', async (ctx) => {
     render({ campaign: campaign({ name: maxLengthOf('CampaignWrite', 'name') }) })
     await drawn()

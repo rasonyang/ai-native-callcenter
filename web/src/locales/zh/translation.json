@@ -965,13 +965,13 @@
     "pauseReasons": {
       "MANUAL": "已由人工暂停",
       "TRUNK_FAILURE": "已自动暂停：中继线路故障",
-      "PROVIDER_FAILURE": "已自动暂停：语音服务商故障",
+      "PROVIDER_FAILURE": "已自动暂停：实时模型服务商限额已满或不可用",
       "OUTBOUND_NOT_CONFIGURED": "已自动暂停：部署未配置外呼出口"
     },
     "pauseExplain": {
       "MANUAL": "不会再拨出新电话，进行中的通话正常结束。",
       "TRUNK_FAILURE": "连续多个呼叫无法到达运营商。系统不会自动恢复，请检查中继线路后手动恢复。",
-      "PROVIDER_FAILURE": "连续多个已接通的呼叫无法启动机器人会话。系统不会自动恢复，请检查语音服务商后手动恢复。",
+      "PROVIDER_FAILURE": "连续多个已接通的呼叫无法启动机器人会话。最常见的原因是实时模型服务商的每分钟限额（token 数或建连数）已满，通常一分钟内恢复；API key 失效或网络不通也会这样。系统不会自动恢复：请调低活动的最大并发或提高限额，再手动恢复。",
       "OUTBOUND_NOT_CONFIGURED": "拨号器发现 AICC_OUTBOUND_ENDPOINT 为空，无法发起任何呼叫。请把它设为运营商网关使用的拨号串（见 deploy/carrier.md）并重建应用，然后再恢复该活动；未设置之前无法恢复。"
     },
     "counts": {

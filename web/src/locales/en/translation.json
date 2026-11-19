@@ -969,13 +969,13 @@
     "pauseReasons": {
       "MANUAL": "Paused by a person",
       "TRUNK_FAILURE": "Paused automatically: the trunk is failing",
-      "PROVIDER_FAILURE": "Paused automatically: the voice provider is failing",
+      "PROVIDER_FAILURE": "Paused automatically: the realtime model provider's quota is reached, or it is unavailable",
       "OUTBOUND_NOT_CONFIGURED": "Paused automatically: this deployment has no outbound endpoint"
     },
     "pauseExplain": {
       "MANUAL": "No new calls are placed. Calls in progress finish normally.",
       "TRUNK_FAILURE": "Too many calls failed to reach the carrier in a row. Nothing will resume this campaign by itself: check the trunk, then resume it.",
-      "PROVIDER_FAILURE": "Too many answered calls failed to start a bot session in a row. Nothing will resume this campaign by itself: check the voice provider, then resume it.",
+      "PROVIDER_FAILURE": "Several answered calls in a row could not start a bot session. The usual cause is the realtime model provider's per-minute quota (tokens or connections), which clears within a minute; an invalid API key or a network fault does the same. Nothing resumes this campaign by itself: lower the campaign's maximum concurrent calls or raise the quota, then resume it.",
       "OUTBOUND_NOT_CONFIGURED": "The dialer found AICC_OUTBOUND_ENDPOINT empty, so no call could be placed. Set it to the dial string your carrier gateway takes (deploy/carrier.md) and recreate the app, then resume this campaign. Resuming is refused until it is set."
     },
     "counts": {

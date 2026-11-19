@@ -272,8 +272,10 @@ const refusedNumber = () =>
  * `entries`, with the route's own search validation. Every list answers 120
  * rows in total, three pages; a list searched by number answers the lead when
  * it is the lead's number, nothing else, and refuses what is not a number.
+ * The campaign itself is `campaignFixture` unless `campaign` names another.
  */
-function renderCampaignAt(entries: string[], options: { queryClient?: QueryClient } = {}) {
+function renderCampaignAt(entries: string[], options: { queryClient?: QueryClient; campaign?: Campaign } = {}) {
+  const campaign = options.campaign ?? campaignFixture
   const backend = installBackend({
     handle: ({ path, method }) => {
       if (method !== 'GET') return undefined
@@ -282,7 +284,7 @@ function renderCampaignAt(entries: string[], options: { queryClient?: QueryClien
       const number = query.get('phoneNumber')
       const found = number === null ? 'all' : searchedFor(number)
       if (found === 'refused') return refusedNumber()
-      if (route === `/campaigns/${CAMPAIGN_ID}`) return campaignFixture
+      if (route === `/campaigns/${CAMPAIGN_ID}`) return campaign
       if (route === `/campaigns/${CAMPAIGN_ID}/contacts`) {
         const intent = query.get('leadIntent')
         const items = [leadFixture].filter((row) => !intent || row.leadIntent === intent)
@@ -309,7 +311,7 @@ function renderCampaignAt(entries: string[], options: { queryClient?: QueryClien
   const router = createRouter({ routeTree: tree, history })
   const view = renderWithProviders(
     <RouterProvider router={router as unknown as Parameters<typeof RouterProvider>[0]['router']} />,
-    options,
+    { queryClient: options.queryClient },
   )
   return { ...view, backend, history }
 }
@@ -579,5 +581,50 @@ describe('searching a campaign by number', () => {
     await waitFor(() => expect(searched(backend, 'attempts')).toEqual([
       { phoneNumber: '138 0000 0000', limit: '50', offset: '0' },
     ]))
+  })
+})
+
+// --- the pause notice -------------------------------------------------------------
+
+describe('the notice on a campaign the provider breaker paused', () => {
+  beforeEach(() => {
+    vi.stubGlobal('scrollTo', () => {})
+  })
+
+  afterEach(async () => {
+    await act(async () => {
+      await i18n.changeLanguage('en')
+    })
+  })
+
+  const paused: Campaign = { ...campaignFixture, status: 'PAUSED', pauseReason: 'PROVIDER_FAILURE', activity: undefined }
+
+  it.each([
+    [
+      'en',
+      "Paused automatically: the realtime model provider's quota is reached, or it is unavailable",
+      'Several answered calls in a row could not start a bot session. The usual cause is the realtime model '
+        + "provider's per-minute quota (tokens or connections), which clears within a minute; an invalid API key "
+        + "or a network fault does the same. Nothing resumes this campaign by itself: lower the campaign's maximum "
+        + 'concurrent calls or raise the quota, then resume it.',
+    ],
+    [
+      'zh',
+      '已自动暂停：实时模型服务商限额已满或不可用',
+      '连续多个已接通的呼叫无法启动机器人会话。最常见的原因是实时模型服务商的每分钟限额（token 数或建连数）已满，'
+        + '通常一分钟内恢复；API key 失效或网络不通也会这样。系统不会自动恢复：请调低活动的最大并发或提高限额，再手动恢复。',
+    ],
+  ])('says what paused the campaign: the provider quota, or the provider out of reach (%s)', async (lang, title, detail) => {
+    await act(async () => {
+      await i18n.changeLanguage(lang)
+    })
+    renderCampaignAt([DETAIL], { campaign: paused })
+    const heading = await screen.findByText(title)
+    const notice = heading.closest('[role="status"]') as HTMLElement
+    expect(notice).not.toBeNull()
+    expect(within(notice).getByText(detail)).toBeInTheDocument()
+    expect(within(notice).getByRole('button', { name: i18n.t('campaign.actions.resume') })).toBeInTheDocument()
+    // The old wording blamed a voice provider fault, which a quota is not.
+    expect(notice).not.toHaveTextContent(/voice provider|语音服务商/i)
   })
 })
