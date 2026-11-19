@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -114,6 +115,54 @@ func TestAScriptedRecordLeadArrivesIsAnsweredAndTheSessionEnds(t *testing.T) {
 	}
 }
 
+// A heard utterance reaches the application's client as the caller's speech and
+// its final transcript, one item, ahead of the tool call that follows it: what
+// the lead guard (#612) links a record_lead to.
+func TestAHeardUtteranceArrivesBeforeTheToolCallThatAnswersIt(t *testing.T) {
+	_, url := scenarioServer(t, `{"scripts":[{"name":"heard","steps":[
+	  {"op":"SPEAK","durationSec":0.1},
+	  {"op":"HEAR","text":"Yes, please call me back.","afterSec":0.05},
+	  {"op":"CALL_TOOL","toolName":"record_lead","args":{"intent":"HIGH"}},
+	  {"op":"AWAIT_TOOL_RESULT"},
+	  {"op":"END_SESSION"}]}]}`)
+	session, events := dialWith(t, url, "any instructions")
+	var seen []string
+	items := map[string]bool{}
+	deadline := time.After(5 * time.Second)
+	for {
+		select {
+		case event, ok := <-events:
+			if !ok {
+				want := []string{"SPEECH_STARTED", "SPEECH_STOPPED", "INPUT_TRANSCRIPT:Yes, please call me back.", "TOOL_CALL"}
+				if !slices.Equal(seen, want) {
+					t.Errorf("caller and tool events = %v, want %v", seen, want)
+				}
+				if len(items) != 1 || items[""] {
+					t.Errorf("item ids = %v, want one, named", items)
+				}
+				return
+			}
+			switch event.Type {
+			case provider.EventTypeSpeechStarted, provider.EventTypeSpeechStopped:
+				seen = append(seen, string(event.Type))
+				items[event.ItemID] = true
+			case provider.EventTypeInputTranscript:
+				if event.IsFinal {
+					seen = append(seen, string(event.Type)+":"+event.Text)
+					items[event.ItemID] = true
+				}
+			case provider.EventTypeToolCall:
+				seen = append(seen, string(event.Type))
+				if err := session.SendToolResult(event.ToolCallID, `{"ok":true}`); err != nil {
+					t.Fatalf("send tool result: %v", err)
+				}
+			}
+		case <-deadline:
+			t.Fatalf("session did not end; saw %v", seen)
+		}
+	}
+}
+
 func TestEachSessionPlaysTheScriptItsInstructionsSelect(t *testing.T) {
 	server, url := scenarioServer(t, `{"scripts":[
 	  {"name":"sales","instructionsContain":"SALES-PERSONA","steps":[
@@ -202,9 +251,11 @@ func TestScenarioDocumentsAreValidated(t *testing.T) {
 		"await without call": `{"scripts":[{"steps":[{"op":"AWAIT_TOOL_RESULT"}]}]}`,
 		"end not last":       `{"scripts":[{"steps":[{"op":"END_SESSION"},{"op":"SPEAK","durationSec":1}]}]}`,
 		"two defaults":       `{"scripts":[{"steps":[{"op":"END_SESSION"}]},{"steps":[{"op":"END_SESSION"}]}]}`,
+		"hear without text":  `{"scripts":[{"steps":[{"op":"HEAR","text":" "}]}]}`,
+		"hear before time":   `{"scripts":[{"steps":[{"op":"HEAR","text":"yes","afterSec":-1}]}]}`,
 	}
-	if len(invalid) != 10 {
-		t.Fatalf("%d invalid cases, the table is meant to hold 10", len(invalid))
+	if len(invalid) != 12 {
+		t.Fatalf("%d invalid cases, the table is meant to hold 12", len(invalid))
 	}
 	for name, document := range invalid {
 		if _, err := mockprovider.ParseScenario([]byte(document)); err == nil {

@@ -31,6 +31,12 @@ import (
 // text, so a script selects on a substring of them (Script.InstructionsContain).
 // A script with no such substring is the default; a session that no script
 // claims gets silence and is counted (Stats.Unmatched).
+//
+// A script can also hear the callee (HEAR): the events a provider's own speech
+// detection and transcriber send for one utterance. The application judges a
+// tool call that records a customer's interest against the caller's words it
+// answers (#612), so a script that records a HIGH or MEDIUM lead hears an
+// agreement first, as a real call would.
 
 // Step operations. SCREAMING_SNAKE, like every enum in the repository.
 const (
@@ -38,6 +44,10 @@ const (
 	OpSpeak = "SPEAK"
 	// OpCallTool plays one turn that requests the tool ToolName with Args.
 	OpCallTool = "CALL_TOOL"
+	// OpHear plays one utterance of the callee's, after AfterSec seconds (so
+	// that what the bot said has played out): speech started, speech stopped
+	// and the input committed for one item, then Text as its final transcript.
+	OpHear = "HEAR"
 	// OpAwaitToolResult waits for the application to answer the most recent
 	// CALL_TOOL, up to TimeoutSec (default DefaultAwaitTimeoutSec).
 	OpAwaitToolResult = "AWAIT_TOOL_RESULT"
@@ -72,6 +82,8 @@ type Step struct {
 	ToolName    string          `json:"toolName,omitempty"`
 	Args        json.RawMessage `json:"args,omitempty"`
 	TimeoutSec  float64         `json:"timeoutSec,omitempty"`
+	Text        string          `json:"text,omitempty"`
+	AfterSec    float64         `json:"afterSec,omitempty"`
 }
 
 // LoadScenario reads and validates a scenario file.
@@ -152,6 +164,13 @@ func (script *Script) validate() error {
 				}
 			}
 			isToolOpen = true
+		case OpHear:
+			if strings.TrimSpace(step.Text) == "" {
+				return fmt.Errorf("step %d: HEAR needs text", i)
+			}
+			if step.AfterSec < 0 {
+				return fmt.Errorf("step %d: afterSec must not be negative", i)
+			}
 		case OpAwaitToolResult:
 			if !isToolOpen {
 				return fmt.Errorf("step %d: AWAIT_TOOL_RESULT with no CALL_TOOL before it", i)
@@ -258,9 +277,14 @@ func (s *session) runScript(instructions string) {
 	s.log.Info("mockprovider: playing script", "script", script.Name)
 
 	lastCallID := ""
-	calls := 0
+	calls, heard := 0, 0
 	for _, step := range script.Steps {
 		switch step.Op {
+		case OpHear:
+			heard++
+			if !s.hear(fmt.Sprintf("item_hear_%d", heard), step.Text, secondsOf(step.AfterSec)) {
+				return
+			}
 		case OpSpeak:
 			if !s.scriptedTurn(secondsOf(step.DurationSec), nil) {
 				return
@@ -302,6 +326,26 @@ func secondsOf(sec float64) time.Duration {
 }
 
 type scriptedCall struct{ id, name, args string }
+
+// hear plays one utterance of the callee's after a pause: what a provider with
+// server-side turn detection and an input transcriber sends for it, in that
+// order. It reports false when the session ended under it.
+func (s *session) hear(itemID, text string, after time.Duration) bool {
+	if after > 0 && !s.wait(after, nil) {
+		return false
+	}
+	for _, event := range []map[string]any{
+		{"type": "input_audio_buffer.speech_started", "item_id": itemID},
+		{"type": "input_audio_buffer.speech_stopped", "item_id": itemID},
+		{"type": "input_audio_buffer.committed", "item_id": itemID},
+		{"type": "conversation.item.input_audio_transcription.completed", "item_id": itemID, "transcript": text},
+	} {
+		if s.send(event) != nil {
+			return false
+		}
+	}
+	return true
+}
 
 // scriptedTurn plays one response: speech of the given length, or a tool call.
 // It reports false when the session ended under it.
