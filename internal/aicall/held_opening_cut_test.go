@@ -32,8 +32,8 @@ import (
 // opening that no transcript makes known are now judged as a greeting is.
 
 // heldOpeningLine is the call's opening, said as written: two sentences, the
-// second the offer, so a cut can be dated in its final sentence (#465's
-// estimate, cutInFinalSentence).
+// second the offer, ending in a clause of its own, the question, so a cut can be
+// dated in its final clause (#465's estimate, cutInFinalClause, #598).
 const heldOpeningLine = "您好，我是安，给您来电是想介绍一下您套餐的续约优惠。现在续约可以享受八折，请问您需要吗？"
 
 // heldOpeningFrames is the opening's length in 20 ms frames (11 s, as on the
@@ -56,13 +56,22 @@ type heldOpeningRig struct {
 	logs    *syncBuffer
 	wait    *verdictWait
 	replay  *holdClock
+	// opening is the call's opening line, as written.
+	opening string
 }
 
 func newHeldOpeningRig(t *testing.T) *heldOpeningRig {
 	t.Helper()
+	return newHeldOpeningRigWith(t, heldOpeningLine)
+}
+
+// newHeldOpeningRigWith is newHeldOpeningRig on a call whose opening is line,
+// played over the same heldOpeningFrames.
+func newHeldOpeningRigWith(t *testing.T, line string) *heldOpeningRig {
+	t.Helper()
 	profile := provider.QwenProfile()
 	r := &heldOpeningRig{leg: newFakeLeg(media.LawMu), model: newFakeModel(), logs: &syncBuffer{},
-		wait: newVerdictWait(), replay: &holdClock{}}
+		wait: newVerdictWait(), replay: &holdClock{}, opening: line}
 	log := slog.New(slog.NewTextHandler(r.logs, nil))
 
 	o, err := NewOrchestrator(OrchestratorConfig{
@@ -96,7 +105,7 @@ func newHeldOpeningRig(t *testing.T) *heldOpeningRig {
 			Instructions: r.runtime.Instructions(),
 			Language:     "zh",
 			Turn:         provider.DefaultTurnDetection(),
-			OpeningText:  heldOpeningLine,
+			OpeningText:  line,
 		},
 		BargeGuard:        -1,
 		NoInput:           -1,
@@ -150,7 +159,7 @@ func (r *heldOpeningRig) cutHeldOpening(t *testing.T, heard int) {
 	for sent := 0; sent < heldOpeningFrames; sent += 50 {
 		r.model.events <- provider.Event{Type: provider.EventTypeAudioDelta, Audio: make([]byte, 50*frameBytes)}
 	}
-	r.model.events <- provider.Event{Type: provider.EventTypeOutputTranscript, Text: heldOpeningLine, IsFinal: true}
+	r.model.events <- provider.Event{Type: provider.EventTypeOutputTranscript, Text: r.opening, IsFinal: true}
 	r.model.events <- provider.Event{Type: provider.EventTypeResponseDone}
 	// The model's events are buffered: the wait may end only once the pump has
 	// taken every one of them, so that all of the opening is held.
@@ -195,6 +204,14 @@ func (r *heldOpeningRig) cutHeldOpening(t *testing.T, heard int) {
 	r.model.events <- provider.Event{Type: provider.EventTypeSpeechStopped, ItemID: "u1"}
 	r.model.events <- provider.Event{Type: provider.EventTypeResponseStarted}
 	r.model.events <- provider.Event{Type: provider.EventTypeAudioDelta, Audio: make([]byte, 5*frameBytes)}
+}
+
+// cutTimes is how much of the opening the callee heard before the cut
+// (cutHeldOpening), and how much of it was left.
+func (r *heldOpeningRig) cutTimes() (played, unplayed time.Duration) {
+	r.session.bc.mu.Lock()
+	defer r.session.bc.mu.Unlock()
+	return r.session.bc.cut.event.Played, r.session.bc.cut.event.Unplayed
 }
 
 // waitLong is waitFor with a bound for work that is slow under -race on a busy
@@ -316,7 +333,7 @@ func (r *heldOpeningRig) assertOpeningSaidAgain(t *testing.T, out string) {
 func (r *heldOpeningRig) assertSaidAgainOnce(t *testing.T) {
 	t.Helper()
 	waitFor(t, "the opening to be said again", func() bool { return len(r.model.spokenLines()) >= 1 })
-	if got := r.model.spokenLines(); !slices.Equal(got, []string{heldOpeningLine}) {
+	if got := r.model.spokenLines(); !slices.Equal(got, []string{r.opening}) {
 		t.Errorf("spoken = %v, want the opening once, as written", got)
 	}
 }
@@ -387,7 +404,7 @@ func TestAMovingToolIsRefusedWhenAHeldOpeningIsCutAndNoFinalComes(t *testing.T) 
 
 // 2. The same, with the final "好。" arriving 200 ms after the tool call, inside
 // the verdict wait: an acknowledgement, refused, and the opening, cut before
-// its final sentence, is said again with the model's reply muted.
+// its final clause, is said again with the model's reply muted.
 func TestAMovingToolIsRefusedWhenAHeldOpeningIsCutAndTheFinalIsLate(t *testing.T) {
 	r := newHeldOpeningRig(t)
 	r.heldOpeningCutByAcknowledgement(t)
@@ -590,7 +607,7 @@ func TestACutOfALaterTurnWithNoWordsStillRunsTheTool(t *testing.T) {
 	}
 }
 
-// An acknowledgement that cuts the opening before its final sentence is no
+// An acknowledgement that cuts the opening before its final clause is no
 // answer to an offer the callee has not heard (owner decision on #610, after a
 // live call): a moving tool is refused, and the opening is said again once,
 // with the model's reply muted, whether or not that reply calls a tool. A run
@@ -630,65 +647,87 @@ func TestAnAcknowledgementOverAHeldOpeningSaysItAgain(t *testing.T) {
 	})
 }
 
-// An acknowledgement in the opening's final sentence, of an opening that had
-// finished generating, is heard as the end of it: nothing is said again, the
-// tool is refused as an acknowledgement as before, and the opening is no
-// longer owed.
-func TestAnAcknowledgementInTheOpeningsFinalSentenceIsNotReplayed(t *testing.T) {
-	r := newHeldOpeningRig(t)
-	r.cutHeldOpening(t, heldOpeningFrames-50) // 1 s of an 11 s opening left
-	r.callerFinal("u1", "好。")
-	r.agree("fc_1")
-	r.ended()
-	out := r.awaitResult(t)
-	r.assertRefused(t, out)
-	assertAcknowledgementRefusal(t, out, false)
-	r.probe(t)
-	if got := r.model.spokenLines(); len(got) != 0 {
-		t.Errorf("said %v, want no line", got)
-	}
-	if r.isOpeningOwed() {
-		t.Error("the opening is still owed after an acknowledgement of its end")
-	}
-	if !strings.Contains(r.logs.String(), "the acknowledgement fell in the opening's final sentence") {
-		t.Errorf("the estimate left no trace in the log:\n%s", r.logs.String())
+// An acknowledgement in the opening's final clause (#598), of an opening that
+// had finished generating, is heard as the end of it: nothing is said again,
+// the tool that would move the call is refused as an acknowledgement as before,
+// and the opening is no longer owed. A slot tool that cannot move the call is
+// not judged by the cut: the reply records what it records.
+func TestAnAcknowledgementInTheOpeningsFinalClauseIsNotReplayed(t *testing.T) {
+	for _, said := range []string{"好。", "好的"} {
+		t.Run(said, func(t *testing.T) {
+			r := newHeldOpeningRig(t)
+			r.cutHeldOpening(t, heldOpeningFrames-50) // 1 s of an 11 s opening left: in "请问您需要吗？"
+			r.callerFinal("u1", said)
+			r.model.events <- provider.Event{Type: provider.EventTypeToolCall, ToolCallID: "fc_0",
+				ToolName: "note", ToolArgs: `{"value":"agreed to hear more"}`}
+			r.agree("fc_1")
+			r.ended()
+			out := r.awaitResults(t, 2)
+			r.assertRefused(t, out)
+			assertAcknowledgementRefusal(t, out, false)
+			for _, result := range r.model.recordedToolResults() {
+				if result.id == "fc_0" && !strings.Contains(result.output, `"ok":"1"`) {
+					t.Errorf("note result = %s, want it recorded", result.output)
+				}
+			}
+			r.probe(t)
+			if got := r.model.spokenLines(); len(got) != 0 {
+				t.Errorf("said %v, want no line", got)
+			}
+			if r.isOpeningOwed() {
+				t.Error("the opening is still owed after an acknowledgement of its end")
+			}
+			logs := r.logs.String()
+			if !strings.Contains(logs, "the acknowledgement fell in the opening's final clause") ||
+				!strings.Contains(logs, "finalClauseMs=") {
+				t.Errorf("the estimate left no trace in the log:\n%s", logs)
+			}
+		})
 	}
 }
 
-// Once the opening has been said again, an acknowledgement over the replay is
-// refused as an acknowledgement and gets no second replay.
+// Once the opening has been said again, for an acknowledgement or for a
+// greeting, an acknowledgement over the replay is refused as an
+// acknowledgement and gets no second replay.
 func TestAnAcknowledgementOverTheReplayIsNotReplayedAgain(t *testing.T) {
-	r := newHeldOpeningRig(t)
-	r.heldOpeningCutByAcknowledgement(t)
-	r.callerFinal("u1", "好。")
-	r.agree("fc_1")
-	r.awaitResult(t)
-	r.assertSaidAgainOnce(t)
-	r.ended()
+	for _, tt := range []struct{ name, first, overReplay string }{
+		{"after an acknowledgement's replay", "好。", "嗯。"},
+		{"after a greeting's replay", "喂？", "嗯嗯"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			r := newHeldOpeningRig(t)
+			r.heldOpeningCutByAcknowledgement(t)
+			r.callerFinal("u1", tt.first)
+			r.agree("fc_1")
+			r.assertRefused(t, r.awaitResult(t))
+			r.assertSaidAgainOnce(t)
+			r.ended()
 
-	// The replay is a line, a turn of its own; the callee acknowledges over it.
-	frameBytes := 2 * media.RateProviderOut / 50
-	r.leg.holdFrames(40)
-	r.model.events <- provider.Event{Type: provider.EventTypeResponseStarted, IsSpokenLine: true}
-	r.model.events <- provider.Event{Type: provider.EventTypeAudioDelta, Audio: make([]byte, 50*frameBytes)}
-	r.model.events <- provider.Event{Type: provider.EventTypeSpeechStarted, ItemID: "u2"}
-	waitFor(t, "the cut over the replay", func() bool {
-		r.session.bc.mu.Lock()
-		defer r.session.bc.mu.Unlock()
-		return r.session.bc.cut != nil && r.session.bc.cut.event.Turn == 3 && r.session.bc.cut.isOpening
-	})
-	r.leg.holdFrames(0)
-	r.model.events <- provider.Event{Type: provider.EventTypeSpeechStopped, ItemID: "u2"}
-	r.model.events <- provider.Event{Type: provider.EventTypeResponseStarted}
-	r.callerFinal("u2", "嗯。")
-	r.agree("fc_2")
-	r.ended()
-	out := r.awaitResults(t, 2)
-	r.assertRefused(t, out)
-	assertAcknowledgementRefusal(t, out, false)
-	r.probe(t)
-	if got := r.model.spokenLines(); len(got) != 1 {
-		t.Errorf("spoken = %v, want no second replay", got)
+			// The replay is a line, a turn of its own; the callee acknowledges over it.
+			frameBytes := 2 * media.RateProviderOut / 50
+			r.leg.holdFrames(40)
+			r.model.events <- provider.Event{Type: provider.EventTypeResponseStarted, IsSpokenLine: true}
+			r.model.events <- provider.Event{Type: provider.EventTypeAudioDelta, Audio: make([]byte, 50*frameBytes)}
+			r.model.events <- provider.Event{Type: provider.EventTypeSpeechStarted, ItemID: "u2"}
+			waitFor(t, "the cut over the replay", func() bool {
+				r.session.bc.mu.Lock()
+				defer r.session.bc.mu.Unlock()
+				return r.session.bc.cut != nil && r.session.bc.cut.event.Turn == 3 && r.session.bc.cut.isOpening
+			})
+			r.leg.holdFrames(0)
+			r.model.events <- provider.Event{Type: provider.EventTypeSpeechStopped, ItemID: "u2"}
+			r.model.events <- provider.Event{Type: provider.EventTypeResponseStarted}
+			r.callerFinal("u2", tt.overReplay)
+			r.agree("fc_2")
+			r.ended()
+			out := r.awaitResults(t, 2)
+			r.assertRefused(t, out)
+			assertAcknowledgementRefusal(t, out, false)
+			r.probe(t)
+			if got := r.model.spokenLines(); len(got) != 1 {
+				t.Errorf("spoken = %v, want no second replay", got)
+			}
+		})
 	}
 }
 
@@ -713,4 +752,123 @@ func TestAnAcknowledgementOverALaterTurnIsUnchanged(t *testing.T) {
 		t.Errorf("the call moved to %q", r.node())
 	}
 	r.assertNothingSpoken(t)
+}
+
+// "好，不需要" over the opening's first sentence is words, not an
+// acknowledgement: the tool runs, nothing is said again and the opening is no
+// longer owed (#598).
+func TestAnAcknowledgementWithWordsOverTheOpeningIsWords(t *testing.T) {
+	r := newHeldOpeningRig(t)
+	r.heldOpeningCutByAcknowledgement(t)
+	r.callerFinal("u1", "好，不需要")
+	r.model.events <- provider.Event{Type: provider.EventTypeToolCall, ToolCallID: "fc_1",
+		ToolName: "classify", ToolArgs: `{"value":"decline"}`}
+	r.ended()
+	out := r.awaitResult(t)
+	if node := r.runtime.Engine().NodeID(); node != "recap" || !strings.Contains(out, `"ok":"1"`) {
+		t.Errorf("the decline did not run: the call is in %q, tool result %s\n%s", node, out, r.diagnosis())
+	}
+	// The move says recap's line; nothing is said before it.
+	waitFor(t, "recap's line", func() bool { return len(r.model.spokenLines()) >= 1 })
+	if got := r.model.spokenLines(); !slices.Equal(got, []string{"我来重复一下优惠。"}) {
+		t.Errorf("spoken = %v, want only recap's line", got)
+	}
+	if r.isOpeningOwed() {
+		t.Error("the opening is still owed after words")
+	}
+	if line := r.decisionLine(t); !strings.Contains(line, "verdict=WORDS ") || !strings.Contains(line, "isRefused=false") {
+		t.Errorf("decision line %q, want words, not refused", line)
+	}
+}
+
+// twoPartOpeningLine is the opening of #598: a short greeting sentence (12 of
+// its 52 letters, about 2.5 s of 11 s), then one long sentence that carries the
+// whole offer and ends in the question. Its final sentence starts about 2.5 s
+// in; its final clause, "请问您需要吗", is the last 1.3 s or so.
+const twoPartOpeningLine = "您好，我是套餐续约专员小安。给您来电是想告诉您，现在续约套餐可以享受八折优惠，每月还多送一百分钟通话，请问您需要吗？"
+
+// The two-part opening (#598): an acknowledgement 3 s in has heard the greeting
+// and none of the offer. Dated by the final sentence (#610) it fell in the
+// question's sentence and counted as an answer; dated by the final clause it
+// owes the opening, said again once, with the moving tool refused. One in the
+// last clause is the acknowledgement it always was.
+func TestATwoPartOpeningIsDatedByItsFinalClause(t *testing.T) {
+	t.Run("3 s in, inside the offer's sentence", func(t *testing.T) {
+		r := newHeldOpeningRigWith(t, twoPartOpeningLine)
+		r.cutHeldOpening(t, 150) // 3000 ms
+		played, unplayed := r.cutTimes()
+		if _, ok := cutInFinalSentence(twoPartOpeningLine, played, unplayed); !ok {
+			t.Fatalf("a cut %v in with %v left is not in the final sentence: not the case of #598", played, unplayed)
+		}
+		r.callerFinal("u1", "好")
+		r.agree("fc_1")
+		out := r.awaitResult(t)
+		r.assertSaidAgainOnce(t)
+		r.ended()
+		r.assertRefused(t, out)
+		assertAcknowledgementRefusal(t, out, true)
+		if !strings.Contains(r.logs.String(), "the acknowledgement cut the opening before its final clause") {
+			t.Errorf("the estimate left no trace in the log:\n%s", r.logs.String())
+		}
+	})
+	t.Run("in the last clause", func(t *testing.T) {
+		r := newHeldOpeningRigWith(t, twoPartOpeningLine)
+		r.cutHeldOpening(t, heldOpeningFrames-50) // 1 s left, in "请问您需要吗？"
+		r.callerFinal("u1", "好")
+		r.agree("fc_1")
+		r.ended()
+		out := r.awaitResult(t)
+		r.assertRefused(t, out)
+		assertAcknowledgementRefusal(t, out, false)
+		r.probe(t)
+		if got := r.model.spokenLines(); len(got) != 0 {
+			t.Errorf("said %v, want no line", got)
+		}
+		if r.isOpeningOwed() {
+			t.Error("the opening is still owed after an acknowledgement of its question")
+		}
+		if !strings.Contains(r.logs.String(), "the acknowledgement fell in the opening's final clause; the opening counts as heard") {
+			t.Errorf("the estimate left no trace in the log:\n%s", r.logs.String())
+		}
+	})
+}
+
+// digitCommaOpeningLine has one comma, between the digits of "1,000", and no
+// other separator before its closing question mark.
+const digitCommaOpeningLine = "现在续约套餐一年可以省1,000元您看需要吗？"
+
+// A comma between two digits ends no clause (#598). A cut just after "1,"
+// would be in the final clause if it did ("000元您看需要吗", 9 of the line's 21
+// letters and digits); the line is one clause, so the opening is said again.
+func TestACommaBetweenDigitsDoesNotEndTheOpeningsClause(t *testing.T) {
+	r := newHeldOpeningRigWith(t, digitCommaOpeningLine)
+	r.cutHeldOpening(t, 316) // 6320 ms: "现在续约套餐一年可以省1," is 12 of 21, about 6.3 s
+	played, unplayed := r.cutTimes()
+	asSeparator := strings.Replace(digitCommaOpeningLine, "1,000", "1，000", 1)
+	if _, ok := cutInFinalClause(asSeparator, played, unplayed); !ok {
+		t.Fatalf("a cut %v in with %v left is not in the clause after the comma: not the case asked for", played, unplayed)
+	}
+	r.callerFinal("u1", "好")
+	r.agree("fc_1")
+	out := r.awaitResult(t)
+	r.assertSaidAgainOnce(t)
+	r.ended()
+	r.assertRefused(t, out)
+	assertAcknowledgementRefusal(t, out, true)
+}
+
+// An opening with no separator at all is one clause: an acknowledgement
+// anywhere in it, its last second included, owes the opening (#598, as under
+// #610 for a one-sentence opening).
+func TestAnOpeningWithNoSeparatorIsSaidAgainWhereverItIsCut(t *testing.T) {
+	const line = "您好我是小安想问问您要不要续约套餐"
+	r := newHeldOpeningRigWith(t, line)
+	r.cutHeldOpening(t, heldOpeningFrames-50) // 1 s left
+	r.callerFinal("u1", "好")
+	r.agree("fc_1")
+	out := r.awaitResult(t)
+	r.assertSaidAgainOnce(t)
+	r.ended()
+	r.assertRefused(t, out)
+	assertAcknowledgementRefusal(t, out, true)
 }

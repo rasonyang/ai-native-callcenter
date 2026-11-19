@@ -202,6 +202,28 @@ func TestACutInTheFinalSentenceLogsWhatItEstimated(t *testing.T) {
 	}
 }
 
+// The closing line keeps the final sentence (#465) where the opening takes the
+// final clause (#598): a first cut inside "Goodbye and take care of yourself,
+// Ann." but before its last clause, "Ann", counts as the line said.
+func TestTheClosingLineIsDatedByItsFinalSentenceNotItsFinalClause(t *testing.T) {
+	pending := lineFrames - lineFrames*73/100
+	played, unplayed := time.Duration(lineFrames-pending)*20*time.Millisecond, time.Duration(pending)*20*time.Millisecond
+	if _, ok := cutInFinalClause(cutLine, played, unplayed); ok {
+		t.Fatalf("a cut %v in with %v left is in the final clause: not the case asked for", played, unplayed)
+	}
+	r := startCutRig(t, time.Minute)
+	r.lineTurn(t, lineFrames, lineFrames, cutLine)
+	r.interrupt(t, pending, 1)
+	if logs := r.logs.String(); !strings.Contains(logs, "the cut fell in the closing line's final sentence; counting it as said") {
+		t.Errorf("the cut was not counted in the final sentence:\n%s", logs)
+	}
+	var isOwed, isSaidByRule bool
+	r.state(func(a *callActions) { isOwed, isSaidByRule = a.isLineOwed, a.isLineSaidByRule })
+	if isOwed || !isSaidByRule {
+		t.Errorf("isLineOwed = %v, isLineSaidByRule = %v; want the line counted as said", isOwed, isSaidByRule)
+	}
+}
+
 // 95 percent in is the caller answering the goodbye: the call ends at once.
 func TestACutInTheLastSecondOfTheLineEndsTheCallAtOnce(t *testing.T) {
 	for _, kind := range []string{"decline", "question", "noise"} {

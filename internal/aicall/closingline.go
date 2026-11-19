@@ -97,7 +97,8 @@ func commonSubsequence(a, b []string) int {
 // speech was detected 400 ms before the final sentence began has heard the line
 // for every purpose that matters here. Kept under 500 ms on the owner's
 // instruction: any more and a cut in the middle of the last-but-one sentence
-// would count as said.
+// would count as said. The opening's final clause is widened by the same
+// (cutInFinalClause).
 const finalSentenceSlack = 400 * time.Millisecond
 
 // cutInFinalSentence reports whether a caller who spoke over the closing line,
@@ -115,18 +116,47 @@ const finalSentenceSlack = 400 * time.Millisecond
 // false): an early cut on a one-sentence line still gets the line said. A
 // negative played (not known) or a line with nothing to weigh never applies.
 func cutInFinalSentence(line string, played, unplayed time.Duration) (finalSentence time.Duration, ok bool) {
+	return cutInFinalPart(line, played, unplayed, isSentenceEnd)
+}
+
+// cutInFinalClause is cutInFinalSentence for the opening (#598): whether a
+// caller who spoke over the opening, having heard played of it with unplayed
+// still to come, cut in on its final clause, the question it usually ends in
+// ("请问您需要吗？"), and so heard the offer before it. finalClause is that
+// clause's estimated audio length, by the same estimate and the same
+// finalSentenceSlack.
+//
+// The clause starts at the last separator before the line's trailing
+// separators and closing quotes: a sentence terminator as for
+// cutInFinalSentence, or one of ，、；： and , ; :. A ',' between two ASCII
+// digits ("1,000") is not one, as the '.' of "3.5" is not. A clause, not a
+// sentence, because an opening may say its whole offer and its question in one
+// long sentence after a short greeting: a cut early in that sentence is in the
+// final sentence, and the callee has heard none of the offer. A line with no
+// separator is one clause, and a cut anywhere in it is a cut before its final
+// clause (ok is false). The closing line keeps the final sentence (#465).
+func cutInFinalClause(line string, played, unplayed time.Duration) (finalClause time.Duration, ok bool) {
+	return cutInFinalPart(line, played, unplayed, isClauseEnd)
+}
+
+// cutInFinalPart dates a cut within line's final part, the text after the last
+// rune isPartEnd says ends a part: the estimate cutInFinalSentence and
+// cutInFinalClause describe, each with its own separators.
+func cutInFinalPart(line string, played, unplayed time.Duration,
+	isPartEnd func(runes []rune, i int) bool) (finalPart time.Duration, ok bool) {
+
 	if played < 0 || unplayed < 0 {
 		return 0, false
 	}
 	runes := []rune(strings.TrimSpace(line))
 	end := len(runes)
-	for end > 0 && (isSentenceEnd(runes, end-1) || isClosingMark(runes[end-1]) || unicode.IsSpace(runes[end-1])) {
+	for end > 0 && (isPartEnd(runes, end-1) || isClosingMark(runes[end-1]) || unicode.IsSpace(runes[end-1])) {
 		end--
 	}
 	runes = runes[:end]
 	split := -1
 	for i := range runes {
-		if isSentenceEnd(runes, i) {
+		if isPartEnd(runes, i) {
 			split = i
 		}
 	}
@@ -137,8 +167,8 @@ func cutInFinalSentence(line string, played, unplayed time.Duration) (finalSente
 	if total == 0 || last == 0 {
 		return 0, false
 	}
-	finalSentence = time.Duration(float64(played+unplayed) * float64(last) / float64(total))
-	return finalSentence, unplayed <= finalSentence+finalSentenceSlack
+	finalPart = time.Duration(float64(played+unplayed) * float64(last) / float64(total))
+	return finalPart, unplayed <= finalPart+finalSentenceSlack
 }
 
 // isSentenceEnd reports whether runes[i] ends a sentence. A '.' with an ASCII
@@ -148,10 +178,28 @@ func isSentenceEnd(runes []rune, i int) bool {
 	case '。', '！', '？', '!', '?':
 		return true
 	case '.':
-		isDigit := func(r rune) bool { return r >= '0' && r <= '9' }
-		return !(i > 0 && i+1 < len(runes) && isDigit(runes[i-1]) && isDigit(runes[i+1]))
+		return !isBetweenDigits(runes, i)
 	}
 	return false
+}
+
+// isClauseEnd reports whether runes[i] ends a clause: it ends a sentence
+// (isSentenceEnd), or it is one of ，、；： , ; :. A ',' with an ASCII digit on
+// both sides is a thousands separator.
+func isClauseEnd(runes []rune, i int) bool {
+	switch runes[i] {
+	case '，', '、', '；', '：', ';', ':':
+		return true
+	case ',':
+		return !isBetweenDigits(runes, i)
+	}
+	return isSentenceEnd(runes, i)
+}
+
+// isBetweenDigits reports whether runes[i] has an ASCII digit on both sides.
+func isBetweenDigits(runes []rune, i int) bool {
+	isDigit := func(r rune) bool { return r >= '0' && r <= '9' }
+	return i > 0 && i+1 < len(runes) && isDigit(runes[i-1]) && isDigit(runes[i+1])
 }
 
 // isClosingMark reports whether r is a quote or bracket that closes a sentence

@@ -5,6 +5,18 @@ under one tag, `rasonyang/ai-native-callcenter` and `rasonyang/freeswitch-aicc`;
 run them together. From v0.2.0 on, the GitHub release of the same tag also
 carries the one-line installer's files.
 
+## Unreleased
+
+### Fixed
+
+- On the engines that cut the bot by themselves (qwen, grok, doubao, gateway),
+  an acknowledgement such as 「好」 that cuts the opening says it again unless
+  it fell in the opening's last clause, where it used to be its last sentence:
+  an opening of a short greeting and one long sentence carrying the offer and
+  its question took a 「好」 early in that sentence for an answer to a question
+  the callee had not heard. A comma between digits ("1,000") ends no clause.
+  The closing line is unchanged (#598).
+
 ## v0.8.9 - 2026-11-19
 
 ### Upgrade notes

@@ -247,8 +247,8 @@ happened, so the damage is limited afterwards.
 - No replay when the flow has left the entry phase, when an ending is armed or
   under way, or when the words were words (an acknowledgement, and words no
   transcript makes known, are replayed too: #610, below). An opening cut before
-  it played in full stays owed; only an acknowledgement in its final sentence
-  counts it as heard (#610).
+  it played in full stays owed; only an acknowledgement in its final clause
+  counts it as heard (#610, #598).
 
 ### Words not known, and acknowledgements, over the opening (#610)
 
@@ -305,16 +305,24 @@ opening once more, as a greeting does:
   through `Session.SayOpeningAgain` under its rules whether or not the reply
   calls a tool, the reply muted as for a greeting. The acknowledgement leaves
   the opening owed until then (`noteCutVerdict`).
-- Except in the final sentence: a cut of the opening line's own turn, made
-  after it finished generating, that falls in its final sentence by the
-  estimate #465 makes for an armed closing line (`cutInFinalSentence`: the
-  sentence's share of the text, plus `finalSentenceSlack`, on the rendered
-  opening) is heard as the end of it. Nothing is said again, the tool is
-  refused as an acknowledgement as before, and the opening is no longer owed. A
-  one-sentence opening has no final sentence to date, so an acknowledgement
-  anywhere in it owes the replay; a cut of an opening still being generated, or
-  of another turn while it is owed, is never dated. The exception is for
-  acknowledgements only: a greeting or words not known over the final sentence
+- Except in the final clause: a cut of the opening line's own turn, made
+  after it finished generating, that falls in its final clause by the estimate
+  #465 makes for an armed closing line (`cutInFinalClause`: the clause's share
+  of the text, plus `finalSentenceSlack`, on the rendered opening) is heard as
+  the end of it. Nothing is said again, the tool is refused as an
+  acknowledgement as before, and the opening is no longer owed. The final
+  clause is the text after the last separator before the trailing punctuation
+  and quotes: a sentence terminator (`。！？.!?`, not the '.' of "3.5") or one
+  of `，` `、` `；` `：` `,` `;` `:`, but not a ',' between two ASCII digits
+  ("1,000").
+  The clause and not the sentence (#598, owner decision): an opening may be a
+  short greeting and then one long sentence that carries the whole offer and
+  ends in the question, and an acknowledgement early in that sentence has
+  heard none of the offer. The closing line keeps its final sentence (#465).
+  An opening with no separator is one clause, so an acknowledgement anywhere
+  in it owes the replay; a cut of an opening still being generated, or of
+  another turn while it is owed, is never dated. The exception is for
+  acknowledgements only: a greeting or words not known over the final clause
   are replayed as above.
 - Once the opening has been said again, or while an ending is armed, an
   acknowledgement over it is what it was before: refused, no second telling.
@@ -412,8 +420,8 @@ and was judged against that one. So the opening is owed at call level:
 - Words over the opening that no transcript makes known are refused only while
   the opening can still be said again: over its replay they let a moving tool
   run, as on any other turn (#610).
-- An acknowledgement in the opening's final sentence is dated from the text's
+- An acknowledgement in the opening's final clause is dated from the text's
   share, not from the audio; on a line spoken at an uneven pace the estimate can
-  be off by the slack it allows (#610).
+  be off by the slack it allows (#610, #598).
 - A callee whose real answer over the opening the transcriber dropped is asked
   again, after hearing the opening once more.
