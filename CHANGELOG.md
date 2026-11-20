@@ -50,6 +50,10 @@ carries the one-line installer's files.
   `tokenPeriod` in place of `startsLastMinute`, `tokensLastMinute`,
   `sessionRpm` and `tokenRpm`.
 - No migration. API contract: no change.
+- A running campaign whose next call waits on one of the dialer's limits no
+  longer reads as a stopped campaign: its state now says it is at a
+  concurrency or rate limit and continues by itself, in English and Chinese.
+  Text only: the `AT_CAPACITY` activity is unchanged (#645).
 
 ## v0.9.0 - 2026-11-20
 

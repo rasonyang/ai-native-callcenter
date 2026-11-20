@@ -127,9 +127,19 @@ describe('the sentence a campaign state reads as', () => {
     expect(
       describeState(campaignFixture({ status: 'RUNNING', activity: 'DIALING' }), tEn, { locale: 'en', ...here }).line,
     ).toBe('Running · dialling')
-    expect(
-      describeState(campaignFixture({ status: 'RUNNING', activity: 'AT_CAPACITY' }), tZh, { locale: 'zh', ...here }).line,
-    ).toBe('运行中 · 受容量限制暂缓')
+  })
+
+  it('says a campaign at a limit carries on by itself, with or without a time', () => {
+    const bare = campaignFixture({ status: 'RUNNING', activity: 'AT_CAPACITY' })
+    const timed = { ...bare, nextDialAt: '2026-10-12T10:00:05+08:00' }
+    for (const campaign of [bare, timed]) {
+      expect(describeState(campaign, tEn, { locale: 'en', ...here }).line).toBe(
+        'Running · at a concurrency or rate limit, continues by itself',
+      )
+      expect(describeState(campaign, tZh, { locale: 'zh', ...here }).line).toBe(
+        '运行中 · 已达并发或速率上限，有空位后自动继续',
+      )
+    }
   })
 
   it('reads as the status alone when nothing is known about the activity', () => {

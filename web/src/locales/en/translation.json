@@ -953,7 +953,7 @@
       "WAITING_RETRY": "waiting to retry",
       "WAITING_FREQUENCY": "held by another campaign's call",
       "WAITING_DAILY_CAP": "held by the daily dial cap",
-      "AT_CAPACITY": "held back at capacity"
+      "AT_CAPACITY": "at a concurrency or rate limit, continues by itself"
     },
     "activitiesWhen": {
       "DIALING": "dialling",
@@ -961,7 +961,7 @@
       "WAITING_RETRY": "waiting to retry ({{when}})",
       "WAITING_FREQUENCY": "held by another campaign's call until {{when}}",
       "WAITING_DAILY_CAP": "held by the daily dial cap until {{when}}",
-      "AT_CAPACITY": "held back at capacity"
+      "AT_CAPACITY": "at a concurrency or rate limit, continues by itself"
     },
     "when": {
       "today": "today {{time}}",
