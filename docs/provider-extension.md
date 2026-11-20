@@ -65,6 +65,7 @@ Every field of `provider.Profile` exists because a vendor forced it to
 | `AcceptsResponseToolChoice` | Whether a line's `response.create` carries `tool_choice: "none"` in its `response` object, so the turn that says a line (`SpeakText`: an announce, the wait line) does not call a tool. No other request carries it. True on openai (documented, not measured). False on qwen (accepted and ignored, as is `response.tools: []`: a line asked for over an unanswered call repeated the call; qwen-findings W-Q8), grok (undocumented, not measured) and gateway (refused as "Unsupported parameter", which would cost the line). Whatever the profile, the client never hands out a call made in a line's turn and deletes its item when the turn ends; a turn that called a tool and said nothing is asked for once more (see "A line's turn that calls a tool" below). |
 | `NeedsToolFreeLineDirection` | Whether a mid-call line's direction (`SpeakText`) also bans any tool call in its turn and says the tool the line mentions is already running, in place of the plain `SayExactly`. True on qwen only: with `SayExactly` the wait line over a running tool was silent 3 of 3 (the flow's action-claim rule makes "我查一下" need a lookup call), with this direction it was said 6 of 6 with no call (qwen-findings W-Q8). The opening line and a tool result's hint keep `SayExactly`. |
 | `DropsToolResultAfterLine` | Whether a line spoken while a tool call is still owed (`SpeakText` between the call and its result) ends the turn the call belongs to, so the result sent afterwards is dropped with no error and never answered. When it is true the orchestrator says no wait line over a slow HTTP tool (#286). True on doubao only: with no line before it a result was answered 1 of 1; after a line 0 of 3 (SayHello, ChatTTSText, SayHello plus a forced audio commit) and in 3 of 3 live calls (doubao-findings W-D10). The Realtime profiles owe the result's turn past the line and answer it. The orchestrator reads it, not a client. |
+| `SessionRPM` / `TokenRPM` | The account's quota per minute: session starts (connection establishments) and tokens, input and output together. Set only where a vendor document states it for the profile's own default model; 0 is unknown. Campaign admission paces itself by them; `AICC_PROVIDER_SESSION_RPM` / `AICC_PROVIDER_TOKEN_RPM` override them. See [Quota](#quota). |
 | `AcceptsG711` | Whether telephone audio passes through untouched. True removes conversion from the hot path entirely. |
 | `LinearInput` / `LinearOutput` | The PCM formats used when it does not. Fixed by the vendor, not negotiated. |
 | `CancelsResponseItself` | Whether it stops generating when it hears the caller, or has to be told |
@@ -182,6 +183,63 @@ second turn's `ResponseStarted` carries `IsLineAskedAgain`, so a wait line
 asked again stays an aside in `aicall`. Doubao has no such turn: its
 `SpeakText` commits text the engine synthesises. Measured on qwen in
 qwen-findings W-Q10.
+
+## Quota
+
+A provider's quota is a rate, not a population (#604): what the vendors here
+document is session starts per minute and tokens per minute, and Qwen's page
+says outright that connections held at once are not limited
+([design 06 §4](design/06-capacity.md)). The profile carries the two numbers
+only where a vendor document gives them for its own default model, and
+`ProfileFor` clears them when `AICC_PROVIDER_MODEL` names another (not on
+doubao, whose client pins its protocol version):
+
+| Profile | `SessionRPM` | `TokenRPM` | Source |
+|---|---|---|---|
+| qwen (`qwen-audio-3.1-realtime-flash`, Beijing) | 60 | 100000 | [Model Studio rate limits](https://help.aliyun.com/zh/model-studio/rate-limit), "Qwen-Audio-Realtime", read 2026-11-18: RPM counts connection establishments, TPM is input plus output, no concurrency limit |
+| doubao (per application id) | 60 | 100000 | DOC-A in [doubao-findings §9](design/doubao-findings.md) |
+| openai | 0 | 0 | depends on the account's usage tier |
+| grok | 0 | 0 | no vendor number sourced |
+| gateway | 0 | 0 | the gateway's own deployment |
+
+A deployment on another model, another region or another plan states its own
+with `AICC_PROVIDER_SESSION_RPM` and `AICC_PROVIDER_TOKEN_RPM` (empty keeps the
+profile's, `0` turns a limit off). `aicc doctor` prints the limits in force and
+where each came from.
+
+What every client does for it, through `provider.Quota` (`internal/provider/quota.go`),
+which shares no protocol event:
+
+- **A failed start is a number.** Every failure before the session is
+  confirmed becomes a `provider.StartFailure`, counted on
+  `aicc_provider_dial_failures_total{provider,status,reason}` and logged with
+  the upgrade's request id (`X-Request-Id` on the Realtime vendors,
+  `X-Tt-Logid` on doubao). `status` is the HTTP status of a refused upgrade,
+  `CLOSE_<code>` for a close during setup, `ERROR_EVENT`, `TIMEOUT` or
+  `NETWORK`; `reason` is `QUOTA_EXCEEDED` (a 429, or vendor text: quota, rate
+  limit, throttling, too many requests, `ExceededConcurrentLimit`),
+  `AUTH_REJECTED` or `OTHER`. Callers ask
+  `errors.Is(err, provider.ErrQuotaExceeded)`, never the vendor's words. Its
+  text is the original error's, so the CDR's `BOT_START_FAILED` and the rescue
+  are unchanged. A start the call gave up on is not counted.
+- **Tokens are counted** from each response's reported usage:
+  `aicc_provider_tokens_total{provider,direction}`. The Realtime client reads
+  `response.done.usage` (`input_tokens`, `output_tokens`, `total_tokens`;
+  OpenAI and qwen both send them); doubao reports usage on its own trailing
+  `response.done`, and it is counted the same way.
+- **Rate-limit headers are read when present** (`X-RateLimit-*` and
+  `x-ratelimit-{limit,remaining,reset}-{requests,tokens}`), logged once per
+  session and published as `aicc_provider_ratelimit_limit` / `_remaining`. None
+  of the vendors here was seen sending one.
+- **The process's rate meter is fed** (`internal/provider/ratemeter`): the
+  session factory in `cmd/aicc` counts each start before the dial, and the
+  client reports tokens and quota refusals (a refused start, or a quota error
+  mid-call), through the `provider.WithMeter` option. Campaign admission reads
+  it (design 10 §6.3); nothing else decides on it.
+
+A new client wires the same: build a `provider.Quota` with its own request-id
+header, hand `Refused` every failure before its session is confirmed, `Spent`
+every usage it decodes, and `RefusedMidCall` a quota error after the start.
 
 ## Grok (xAI Grok Voice)
 
