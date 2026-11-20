@@ -5,7 +5,7 @@ under one tag, `rasonyang/ai-native-callcenter` and `rasonyang/freeswitch-aicc`;
 run them together. From v0.2.0 on, the GitHub release of the same tag also
 carries the one-line installer's files.
 
-## Unreleased
+## v0.9.0 - 2026-11-20
 
 ### Upgrade notes
 
@@ -65,11 +65,29 @@ carries the one-line installer's files.
 - Two settings added, both empty by default: `AICC_PROVIDER_SESSION_RPM` and
   `AICC_PROVIDER_TOKEN_RPM`. Empty keeps the provider profile's documented
   default for its own model (cleared when `AICC_PROVIDER_MODEL` names another
-  model), `0` turns that limit off, and a positive number replaces it with the
-  account's. Anything else stops the application at startup. A qwen deployment
-  in another region, on another model or with a raised quota sets them.
+  model, except on doubao, whose client pins its protocol version), `0` turns
+  that limit off, and a positive number replaces it with the account's.
+  Anything else stops the application at startup. A qwen deployment in another
+  region, on another model or with a raised quota sets them.
+- No migration.
 - API contract: no schema change. `CDR.hangupCause` now says what it holds,
-  `MAX_CALL_DURATION` among the platform's own words (#637).
+  `MAX_CALL_DURATION` among the platform's own words (#637). `make
+  api-breaking BASE=v0.8.9` reports no breaking change and no warning ("No
+  breaking changes to report, but the specs are different"), and `oasdiff
+  changelog` against v0.8.9 lists no change: only that field's description
+  differs.
+- Upgrade both images together, as always: they are published under one tag
+  and the deploy stack names both. The switch image changes in this release
+  (#637): `dialplan/aicc.xml` has two new extensions first in the `aicc`
+  context, `aicc_max_call_duration_bot` and `aicc_max_call_duration_agent`,
+  and `scripts/aicc_inbound.lua` and `scripts/aicc_queue.lua` schedule a
+  call's transfer to them; `vars.xml` gains only a comment. A switch installed
+  natively is not updated by an image: copy those three files in and run
+  `reloadxml`. Until this application has connected to it, the switch uses the
+  scripts' defaults, 360 seconds from the answer for a call a bot serves and
+  3600 seconds from the first queue entry, so an application of an earlier
+  release next to this switch has its inbound AI calls ended at the former,
+  whatever their flow says.
 
 ### Added
 
@@ -78,7 +96,6 @@ carries the one-line installer's files.
   WARN with its `callId` ("the switch ended a call at the deployment's maximum
   call duration"). A `BOT` one means the application's own ending at the
   flow's time limit did not run (#637).
-
 - A provider session that could not be started is counted by what the
   provider said: `aicc_provider_dial_failures_total{provider,status,reason}`,
   where `status` is the HTTP status of a refused upgrade, `CLOSE_<code>` for a
@@ -88,8 +105,9 @@ carries the one-line installer's files.
   carries the request id of the provider's upgrade response, the handle the
   vendor's support asks for; a session that opened logs it once (#604).
 - The tokens each provider response reports are counted:
-  `aicc_provider_tokens_total{provider,direction}` (`INPUT`, `OUTPUT`). Together
-  with `aicc_provider_sessions_started_total` and the new
+  `aicc_provider_tokens_total{provider,direction}` (`INPUT`, `OUTPUT`, and
+  `UNSPLIT` for the part of a reported total the vendor did not split between
+  them). Together with `aicc_provider_sessions_started_total` and the new
   `aicc_provider_quota_per_minute{provider,kind}`, a dashboard can show how
   close a minute runs to the provider's two caps (#604).
 - `aicc_dialer_admission_blocked_total` has three new reasons:
