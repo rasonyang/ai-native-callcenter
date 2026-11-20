@@ -2041,3 +2041,50 @@ The en half (95001: "Wrong number, sorry.", "Sorry, I called by mistake.", "Oh, 
 **The shipped payload, once** (same day, `AICC_PROBE_ARMS=product`, one session). The opening `session.update` built by `buildSessionUpdate` was accepted: `session.created` `{"model":"fun-asr"}`, `session.updated` `{"language":"zh","model":"fun-asr"}`, and the same after the instructions-only update. The four clips came back as 嗯。, 喂。, 嗯。 and 嗯。. The streamed `stash` showed `Wait` under 喂 and `음` under the Korean clip before `completed` wrote them in Chinese; the client reads a partial's `delta` field, which qwen's partials do not carry (they carry `text` and `stash`), so only the completed transcript reaches a classifier.
 
 **Not covered.** No telephone call was placed: 8 kHz telephone audio and a human 嗯 were not measured, only clean synthesized 16 kHz clips. A human caller and a plus model were not run. How often the hint helps in production is not known from 8 sessions.
+
+## W-Q20: the realtime quota is a connect rate and a token rate, and a refusal is a close after the upgrade (#604, 2026-11-18/19)
+
+**The vendor's document.** The Model Studio rate-limit page
+(<https://help.aliyun.com/zh/model-studio/rate-limit>, section "Qwen-Audio-Realtime", read 2026-11-18)
+says, for the WebSocket realtime models: RPM counts **connection establishments** (turns inside one
+connection do not count, a reconnect does); there is **no separate limit on connections held at
+once**; TPM, input and output tokens together, applies. For `qwen-audio-3.1-realtime-flash` in the
+Beijing region: **60 connects and 100,000 tokens per minute**.
+
+**What a deployment answers (2026-11-18, one deployment, its own key).**
+
+- The upgrade response (101) carried `x-request-id` and no `X-RateLimit-*` header. Neither did a 401
+  upgrade nor the DashScope REST API's 200 and 429. A rate-limit header cannot be the only way to
+  read the limit.
+- `GET /api/v1/quotas?model=<model>` with the same key answered JSON: `request_limit` 60 per 60 s,
+  `usage_limit` 100000 `total_tokens` per 60 s, and a null concurrency field. The numbers match the
+  document. Whether the endpoint is a stable public API is the vendor's question; nothing in this
+  repository reads it.
+
+**What a refusal looks like (2026-11-19, production, v0.8.8, flash, Beijing).** From the database and
+the application log of one deployment (issue #604, comment of 2026-11-19): 1117 of 4262 answered
+campaign calls ended `BOT_START_FAILED`, every one with the start error `aicall: start model: session
+rejected: websocket: close 1007 (invalid payload data): Allocated quota exceeded, please increase your
+quota limit.`
+
+- The upgrade had succeeded; the server closed the socket with **1007** and that text once the
+  `session.update` was in. It is not an HTTP 429, so a client that looks for a 429 alone misses it.
+- Each answered call opened one session at the answer (`provider session created` right after
+  `invite accepted`), and the platform hung the refused callee up. The provider breaker paused the
+  campaign 72 times (`PROVIDER_FAILURE`).
+- The refusals did not stop when operators lowered `maxConcurrent` from 60 to 35, and minutes with
+  about 30 answered calls, half the connect rate, still had 10 to 20 refusals. So the 60 connects a
+  minute were probably not the only cap in play: the 100,000 tokens a minute is the likelier one,
+  unless something else shares the key. The deployment could not confirm it, because `response.done`
+  usage was not counted anywhere.
+
+**What changed (#604).** The refusal is classified (`CLOSE_1007`, `QUOTA_EXCEEDED`), counted on
+`aicc_provider_dial_failures_total` and logged with the `x-request-id`; `response.done` usage is
+counted on `aicc_provider_tokens_total`; the qwen profile carries the documented 60 / 100000
+(`Profile.SessionRPM`, `Profile.TokenRPM`, for flash only, overridable); and campaign admission paces
+itself by both and holds for a minute after any quota refusal (design 10 §6.3, design 06 §4). The
+refusal stays a `BOT_START_FAILED` call and a `BOT_FAILED` outcome.
+
+**Not measured.** How many tokens a call of a given flow spends a minute, which is what decides
+whether the connect cap or the token cap binds first: the new counter is how a deployment finds out.
+Whether a connection the vendor refuses counts towards its RPM. Other models and regions.

@@ -106,6 +106,9 @@ type Session struct {
 
 	events chan provider.Event
 	conn   *wsconn.Conn
+	// quota is this session's side of the provider's quota
+	// (provider/quota.go); its request id is the upgrade's X-Tt-Logid.
+	quota provider.Quota
 
 	// ready closes when the provider has created the session, which is the one
 	// thing that must happen before anything else may be sent.
@@ -143,6 +146,7 @@ type Session struct {
 	tools        []toolBody
 	startError   error
 	logid        string
+	handshake    provider.Handshake
 	terminal     string
 	// isFenced drops audio from a turn that was cancelled: deltas go on
 	// arriving for up to half a second after the cancel was acknowledged, and
@@ -194,11 +198,15 @@ type Session struct {
 	stopTicker func()
 }
 
+// requestIDHeader is where this protocol answers an upgrade with the session's
+// identity, the id the vendor's support answers from.
+const requestIDHeader = "X-Tt-Logid"
+
 // New builds a session for a profile. The credential is read from the
 // environment named by the profile, so a missing key fails here rather than
 // mid-call.
-func New(profile provider.Profile, log *slog.Logger) (provider.VoiceSession, error) {
-	session, err := newSession(profile, log)
+func New(profile provider.Profile, log *slog.Logger, opts ...provider.Option) (provider.VoiceSession, error) {
+	session, err := newSession(profile, log, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -206,7 +214,7 @@ func New(profile provider.Profile, log *slog.Logger) (provider.VoiceSession, err
 }
 
 // newSession is New without the interface, for this package and its tests.
-func newSession(profile provider.Profile, log *slog.Logger) (*Session, error) {
+func newSession(profile provider.Profile, log *slog.Logger, opts ...provider.Option) (*Session, error) {
 	apiKey := os.Getenv(profile.APIKeyEnv)
 	if apiKey == "" {
 		return nil, fmt.Errorf("provider %s: %s is not set", profile.Name, profile.APIKeyEnv)
@@ -214,10 +222,12 @@ func newSession(profile provider.Profile, log *slog.Logger) (*Session, error) {
 	if log == nil {
 		log = slog.Default()
 	}
+	options := provider.ApplyOptions(opts)
 	return &Session{
 		profile: profile,
 		apiKey:  apiKey,
 		log:     log.With("provider", profile.Name, "model", model),
+		quota:   provider.NewQuota(profile.Name, requestIDHeader, options.Meter),
 
 		events:   make(chan provider.Event, eventBuffer),
 		ready:    make(chan struct{}),
@@ -232,10 +242,22 @@ func newSession(profile provider.Profile, log *slog.Logger) (*Session, error) {
 	}, nil
 }
 
-// Session satisfies the one interface above this package.
-var _ provider.VoiceSession = (*Session)(nil)
+// Session satisfies the one interface above this package, and says what its
+// upgrade was answered with to aicc doctor.
+var (
+	_ provider.VoiceSession      = (*Session)(nil)
+	_ provider.HandshakeReporter = (*Session)(nil)
+)
 
 func (s *Session) Events() <-chan provider.Event { return s.events }
+
+// Handshake is what the provider answered this session's upgrade with; empty
+// before Start has connected.
+func (s *Session) Handshake() provider.Handshake {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.handshake
+}
 
 // Start connects, creates the session and waits for the provider to confirm
 // it, then says the opening line if the flow gave one.
@@ -260,19 +282,25 @@ func (s *Session) Start(ctx context.Context, cfg provider.SessionConfig) error {
 
 	conn, err := wsconn.Dial(ctx, s.profile.Endpoint, headers, s.log)
 	if err != nil {
-		return err
+		return s.quota.Refused(ctx, s.log, nil, err)
 	}
 	s.conn = conn
 	// The session's identity is in the upgrade response, not in a frame. It is
 	// what a support ticket is answered from, so it is logged once and carried
-	// by every line this session writes afterwards.
-	if logid := conn.Header().Get("X-Tt-Logid"); logid != "" {
+	// by every line this session writes afterwards. A rate limit the vendor
+	// stated there is logged with it (#604).
+	handshake := s.quota.Upgraded(conn.Header())
+	s.mu.Lock()
+	s.handshake = handshake
+	s.mu.Unlock()
+	if logid := handshake.RequestID; logid != "" {
 		s.mu.Lock()
 		s.logid = logid
 		s.mu.Unlock()
 		s.log = s.log.With("logid", logid)
 	}
-	s.log.Info("provider session opening", "endpoint", s.profile.Endpoint)
+	s.log.Info("provider session opening",
+		append([]any{"endpoint", s.profile.Endpoint}, handshake.LogAttrs()...)...)
 
 	s.dog = provider.NewWatchdog(provider.WatchdogConfig{
 		FirstAudioDeadline: s.firstAudioDeadline,
@@ -286,7 +314,7 @@ func (s *Session) Start(ctx context.Context, cfg provider.SessionConfig) error {
 
 	if err := s.sendEvent(s.buildSession("session.create", cfg.Instructions)); err != nil {
 		s.conn.Close()
-		return fmt.Errorf("create session: %w", err)
+		return s.quota.Refused(ctx, s.log, conn.Header(), fmt.Errorf("create session: %w", err))
 	}
 
 	// Nothing may be sent until the session exists: a frame that arrives ahead
@@ -299,13 +327,14 @@ func (s *Session) Start(ctx context.Context, cfg provider.SessionConfig) error {
 	case <-time.After(wsconn.DialTimeout):
 		s.conn.Close()
 		if err := s.failure(); err != nil {
-			return fmt.Errorf("session refused: %w", err)
+			return s.quota.Refused(ctx, s.log, conn.Header(), fmt.Errorf("session refused: %w", err))
 		}
-		return errors.New("the provider did not create the session")
+		return s.quota.Refused(ctx, s.log, conn.Header(),
+			provider.StartTimedOut("the provider did not create the session"))
 	}
 	if err := s.failure(); err != nil {
 		s.conn.Close()
-		return fmt.Errorf("session refused: %w", err)
+		return s.quota.Refused(ctx, s.log, conn.Header(), fmt.Errorf("session refused: %w", err))
 	}
 
 	// The opening line goes out as a line to speak, the same frame a mid-call

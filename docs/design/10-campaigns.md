@@ -662,6 +662,16 @@ and nothing is retried blindly.
 
 The token bucket (F6) keeps pacing originates per second, unchanged.
 
+**As built (#604): a fifth limit, the provider's rate.** The first bullet's premise, that a cloud
+provider's quota is counted in concurrent sessions, does not hold for the providers documented so
+far: Qwen-Audio-Realtime limits connection establishments and tokens per minute and states no limit
+on sessions held at once, and doubao limits `session.create` and tokens per minute
+([06-capacity §4](06-capacity.md)). `AICC_BOT_MAX_CALLS` still bounds the sessions this process
+runs; what the provider takes is a rate, and every answered call opens one session at the answer.
+The provider's per-minute quota (`AICC_PROVIDER_SESSION_RPM`, `AICC_PROVIDER_TOKEN_RPM`, defaulting
+to the profile's documented numbers) is a fifth limit, applied in §6.3. It is shared with inbound
+the way bot concurrency is: inbound sessions spend it and are never held for it.
+
 ### 6.2 Why a ringing leg must not hold a bot slot
 
 Reserving a slot for every ringing leg (`talking + ringing < cap`) wastes exactly the scarce
@@ -710,6 +720,47 @@ admit iff  ringing < maxRinging
   is a sample.
 - After a restart the window is rebuilt from the campaign's last 600 finished attempts, then kept by
   each finish; no admission reads the database.
+
+**As built (#604): the provider's rate.** After the four conditions above, admission applies the
+provider's quota per minute (`internal/dialer/provider.go`, `providerHold`):
+
+```
+and now ≥ lastQuotaRefusal + 60 s
+and starts60 + n ≤ SessionRPM                                  -- when SessionRPM > 0
+and tokens60 + n × tokens60 / max(1, botSessionsInUse) ≤ TokenRPM   -- when TokenRPM > 0
+where n = pendingAnswered + Σ_campaigns (p̂_c × ringing_c) + 1
+```
+
+- `starts60` and `tokens60` are the last 60 s of the process's rate meter
+  (`internal/provider/ratemeter`): every provider session start, counted before it dials, and every
+  response's reported tokens, inbound sessions included. An event counts while `now < t + 60 s`.
+  `lastQuotaRefusal` is the latest time the provider said its quota was spent: a refused start
+  (`provider.ErrQuotaExceeded`: an HTTP 429, or vendor text that says quota, rate limit or
+  throttling) or such an error mid-call, from any call.
+- `Σ p̂_c × ringing_c` is the expected-answer sum the bot rule already computes, because each answer
+  opens a session. `pendingAnswered` is the answered legs holding a reserved slot or waiting in the
+  overflow hold (`voice.Usage.Reserved + Waiting`): answered, their session not yet started, so in
+  neither the meter nor the sum — the gap the bot rule's `Waiting` term closes, closed here too.
+- `tokens60 / max(1, botSessionsInUse)` is what a session in use cost over the last minute, so the
+  token condition asks whether the minute ahead, the sessions running plus the ones about to open,
+  fits. With no tokens counted yet it admits; the session condition is what guards a cold burst, and
+  the refusal backoff what bounds an estimate that ran short while sessions were younger than a
+  minute.
+- The backoff applies whenever the meter is wired, whatever the limits, 0 included: a refusal is
+  the provider's word, not an estimate. A limit of 0 (the profile has no documented number, or the
+  deployment set it off) turns its condition off.
+- A call held for one of these is counted as `aicc_dialer_admission_blocked_total{reason}` with
+  `PROVIDER_SESSION_RATE`, `PROVIDER_TOKEN_RATE` or `PROVIDER_QUOTA_BACKOFF`; the campaign's activity
+  is `AT_CAPACITY`, as for every other limit (no contract change). The dialer logs the rule starting
+  to hold, changing reason and letting calls through again, once per change. A hold that ends by
+  time alone (the refusal's minute, the oldest start or token leaving the window) asks for a pass at
+  that moment, because no event may arrive to wake the dialer then.
+- Inbound calls are never held. A quota refusal is still a `BOT_FAILED` outcome and still counts
+  towards the provider breaker (§7.4); what changed is that admission stops feeding it.
+- The capacity simulation has a provider with a per-minute quota (`internal/dialer/provider_test.go`):
+  a connect-rate case and a token-rate case, each run with and without the rule, the rule keeping
+  refusals near zero (a run of answers above `p̂_c` can still put one start over) while the rate is
+  used.
 
 ### 6.4 Take a slot on answer; wait briefly if there is none
 
@@ -1338,13 +1389,15 @@ configuration today, so only the env names `AICC_OVERFLOW_HOLD` and the like app
 | `AICC_OVERFLOW_HOLD` | `1500ms` | 6.4 |
 | `AICC_OVERFLOW_TIGHTEN_RATE` / `AICC_OVERFLOW_STOP_RATE` | `1%` / `3%` | 6.5 |
 | `AICC_TRUNK_BREAKER_COUNT` / `AICC_PROVIDER_BREAKER_COUNT` | `20` / `5` | 7.4 |
+| `AICC_PROVIDER_SESSION_RPM` / `AICC_PROVIDER_TOKEN_RPM` | the profile's documented default; `0` off | 6.3 |
 
 **Metrics** (names as built — every instrument carries the `aicc_` prefix and lives in
 `internal/obs/callmetrics.go`):
 
 - `aicc_campaign_attempts_total{outcome}`
 - `aicc_dialer_in_flight{kind=ringing|talking}`
-- `aicc_dialer_admission_blocked_total{reason}`
+- `aicc_dialer_admission_blocked_total{reason}` (reasons include the provider rule's
+  `PROVIDER_SESSION_RATE`, `PROVIDER_TOKEN_RATE`, `PROVIDER_QUOTA_BACKOFF`, #604)
 - `aicc_bot_slots{state=in_use|reserved}`
 - `aicc_did_outbound_in_use{did}`
 - `aicc_campaign_answer_rate_ucb{campaign}`, `aicc_campaign_overflow_total`, `aicc_bot_overflow_hold_ms`

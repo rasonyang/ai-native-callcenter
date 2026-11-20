@@ -372,3 +372,93 @@ func TestALeadGuardVerdictIsCountedByReasonAndProvider(t *testing.T) {
 		}
 	}
 }
+
+// sumByLabels reads one counter or gauge: its value per combination of the
+// named labels, joined with "/".
+func sumByLabels(t *testing.T, reader sdkmetric.Reader, name string, labels ...string) map[string]int64 {
+	t.Helper()
+	var rm metricdata.ResourceMetrics
+	if err := reader.Collect(context.Background(), &rm); err != nil {
+		t.Fatal(err)
+	}
+	key := func(set attribute.Set) string {
+		values := make([]string, 0, len(labels))
+		for _, label := range labels {
+			v, _ := set.Value(attribute.Key(label))
+			values = append(values, v.AsString())
+		}
+		return strings.Join(values, "/")
+	}
+	out := map[string]int64{}
+	for _, sm := range rm.ScopeMetrics {
+		for _, m := range sm.Metrics {
+			if m.Name != name {
+				continue
+			}
+			switch data := m.Data.(type) {
+			case metricdata.Sum[int64]:
+				for _, dp := range data.DataPoints {
+					out[key(dp.Attributes)] += dp.Value
+				}
+			case metricdata.Gauge[int64]:
+				for _, dp := range data.DataPoints {
+					out[key(dp.Attributes)] = dp.Value
+				}
+			}
+		}
+	}
+	return out
+}
+
+func TestAProviderDialFailureIsCountedByStatusAndReason(t *testing.T) {
+	reader := useTestReader()
+	const name = "aicc_provider_dial_failures_total"
+	before := sumByLabels(t, reader, name, "provider", "status", "reason")
+	RecordProviderDialFailure("qwen", "CLOSE_1007", "QUOTA_EXCEEDED")
+	RecordProviderDialFailure("qwen", "CLOSE_1007", "QUOTA_EXCEEDED")
+	RecordProviderDialFailure("openai", "401", "AUTH_REJECTED")
+	after := sumByLabels(t, reader, name, "provider", "status", "reason")
+	for key, want := range map[string]int64{
+		"qwen/CLOSE_1007/QUOTA_EXCEEDED": 2,
+		"openai/401/AUTH_REJECTED":       1,
+		"qwen/429/QUOTA_EXCEEDED":        0,
+	} {
+		if got := after[key] - before[key]; got != want {
+			t.Errorf("%s gained %d, want %d", key, got, want)
+		}
+	}
+}
+
+func TestARateLimitHeaderSetsOnlyTheValuesItCarried(t *testing.T) {
+	reader := useTestReader()
+	SetProviderRateLimit("gateway", "TOKENS", 100000, true, 0, false)
+	SetProviderRateLimit("gateway", "TOKENS", 0, false, 99000, true)
+	limits := sumByLabels(t, reader, "aicc_provider_ratelimit_limit", "provider", "kind")
+	left := sumByLabels(t, reader, "aicc_provider_ratelimit_remaining", "provider", "kind")
+	if limits["gateway/TOKENS"] != 100000 || left["gateway/TOKENS"] != 99000 {
+		t.Errorf("limit %d remaining %d, want 100000 and 99000", limits["gateway/TOKENS"], left["gateway/TOKENS"])
+	}
+}
+
+func TestProviderTokensAreCountedByDirection(t *testing.T) {
+	reader := useTestReader()
+	const name = "aicc_provider_tokens_total"
+	before := sumByLabels(t, reader, name, "provider", "direction")
+	RecordProviderTokens("qwen", 1288, 255, 0)
+	RecordProviderTokens("qwen", 0, 0, 7)
+	after := sumByLabels(t, reader, name, "provider", "direction")
+	for key, want := range map[string]int64{"qwen/INPUT": 1288, "qwen/OUTPUT": 255, "qwen/UNSPLIT": 7} {
+		if got := after[key] - before[key]; got != want {
+			t.Errorf("%s gained %d, want %d", key, got, want)
+		}
+	}
+}
+
+func TestTheProviderQuotaIsPublishedByKind(t *testing.T) {
+	reader := useTestReader()
+	SetProviderQuota("doubao", 60, 100000)
+	got := sumByLabels(t, reader, "aicc_provider_quota_per_minute", "provider", "kind")
+	if got["doubao/SESSIONS"] != 60 || got["doubao/TOKENS"] != 100000 {
+		t.Errorf("quota = %v, want doubao 60 sessions and 100000 tokens", got)
+	}
+}

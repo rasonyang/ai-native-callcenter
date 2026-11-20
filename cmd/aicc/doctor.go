@@ -315,7 +315,7 @@ func runDoctor(args []string) error {
 				func() { _ = client.Close() }, nil
 		},
 		recordings:     func() (recording.Storage, error) { return newRecordingStorage(cfg) },
-		sessions:       voiceSession,
+		sessions:       voiceSessions(nil),
 		interfaceAddrs: net.InterfaceAddrs,
 		ephemeralPorts: osEphemeralPorts,
 		sleep:          sleepCtx,
@@ -1068,30 +1068,69 @@ func checkProvider(ctx context.Context, d doctorDeps, opts doctorOptions) []doct
 			skip(DoctorCheckProviderSession, "no key to open a session with"),
 		}
 	}
-	out := []doctorResult{pass(DoctorCheckProviderKey, "provider "+profile.Name+" has a key")}
+	// The per-minute quota campaigns are paced by is said whether or not a
+	// session is opened: it is configuration, and the one a sizing question
+	// starts from (#604).
+	out := []doctorResult{pass(DoctorCheckProviderKey,
+		"provider "+profile.Name+" has a key; "+providerQuotaSummary(d.cfg, profile))}
 	if opts.skipProvider {
 		return append(out, skip(DoctorCheckProviderSession, "--skip-provider"))
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, providerProbeTimeout)
 	defer cancel()
-	if err := probeProvider(ctx, d, profile, discard); err != nil {
-		return append(out, fail(DoctorCheckProviderSession,
-			"provider "+profile.Name+" ("+profile.Model+") did not open a session: "+oneLine(err.Error()),
-			"check "+profile.APIKeyEnv+" and AICC_PROVIDER_ENDPOINT/AICC_PROVIDER_MODEL, and that this host can reach "+profile.Endpoint))
+	handshake, err := probeProvider(ctx, d, profile, discard)
+	if err != nil {
+		fix := "check " + profile.APIKeyEnv + " and AICC_PROVIDER_ENDPOINT/AICC_PROVIDER_MODEL, and that this host can reach " + profile.Endpoint
+		msg := "provider " + profile.Name + " (" + profile.Model + ") did not open a session: " + oneLine(err.Error())
+		var failure *provider.StartFailure
+		if errors.As(err, &failure) {
+			msg += " (status " + failure.Status + ", " + string(failure.Reason) + requestIDNote(failure.RequestID) + ")"
+		}
+		if errors.Is(err, provider.ErrQuotaExceeded) {
+			fix = "the provider's per-minute quota is spent (session starts or tokens): it clears within a minute; " +
+				"if it recurs, lower the campaigns' maxConcurrent, set AICC_PROVIDER_SESSION_RPM / AICC_PROVIDER_TOKEN_RPM " +
+				"to the account's limits, or raise the quota with the vendor (docs/design/06-capacity.md section 4)"
+		}
+		return append(out, fail(DoctorCheckProviderSession, msg, fix))
 	}
 	return append(out, pass(DoctorCheckProviderSession,
-		"provider "+profile.Name+" ("+profile.Model+") opened a session"))
+		"provider "+profile.Name+" ("+profile.Model+") opened a session"+handshakeNote(handshake)))
+}
+
+// requestIDNote is a request id as a clause of a doctor message, nothing
+// when there is none.
+func requestIDNote(id string) string {
+	if id == "" {
+		return ""
+	}
+	return ", request id " + id
+}
+
+// handshakeNote is what the provider answered the probe's upgrade with that
+// matters to its quota: the request id its support asks for, and any
+// rate-limit header, or that there was none (the vendors here send none).
+func handshakeNote(h provider.Handshake) string {
+	note := requestIDNote(h.RequestID)
+	if len(h.RateLimits) == 0 {
+		return note + "; no rate-limit headers"
+	}
+	limits := make([]string, 0, len(h.RateLimits))
+	for _, limit := range h.RateLimits {
+		limits = append(limits, limit.String())
+	}
+	return note + "; rate-limit headers: " + strings.Join(limits, "; ")
 }
 
 // probeProvider opens one session the way a call would, and closes it as soon
 // as the provider says it is ready. That is the one proof a key, a model name
 // and an endpoint work together: a WebSocket handshake alone is not, because
-// some providers accept it and reject the first frame.
-func probeProvider(ctx context.Context, d doctorDeps, profile provider.Profile, log *slog.Logger) error {
+// some providers accept it and reject the first frame. It returns what the
+// provider answered the upgrade with, when the client can say.
+func probeProvider(ctx context.Context, d doctorDeps, profile provider.Profile, log *slog.Logger) (provider.Handshake, error) {
 	session, err := d.sessions(profile, log)
 	if err != nil {
-		return err
+		return provider.Handshake{}, err
 	}
 	defer func() {
 		closeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
@@ -1104,13 +1143,18 @@ func probeProvider(ctx context.Context, d doctorDeps, profile provider.Profile, 
 		}
 	}()
 	in, out := profile.FormatsFor(media.LawMu)
-	return session.Start(ctx, provider.SessionConfig{
+	err = session.Start(ctx, provider.SessionConfig{
 		Instructions: "You are a connectivity check. Say nothing.",
 		Language:     "en",
 		Turn:         provider.DefaultTurnDetection(),
 		InputFormat:  in,
 		OutputFormat: out,
 	})
+	var handshake provider.Handshake
+	if reporter, ok := session.(provider.HandshakeReporter); ok {
+		handshake = reporter.Handshake()
+	}
+	return handshake, err
 }
 
 func printDoctor(w io.Writer, results []doctorResult, asJSON bool) error {

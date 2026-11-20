@@ -143,6 +143,13 @@ type Config struct {
 	// thresholds (design 10 section 6.5). Defaults 0.01 and 0.03.
 	OverflowTightenRate float64
 	OverflowStopRate    float64
+	// ProviderSessionRPM and ProviderTokenRPM are the speech provider's quota
+	// per minute (provider.Profile, after AICC_PROVIDER_SESSION_RPM and
+	// AICC_PROVIDER_TOKEN_RPM): session starts, and tokens in and out
+	// together. Zero turns that half of the provider rule off; the refusal
+	// backoff applies whenever Deps.ProviderRate is set (providerHold).
+	ProviderSessionRPM int
+	ProviderTokenRPM   int
 	// noOverdial plans every ringing leg as an answer, whatever the history says:
 	// the conservative rule on its own. Unexported on purpose; tests set it to
 	// have the baseline the expected-answer rule is compared with.
@@ -202,6 +209,9 @@ type Deps struct {
 	Placer Placer
 	Slots  Slots
 	Lines  Lines
+	// ProviderRate is the provider's quota as spent over the last minute
+	// (ratemeter.Meter); nil means the provider rule is not applied.
+	ProviderRate ProviderRate
 	// IsLive says whether the registry holds the call (a live call is never
 	// reconciled away).
 	IsLive func(callID uuid.UUID) bool
@@ -224,6 +234,7 @@ type Dialer struct {
 	pl  Placer
 	sl  Slots
 	ln  Lines
+	pr  ProviderRate
 	// isLive and the clock are read by the actor only.
 	isLive     func(uuid.UUID) bool
 	reconciled <-chan struct{}
@@ -265,6 +276,12 @@ type Dialer struct {
 	samples []rangSample
 	// limits is the DIDs' outbound line limits, read once per pass.
 	limits map[string]int
+	// rateWake is the earliest moment a provider-rule hold of this pass ends
+	// by time alone (providerLimit); providerHeld is the rule's last reason,
+	// for a log line per change.
+	rateWake     time.Time
+	providerHeld string
+
 	halted map[uuid.UUID]bool      // paused by a breaker this pass, not yet re-read
 	since  map[uuid.UUID]time.Time // breaker run starts
 	// rearm holds the campaigns whose waiting contacts are to be judged again
@@ -309,7 +326,7 @@ func New(cfg Config, d Deps) *Dialer {
 		d.Log = slog.Default()
 	}
 	x := &Dialer{
-		cfg: cfg.withDefaults(), st: d.Store, pl: d.Placer, sl: d.Slots, ln: d.Lines,
+		cfg: cfg.withDefaults(), st: d.Store, pl: d.Placer, sl: d.Slots, ln: d.Lines, pr: d.ProviderRate,
 		isLive: d.IsLive, reconciled: d.Reconciled, clock: d.Clock, log: d.Log, onChange: d.OnChange,
 		wake:      make(chan struct{}, 1),
 		flights:   map[uuid.UUID]*flight{},

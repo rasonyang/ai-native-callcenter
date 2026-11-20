@@ -18,6 +18,7 @@ import (
 	"github.com/rasonyang/ai-native-callcenter/internal/campaign"
 	"github.com/rasonyang/ai-native-callcenter/internal/dayrange"
 	"github.com/rasonyang/ai-native-callcenter/internal/outbound"
+	"github.com/rasonyang/ai-native-callcenter/internal/provider/ratemeter"
 	"github.com/rasonyang/ai-native-callcenter/internal/voice"
 )
 
@@ -192,6 +193,12 @@ const (
 	evRingOut
 	evTalkEnd
 	evHoldExpire
+	// evTurn is a provider session reporting what one turn cost (#604).
+	evTurn
+	// evTick moves the clock on by a second when nothing else would: a hold
+	// by the provider's quota can end by time alone, after the last call has
+	// ended, and the dialer's own timer is what dials again then.
+	evTick
 )
 
 type simEvent struct {
@@ -226,6 +233,9 @@ type simCall struct {
 	talk     time.Duration
 	isParked bool
 	hasSlot  bool
+	// isRefused: the provider refused its session; the platform hangs up a
+	// second later and the outcome is BOT_FAILED (#604).
+	isRefused bool
 }
 
 // sim wires the pieces; it implements dialer.Placer, Slots and Lines.
@@ -260,6 +270,12 @@ type sim struct {
 	placements    int
 	failPlace     func(req outbound.AIDialRequest) error
 	lines         *simLines
+
+	// prov is the speech provider and its per-minute quota (#604), and meter
+	// the process's account of it that admission reads; nil: every session
+	// starts and nothing is metered.
+	prov  *simProvider
+	meter *ratemeter.Meter
 }
 
 // simLines is the DID line account as the dialer sees it.
@@ -317,6 +333,13 @@ type simSpec struct {
 	maxRinging      int
 	outboundReserve int
 	onChange        func(uuid.UUID)
+	// provider is the speech provider every answered call opens a session
+	// with; nil: sessions always start. isGated wires the rate meter into
+	// admission with sessionRPM and tokenRPM as the limits it paces by; the
+	// meter is fed either way.
+	provider             *simProvider
+	isGated              bool
+	sessionRPM, tokenRPM int
 }
 
 func newSim(t *testing.T, sp simSpec) *sim {
@@ -366,10 +389,20 @@ func newSim(t *testing.T, sp simSpec) *sim {
 	if cfg.MaxRinging == 1 && sp.maxRinging == 0 {
 		cfg.MaxRinging = 100000
 	}
-	s.d = New(cfg, Deps{
+	deps := Deps{
 		Store: s.store, Placer: s, Slots: s, Lines: s.lines, Clock: s.clock,
 		IsLive: s.isLive, Log: slog.New(slog.DiscardHandler), OnChange: sp.onChange,
-	})
+	}
+	s.prov = sp.provider
+	s.meter = ratemeter.New(s.clock.Now)
+	if s.prov != nil {
+		s.push(start.Add(time.Second), evTick, uuid.Nil)
+	}
+	if sp.isGated {
+		deps.ProviderRate = s.meter
+		cfg.ProviderSessionRPM, cfg.ProviderTokenRPM = sp.sessionRPM, sp.tokenRPM
+	}
+	s.d = New(cfg, deps)
 	s.store.onFinish = s.d.AttemptFinished
 	s.lastAt = start
 	s.measuredSince = start
@@ -446,7 +479,7 @@ func (s *sim) step(until time.Time) bool {
 		if s.inUse+s.inbound < s.capacity {
 			s.inUse++
 			call.hasSlot = true
-			s.push(ev.at.Add(call.talk), evTalkEnd, ev.call)
+			s.beginTalk(ev.at, ev.call)
 		} else {
 			call.isParked = true
 			s.parked = append(s.parked, ev.call)
@@ -458,8 +491,12 @@ func (s *sim) step(until time.Time) bool {
 	case evTalkEnd:
 		s.mu.Lock()
 		s.inUse--
+		outcome := campaign.OutcomeAnswered
+		if s.calls[ev.call].isRefused {
+			outcome = campaign.OutcomeBotFailed
+		}
 		s.mu.Unlock()
-		s.end(ev.call, campaign.OutcomeAnswered)
+		s.end(ev.call, outcome)
 		s.mu.Lock()
 		s.serveParked(ev.at)
 		s.mu.Unlock()
@@ -477,6 +514,18 @@ func (s *sim) step(until time.Time) bool {
 		if isParked {
 			s.end(ev.call, campaign.OutcomeOverflow)
 		}
+	case evTick:
+		s.mu.Lock()
+		s.push(ev.at.Add(time.Second), evTick, uuid.Nil)
+		s.mu.Unlock()
+	case evTurn:
+		s.mu.Lock()
+		if call, ok := s.calls[ev.call]; ok && !call.isRefused {
+			s.meter.TokensUsed(s.prov.tokensPerTurn)
+			s.prov.spend(ev.at, s.prov.tokensPerTurn)
+			s.push(ev.at.Add(s.prov.turnEvery), evTurn, ev.call)
+		}
+		s.mu.Unlock()
 	}
 	s.d.Wake()
 	if err := s.d.Sync(context.Background()); err != nil {
@@ -502,8 +551,29 @@ func (s *sim) serveParked(at time.Time) {
 		call := s.calls[id]
 		call.isParked, call.hasSlot = false, true
 		s.inUse++
-		s.push(at.Add(call.talk), evTalkEnd, id)
+		s.beginTalk(at, id)
 	}
+}
+
+// beginTalk is an answered call that has its bot slot: the bot opens its
+// provider session, counted on the meter before the dial as cmd/aicc counts
+// it, and the conversation runs. A session the provider refuses is hung up a
+// second later. Called with s.mu held.
+func (s *sim) beginTalk(at time.Time, id uuid.UUID) {
+	call := s.calls[id]
+	if s.prov != nil {
+		s.meter.SessionStarted()
+		if !s.prov.start(at) {
+			s.meter.QuotaRefused()
+			call.isRefused = true
+			s.push(at.Add(time.Second), evTalkEnd, id)
+			return
+		}
+		if s.prov.tokensPerTurn > 0 {
+			s.push(at.Add(s.prov.turnEvery), evTurn, id)
+		}
+	}
+	s.push(at.Add(call.talk), evTalkEnd, id)
 }
 
 // account integrates the bot sessions in use up to at.

@@ -14,6 +14,7 @@ import (
 	"github.com/rasonyang/ai-native-callcenter/internal/obs"
 	"github.com/rasonyang/ai-native-callcenter/internal/outbound"
 	"github.com/rasonyang/ai-native-callcenter/internal/phonenum"
+	"github.com/rasonyang/ai-native-callcenter/internal/voice"
 )
 
 // maxRefills bounds how many batches one campaign may defer in one pass; a
@@ -38,6 +39,7 @@ func (d *Dialer) pass(ctx context.Context) {
 	clear(d.stopped)
 	now := d.clock.Now()
 	d.nextWake = now.Add(d.cfg.SafetyScan)
+	d.rateWake = time.Time{}
 
 	running, err := d.st.RunningCampaigns(ctx)
 	if err != nil {
@@ -144,6 +146,11 @@ func (d *Dialer) pass(ctx context.Context) {
 	}
 	if !next.IsZero() && next.Before(d.nextWake) {
 		d.nextWake = next
+	}
+	// A hold by the provider's quota that ends by time alone is looked at
+	// again when it ends.
+	if !d.rateWake.IsZero() && d.rateWake.Before(d.nextWake) {
+		d.nextWake = d.rateWake
 	}
 	// A pass that stopped short of the whole list asks for another at once.
 	for id, b := range buckets {
@@ -306,10 +313,12 @@ func (d *Dialer) admitOne(ctx context.Context, c campaign.Campaign, b *bucket, n
 //	campaign in flight < max_concurrent
 //	DID outbound lines in use < the DID's limit
 //	botInUse + sum over campaigns (p_c x ringing_c) + 1 <= cap - inboundReserve
+//	the provider's quota per minute (providerHold)
 //
 // botInUse counts the slots in use, those reserved for answered legs that have
 // not bridged yet, and the answered legs waiting in the overflow hold for one.
-// p_c is the campaign's answer-rate bound (CapacityStats.Bound).
+// p_c is the campaign's answer-rate bound (CapacityStats.Bound). Inbound calls
+// are never held: this is campaign admission only.
 func (d *Dialer) limit(ctx context.Context, c campaign.Campaign) string {
 	if d.inflight[c.ID] >= c.MaxConcurrent {
 		return obs.DialerBlockedCampaign
@@ -322,13 +331,23 @@ func (d *Dialer) limit(ctx context.Context, c campaign.Campaign) string {
 			return obs.DialerBlockedDIDLines
 		}
 	}
+	if d.sl == nil && d.pr == nil {
+		return ""
+	}
+	var u voice.Usage
 	if d.sl != nil {
-		u := d.sl.Usage()
+		u = d.sl.Usage()
+	}
+	expected := d.expectedAnswers(ctx)
+	if d.sl != nil {
 		reserve := max(d.cfg.InboundReserve, u.InboundReserve)
 		held := float64(u.InUse + u.Reserved + u.Waiting)
-		if held+d.expectedAnswers(ctx)+1 > float64(u.Cap-reserve)+1e-9 {
+		if held+expected+1 > float64(u.Cap-reserve)+1e-9 {
 			return obs.DialerBlockedBot
 		}
+	}
+	if d.pr != nil {
+		return d.providerLimit(u, expected)
 	}
 	return ""
 }

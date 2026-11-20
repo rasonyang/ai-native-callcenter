@@ -335,3 +335,42 @@ func TestGASessionUpdateTranscriptionLanguageTrait(t *testing.T) {
 		t.Error("AcceptsTranscriptionLanguage is not qwen only")
 	}
 }
+
+// A profile carries a per-minute quota only where a vendor document gives one
+// for its default model; another model clears it, and the deployment's own
+// setting wins either way, 0 turning a limit off (#604).
+func TestTheQuotaLimitsAreTheDefaultModelsAndOverridable(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name                 string
+		provider             string
+		override             Override
+		wantSession, wantTok int
+	}{
+		{"qwen flash, Beijing, as documented", NameQwen, Override{}, 60, 100000},
+		{"qwen named by its own default model", NameQwen, Override{Model: "qwen-audio-3.1-realtime-flash"}, 60, 100000},
+		{"qwen on another model knows no limit", NameQwen, Override{Model: "qwen-audio-3.1-realtime-plus"}, 0, 0},
+		{"another model with the deployment's own", NameQwen,
+			Override{Model: "qwen-audio-3.1-realtime-plus", SessionRPM: 120, IsSessionRPMSet: true}, 120, 0},
+		{"a limit turned off", NameQwen, Override{TokenRPM: 0, IsTokenRPMSet: true}, 60, 0},
+		{"doubao, per application id", NameDoubao, Override{}, 60, 100000},
+		{"doubao's model setting is ignored by its client", NameDoubao, Override{Model: "anything"}, 60, 100000},
+		{"openai depends on the account's tier", NameOpenAI, Override{}, 0, 0},
+		{"openai with the account's limits", NameOpenAI,
+			Override{SessionRPM: 200, IsSessionRPMSet: true, TokenRPM: 40000, IsTokenRPMSet: true}, 200, 40000},
+		{"grok", NameGrok, Override{}, 0, 0},
+		{"gateway", NameGateway, Override{}, 0, 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p, err := ProfileFor(tt.provider, tt.override)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if p.SessionRPM != tt.wantSession || p.TokenRPM != tt.wantTok {
+				t.Errorf("limits = %d sessions, %d tokens per minute, want %d and %d",
+					p.SessionRPM, p.TokenRPM, tt.wantSession, tt.wantTok)
+			}
+		})
+	}
+}

@@ -28,6 +28,7 @@ import (
 	"github.com/rasonyang/ai-native-callcenter/internal/phonenum"
 	"github.com/rasonyang/ai-native-callcenter/internal/postcall"
 	"github.com/rasonyang/ai-native-callcenter/internal/provider"
+	"github.com/rasonyang/ai-native-callcenter/internal/provider/ratemeter"
 	"github.com/rasonyang/ai-native-callcenter/internal/sipsession"
 	"github.com/rasonyang/ai-native-callcenter/internal/store"
 	"github.com/rasonyang/ai-native-callcenter/internal/telephony"
@@ -607,6 +608,7 @@ func TestEveryBotDependencyIsPlumbed(t *testing.T) {
 		true,
 		"86",
 		phonenum.FormNational,
+		ratemeter.New(nil),
 	)
 
 	// The greeting gate is exempt only when unset, which is a real setting
@@ -672,7 +674,7 @@ func TestBotConfigCarriesTheGreetingMediaWait(t *testing.T) {
 			}
 			got := botConfig(botUAS(cfg, nil), nil, nil, nil, nil, nil, nil, provider.Profile{},
 				nil, nil, nil, nil, nil, cfg.IsBotGreetingGated, cfg.BotGreetingMediaWait, cfg.BotNoInputTimeout,
-				cfg.BotEchoDumpDir, cfg.IsBotEchoSuppressionEnabled, cfg.DefaultCountryCode, cfg.OutboundDialForm)
+				cfg.BotEchoDumpDir, cfg.IsBotEchoSuppressionEnabled, cfg.DefaultCountryCode, cfg.OutboundDialForm, nil)
 			if got.IsGreetingGated != tc.wantGated || got.GreetingMediaWait != tc.wantWait {
 				t.Errorf("orchestrator gate = %v, %s, want %v, %s",
 					got.IsGreetingGated, got.GreetingMediaWait, tc.wantGated, tc.wantWait)
@@ -706,7 +708,7 @@ func TestBotConfigCarriesTheNoInputTimeout(t *testing.T) {
 			}
 			got := botConfig(botUAS(cfg, nil), nil, nil, nil, nil, nil, nil, provider.Profile{},
 				nil, nil, nil, nil, nil, cfg.IsBotGreetingGated, cfg.BotGreetingMediaWait, cfg.BotNoInputTimeout,
-				cfg.BotEchoDumpDir, cfg.IsBotEchoSuppressionEnabled, cfg.DefaultCountryCode, cfg.OutboundDialForm)
+				cfg.BotEchoDumpDir, cfg.IsBotEchoSuppressionEnabled, cfg.DefaultCountryCode, cfg.OutboundDialForm, nil)
 			if got.NoInput != tc.want {
 				t.Errorf("orchestrator NoInput = %s, want %s", got.NoInput, tc.want)
 			}

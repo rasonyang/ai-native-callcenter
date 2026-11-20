@@ -218,6 +218,19 @@ type Profile struct {
 	// with an audio commit. Unlike the traits above it is read by the
 	// orchestrator, not by a client, so it is set on doubao's profile.
 	DropsToolResultAfterLine bool
+
+	// SessionRPM and TokenRPM are the provider's quota per minute, where a
+	// vendor document states it for the profile's default model: session
+	// starts (WebSocket connection establishments; turns inside a session do
+	// not count, a reconnect does) and tokens, input and output together. Zero
+	// is unknown, and campaign admission then holds for nothing but a refusal
+	// (docs/design/10-campaigns.md section 6.3). They are the account's, not
+	// the call's: a deployment whose plan differs says so with
+	// AICC_PROVIDER_SESSION_RPM and AICC_PROVIDER_TOKEN_RPM, and ProfileFor
+	// clears them when the deployment runs another model, whose limits this
+	// profile does not know (#604, docs/provider-extension.md "Quota").
+	SessionRPM int
+	TokenRPM   int
 }
 
 // OpenAIProfile is the provider used outside mainland China.
@@ -251,6 +264,9 @@ func OpenAIProfile() Profile {
 		// "auto", "required" or a forced function), read 2026-10-22. Not
 		// measured live here.
 		AcceptsResponseToolChoice: true,
+		// No SessionRPM or TokenRPM: this vendor's limits depend on the
+		// account's usage tier, so there is no number that is right for every
+		// deployment. AICC_PROVIDER_SESSION_RPM / _TOKEN_RPM set the account's.
 	}
 }
 
@@ -310,6 +326,14 @@ func QwenProfile() Profile {
 		// Measured 2026-10-22 (qwen-findings W-Q8): the plain SayExactly line
 		// over a running tool was silent 3 of 3, this one said 6 of 6.
 		NeedsToolFreeLineDirection: true,
+		// Documented for qwen-audio-3.1-realtime-flash in the Beijing region,
+		// which is this profile's endpoint and model: 60 connection
+		// establishments and 100,000 tokens (input and output) per minute, and
+		// no limit on connections held at once (Model Studio rate limits,
+		// https://help.aliyun.com/zh/model-studio/rate-limit, "Qwen-Audio-
+		// Realtime", read 2026-11-18). Another model or region has its own.
+		SessionRPM: 60,
+		TokenRPM:   100000,
 	}
 }
 
@@ -422,6 +446,11 @@ func DoubaoProfile() Profile {
 		// omission: this engine transcribes the caller unprompted, and its
 		// session payload has no field to ask for it in.
 		TranscribeModel: "",
+		// Documented per application id: 60 session.create and 100k tokens
+		// per minute (doubao-findings section 9, DOC-A). The protocol version
+		// is pinned in the client, so AICC_PROVIDER_MODEL does not clear them.
+		SessionRPM: 60,
+		TokenRPM:   100000,
 	}
 }
 
@@ -513,6 +542,12 @@ type Override struct {
 	// leaving the variable empty. Off has to be something somebody can say.
 	TranscribeModel string
 	TranscribeOff   bool
+	// SessionRPM and TokenRPM replace the profile's per-minute quota when
+	// their Is...Set is true, 0 turning that limit off; unset keeps the
+	// profile's default. Two fields each for the reason TranscribeOff is one:
+	// an empty environment value means unset, and off has to be sayable.
+	SessionRPM, TokenRPM           int
+	IsSessionRPMSet, IsTokenRPMSet bool
 }
 
 // ProfileFor returns the profile of the provider this deployment runs, with
@@ -543,7 +578,19 @@ func ProfileFor(name string, override Override) (Profile, error) {
 		profile.Endpoint = override.Endpoint
 	}
 	if override.Model != "" {
+		// A documented limit belongs to the profile's own model; another
+		// model's is unknown here, so none is assumed. Doubao's model is a
+		// protocol version its client pins, so the setting does not reach it.
+		if override.Model != profile.Model && profile.Name != NameDoubao {
+			profile.SessionRPM, profile.TokenRPM = 0, 0
+		}
 		profile.Model = override.Model
+	}
+	if override.IsSessionRPMSet {
+		profile.SessionRPM = override.SessionRPM
+	}
+	if override.IsTokenRPMSet {
+		profile.TokenRPM = override.TokenRPM
 	}
 	switch {
 	case override.TranscribeOff:

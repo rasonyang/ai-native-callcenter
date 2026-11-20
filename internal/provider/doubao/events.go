@@ -271,6 +271,9 @@ func (s *Session) onWireResponseDone(event *wireEvent) {
 		usage := event.Response.Usage
 		s.log.Info("turn usage", "totalTokens", usage.TotalTokens,
 			"inputTokens", usage.InputTokens, "outputTokens", usage.OutputTokens)
+		// Counted when it arrives, whichever turn is current by then: the
+		// quota counts tokens per minute, not per turn.
+		s.quota.Spent(usage.InputTokens, usage.OutputTokens, usage.TotalTokens)
 	}
 	if !s.isTurnOpen.Load() {
 		return
@@ -379,6 +382,15 @@ func (s *Session) onError(event *wireEvent) {
 			"code", err.Code, "message", err.Message)
 	}
 
+	// After the start, an error that says the quota is spent is reported to
+	// the meter as a refusal; before it, Start reports it.
+	select {
+	case <-s.ready:
+		if s.failure() == nil {
+			s.quota.RefusedMidCall(s.log, err)
+		}
+	default:
+	}
 	s.setOutcome(failedOutcome(err.Code))
 	s.finishStart(err)
 	s.emit(provider.Event{

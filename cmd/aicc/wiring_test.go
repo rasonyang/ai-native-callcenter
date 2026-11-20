@@ -19,6 +19,7 @@ import (
 	"github.com/rasonyang/ai-native-callcenter/internal/events"
 	"github.com/rasonyang/ai-native-callcenter/internal/provider"
 	"github.com/rasonyang/ai-native-callcenter/internal/provider/doubao"
+	"github.com/rasonyang/ai-native-callcenter/internal/provider/ratemeter"
 	"github.com/rasonyang/ai-native-callcenter/internal/telephony"
 	"github.com/rasonyang/ai-native-callcenter/internal/transcript"
 )
@@ -177,14 +178,37 @@ func TestTheProviderNameChoosesTheClient(t *testing.T) {
 		{provider.GatewayProfile(), (*provider.Realtime)(nil)},
 	} {
 		t.Run(tc.profile.Name, func(t *testing.T) {
-			session, err := voiceSession(tc.profile, nil)
+			session, err := voiceSessions(ratemeter.New(nil))(tc.profile, nil)
 			if err != nil {
-				t.Fatalf("voiceSession: %v", err)
+				t.Fatalf("voiceSessions: %v", err)
 			}
 			if got, want := reflect.TypeOf(session), reflect.TypeOf(tc.want); got != want {
 				t.Errorf("%s is answered by %v, want %v", tc.profile.Name, got, want)
 			}
 		})
+	}
+}
+
+// Every session is counted on the rate meter when it is made, before it dials,
+// whichever client answers it: a start the provider refuses still counted
+// against its connect rate (#604).
+func TestEverySessionIsCountedOnTheMeterBeforeItDials(t *testing.T) {
+	for _, keyEnv := range []string{"ALIYUN_API_KEY", "DOUBAO_API_KEY"} {
+		t.Setenv(keyEnv, "not-a-real-key")
+	}
+	meter := ratemeter.New(nil)
+	sessions := voiceSessions(meter)
+	for _, profile := range []provider.Profile{provider.QwenProfile(), provider.DoubaoProfile()} {
+		if _, err := sessions(profile, nil); err != nil {
+			t.Fatalf("%s: %v", profile.Name, err)
+		}
+	}
+	if got := meter.Read().Starts; got != 2 {
+		t.Errorf("the meter counted %d starts, want 2", got)
+	}
+	// Doctor's factory has no meter and still works.
+	if _, err := voiceSessions(nil)(provider.QwenProfile(), nil); err != nil {
+		t.Errorf("a factory without a meter: %v", err)
 	}
 }
 

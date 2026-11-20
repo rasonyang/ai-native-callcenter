@@ -7,6 +7,57 @@ carries the one-line installer's files.
 
 ## Unreleased
 
+### Upgrade notes
+
+- **Campaigns are paced by the speech provider's per-minute quota** (#604).
+  The vendors limit session starts and tokens per minute, not sessions held at
+  once, and on qwen a session refused for its quota looked like any other
+  failed call. Campaign admission now holds a call while the provider session
+  starts or tokens of the last minute, plus what the legs ringing are expected
+  to add, would pass the provider's quota, and for one minute after the
+  provider refuses any session, inbound included, for its quota. Inbound calls
+  are never held. On qwen (`qwen-audio-3.1-realtime-flash`) and doubao this is
+  on with the vendors' documented 60 session starts and 100,000 tokens a
+  minute; expect campaigns that used to run into refusals to dial more slowly
+  and to show `AT_CAPACITY` while they wait. On openai, grok and the gateway no
+  limit is known, so only the one-minute hold after a refusal applies until the
+  account's limits are set. A refused session is still `BOT_START_FAILED` on
+  the CDR and `BOT_FAILED` for the campaign, and still counts towards the
+  provider breaker.
+- Two settings added, both empty by default: `AICC_PROVIDER_SESSION_RPM` and
+  `AICC_PROVIDER_TOKEN_RPM`. Empty keeps the provider profile's documented
+  default for its own model (cleared when `AICC_PROVIDER_MODEL` names another
+  model), `0` turns that limit off, and a positive number replaces it with the
+  account's. Anything else stops the application at startup. A qwen deployment
+  in another region, on another model or with a raised quota sets them.
+- API contract: unchanged.
+
+### Added
+
+- A provider session that could not be started is counted by what the
+  provider said: `aicc_provider_dial_failures_total{provider,status,reason}`,
+  where `status` is the HTTP status of a refused upgrade, `CLOSE_<code>` for a
+  socket the provider closed during setup (qwen's quota refusal is
+  `CLOSE_1007`), `ERROR_EVENT`, `TIMEOUT` or `NETWORK`, and `reason` is
+  `QUOTA_EXCEEDED`, `AUTH_REJECTED` or `OTHER`. The log line of a refusal
+  carries the request id of the provider's upgrade response, the handle the
+  vendor's support asks for; a session that opened logs it once (#604).
+- The tokens each provider response reports are counted:
+  `aicc_provider_tokens_total{provider,direction}` (`INPUT`, `OUTPUT`). Together
+  with `aicc_provider_sessions_started_total` and the new
+  `aicc_provider_quota_per_minute{provider,kind}`, a dashboard can show how
+  close a minute runs to the provider's two caps (#604).
+- `aicc_dialer_admission_blocked_total` has three new reasons:
+  `PROVIDER_SESSION_RATE`, `PROVIDER_TOKEN_RATE` and `PROVIDER_QUOTA_BACKOFF`.
+  When a provider sends rate-limit headers on its upgrade response, they are
+  logged and published as `aicc_provider_ratelimit_limit` and
+  `aicc_provider_ratelimit_remaining`; none of the supported vendors was seen
+  sending them (#604).
+- `aicc doctor` says which per-minute quota campaigns are paced by and where
+  each number came from, the request id and any rate-limit header of its
+  probe session, and a refused probe's status and reason, with its own fix for
+  a spent quota (#604).
+
 ### Fixed
 
 - On the engines that cut the bot by themselves (qwen, grok, doubao, gateway),
