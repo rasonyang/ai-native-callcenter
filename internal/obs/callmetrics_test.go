@@ -453,3 +453,12 @@ func TestProviderTokensAreCountedByDirection(t *testing.T) {
 		}
 	}
 }
+
+func TestTheProviderQuotaIsPublishedByKind(t *testing.T) {
+	reader := useTestReader()
+	SetProviderQuota("doubao", 60, 100000)
+	got := sumByLabels(t, reader, "aicc_provider_quota_per_minute", "provider", "kind")
+	if got["doubao/SESSIONS"] != 60 || got["doubao/TOKENS"] != 100000 {
+		t.Errorf("quota = %v, want doubao 60 sessions and 100000 tokens", got)
+	}
+}

@@ -217,6 +217,17 @@ type Config struct {
 	// built-in value.
 	ProviderEndpoint string
 	ProviderModel    string
+	// ProviderSessionRPM and ProviderTokenRPM replace the provider profile's
+	// per-minute quota (session starts, and tokens in and out together), which
+	// campaign admission paces itself by (#604). Unset (Is...Set false) keeps
+	// the profile's default, which is set only where a vendor document gives
+	// one for the default model; 0 turns that limit off.
+	ProviderSessionRPM      int
+	IsProviderSessionRPMSet bool
+	providerSessionRPMErr   error // a malformed value, refused by validate
+	ProviderTokenRPM        int
+	IsProviderTokenRPMSet   bool
+	providerTokenRPMErr     error // a malformed value, refused by validate
 
 	// IsTranscriptionEnabled turns live transcription of the human phase off
 	// entirely. Off by default: it is a new external dependency, a new
@@ -438,6 +449,8 @@ func Load() (Config, error) {
 	dialForm, dialFormErr := phonenum.ParseDialForm(env("AICC_OUTBOUND_DIAL_FORM", ""))
 	outboundHeaders, outboundHeadersErr := ParseOutboundSIPHeaders(env(outboundHeadersVar, ""))
 	outboundHours, outboundHoursErr := ParseOutboundHours(env("AICC_OUTBOUND_HOURS", DefaultOutboundHours))
+	sessionRPM, isSessionRPMSet, sessionRPMErr := envCountIfSet("AICC_PROVIDER_SESSION_RPM")
+	tokenRPM, isTokenRPMSet, tokenRPMErr := envCountIfSet("AICC_PROVIDER_TOKEN_RPM")
 	c := Config{
 		Env:                             env("AICC_ENV", "dev"),
 		HTTPAddr:                        env("AICC_HTTP_ADDR", ":8080"),
@@ -503,6 +516,12 @@ func Load() (Config, error) {
 		Provider:                      env("AICC_PROVIDER", "openai"),
 		ProviderEndpoint:              env("AICC_PROVIDER_ENDPOINT", ""),
 		ProviderModel:                 env("AICC_PROVIDER_MODEL", ""),
+		ProviderSessionRPM:            sessionRPM,
+		IsProviderSessionRPMSet:       isSessionRPMSet,
+		providerSessionRPMErr:         sessionRPMErr,
+		ProviderTokenRPM:              tokenRPM,
+		IsProviderTokenRPMSet:         isTokenRPMSet,
+		providerTokenRPMErr:           tokenRPMErr,
 		IsBotEchoSuppressionEnabled:   envBool("AICC_BOT_ECHO_SUPPRESS", false),
 		OutboundEndpoint:              env("AICC_OUTBOUND_ENDPOINT", ""),
 		OutboundRingTimeout:           ringTimeout,
@@ -748,6 +767,11 @@ func (c Config) validate() error {
 	} else if err := ValidateOutboundSIPHeaders(c.OutboundSIPHeaders); err != nil {
 		errs = append(errs, err)
 	}
+	for _, err := range []error{c.providerSessionRPMErr, c.providerTokenRPMErr} {
+		if err != nil {
+			errs = append(errs, err)
+		}
+	}
 	if c.botNoInputErr != nil {
 		errs = append(errs, c.botNoInputErr)
 	} else if c.BotNoInputTimeout < MinBotNoInputTimeout || c.BotNoInputTimeout > MaxBotNoInputTimeout {
@@ -931,6 +955,21 @@ func envDurationIfSet(key string) (d time.Duration, ok bool, err error) {
 		return 0, false, fmt.Errorf("%s=%q is not a duration; use 0, or a Go duration such as 500ms or 3s", key, v)
 	}
 	return d, true, nil
+}
+
+// envCountIfSet is a whole number of at least zero, for a setting where unset
+// and zero differ: ok is false when the variable is unset or empty; anything
+// else that is not such a number is an error, which validate refuses.
+func envCountIfSet(key string) (n int, ok bool, err error) {
+	v, isSet := os.LookupEnv(key)
+	if !isSet || v == "" {
+		return 0, false, nil
+	}
+	n, err = strconv.Atoi(v)
+	if err != nil || n < 0 {
+		return 0, false, fmt.Errorf("%s=%q is not a whole number of at least 0; leave it empty for the provider profile's default, 0 for off", key, v)
+	}
+	return n, true, nil
 }
 
 // loadDotEnv reads KEY=VALUE lines from path, without overriding existing

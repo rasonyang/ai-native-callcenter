@@ -30,6 +30,7 @@ import (
 	"github.com/rasonyang/ai-native-callcenter/internal/httpapi"
 	"github.com/rasonyang/ai-native-callcenter/internal/obs"
 	"github.com/rasonyang/ai-native-callcenter/internal/outbound"
+	"github.com/rasonyang/ai-native-callcenter/internal/provider/ratemeter"
 	"github.com/rasonyang/ai-native-callcenter/internal/recording"
 	"github.com/rasonyang/ai-native-callcenter/internal/seed"
 	"github.com/rasonyang/ai-native-callcenter/internal/sipsession"
@@ -360,6 +361,11 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	// The provider's quota as this process spends it: session starts and
+	// tokens over the last minute, and its latest quota refusal. Every bot
+	// session feeds it, inbound and outbound; campaign admission reads it
+	// (#604).
+	quotaMeter := ratemeter.New(time.Now)
 
 	// Outbound: click-to-dial and the AI outbound leg share one originator.
 	outboundSvc := outbound.New(outbound.Config{
@@ -499,7 +505,11 @@ func run() error {
 			// transcript at all, said at startup rather than discovered from
 			// an empty column afterwards. Empty on a vendor that transcribes
 			// unasked is not the same as off.
-			"transcribesCaller", profile.TranscribeModel)
+			"transcribesCaller", profile.TranscribeModel,
+			// What campaign admission paces itself by, and where each number
+			// came from (#604).
+			"quota", providerQuotaSummary(cfg, profile))
+		obs.SetProviderQuota(profile.Name, profile.SessionRPM, profile.TokenRPM)
 		reportMissingProviderKey(slog.Default(), profile, os.Getenv)
 
 		backend, err := toolBackend(cfg)
@@ -527,6 +537,7 @@ func run() error {
 			cfg.IsBotEchoSuppressionEnabled,
 			cfg.DefaultCountryCode,
 			cfg.OutboundDialForm,
+			quotaMeter,
 		))
 		if err != nil {
 			return fmt.Errorf("build ai voice leg: %w", err)

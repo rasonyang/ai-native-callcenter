@@ -110,15 +110,18 @@ func (f fakeMigrations) MigrationStatus(context.Context) (store.MigrationState, 
 	return f.state, f.err
 }
 
-// fakeSession is a provider session that only knows how to start and stop.
+// fakeSession is a provider session that only knows how to start and stop,
+// and what its upgrade was answered with.
 type fakeSession struct {
 	provider.VoiceSession
-	startErr error
-	closed   atomic.Bool
-	events   chan provider.Event
+	startErr  error
+	closed    atomic.Bool
+	events    chan provider.Event
+	handshake provider.Handshake
 }
 
 func (s *fakeSession) Start(context.Context, provider.SessionConfig) error { return s.startErr }
+func (s *fakeSession) Handshake() provider.Handshake                       { return s.handshake }
 func (s *fakeSession) Events() <-chan provider.Event                       { return s.events }
 func (s *fakeSession) Close(context.Context) error {
 	if s.closed.CompareAndSwap(false, true) {
@@ -660,6 +663,49 @@ func TestTheProviderChecks(t *testing.T) {
 				t.Error("a session that failed to start was not closed")
 			}
 		})
+	}
+}
+
+// The provider checks say what the deployment paces campaigns by, what the
+// provider answered the probe's upgrade with, and a quota refusal as one,
+// with its own fix (#604).
+func TestTheProviderChecksSayTheQuotaAndTheRequestID(t *testing.T) {
+	h := newHarness(t)
+	h.session.handshake = provider.Handshake{RequestID: "req-ok"}
+	got := h.run()
+	if msg := got[DoctorCheckProviderKey].Message; !strings.Contains(msg,
+		"session starts: unknown (set AICC_PROVIDER_SESSION_RPM to the account's)") {
+		t.Errorf("key message = %q, want openai's unknown limits named", msg)
+	}
+	if msg := got[DoctorCheckProviderSession].Message; !strings.Contains(msg, "request id req-ok; no rate-limit headers") {
+		t.Errorf("session message = %q, want the request id and the absence of rate-limit headers", msg)
+	}
+
+	h = newHarness(t)
+	h.deps.cfg.Provider = "qwen"
+	h.deps.cfg.ProviderTokenRPM, h.deps.cfg.IsProviderTokenRPMSet = 0, true
+	h.deps.getenv = func(k string) string {
+		if k == "ALIYUN_API_KEY" {
+			return "sk-test"
+		}
+		return ""
+	}
+	h.session.handshake = provider.Handshake{RateLimits: []provider.RateLimit{
+		{Kind: provider.RateLimitTokens, Limit: "100000", Remaining: "0"}}}
+	h.session.startErr = &provider.StartFailure{Status: "CLOSE_1007", Reason: provider.StartReasonQuotaExceeded,
+		RequestID: "req-1007", Err: errors.New("session rejected: websocket: close 1007 (invalid payload data): Allocated quota exceeded")}
+	got = h.run()
+	wantState(t, got, DoctorCheckProviderSession, DoctorStateFail)
+	if msg := got[DoctorCheckProviderKey].Message; !strings.Contains(msg,
+		"session starts: 60 (profile default for qwen-audio-3.1-realtime-flash), tokens: off (AICC_PROVIDER_TOKEN_RPM=0)") {
+		t.Errorf("key message = %q", msg)
+	}
+	r := got[DoctorCheckProviderSession]
+	if !strings.Contains(r.Message, "(status CLOSE_1007, QUOTA_EXCEEDED, request id req-1007)") {
+		t.Errorf("session message = %q, want the refusal as a number", r.Message)
+	}
+	if !strings.Contains(r.Fix, "per-minute quota is spent") {
+		t.Errorf("fix = %q, want the quota's own", r.Fix)
 	}
 }
 

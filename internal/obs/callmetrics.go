@@ -42,6 +42,7 @@ var (
 	providerDialFails  metric.Int64Counter
 	providerTokens     metric.Int64Counter
 	providerRateLimit  metric.Int64Gauge
+	providerQuota      metric.Int64Gauge
 	providerRateLeft   metric.Int64Gauge
 	providerUnanswered metric.Int64Counter
 	botInterruptions   metric.Int64Counter
@@ -172,6 +173,13 @@ func init() {
 			"minute, input and output together, beside session starts per minute, so "+
 			"rate() of this against the profile's token limit is how close a busy minute "+
 			"runs to the cap (aicc_provider_quota_per_minute{kind=\"TOKENS\"})."))
+	providerQuota, _ = meter.Int64Gauge("aicc_provider_quota_per_minute",
+		metric.WithDescription("The provider's quota per minute this process paces campaign "+
+			"admission by, by provider and kind: SESSIONS (session starts) and TOKENS (input "+
+			"and output together). The profile's documented default for its own model, or "+
+			"AICC_PROVIDER_SESSION_RPM / AICC_PROVIDER_TOKEN_RPM; 0 is unknown or off. "+
+			"Compare rate(aicc_provider_sessions_started_total[1m]) * 60 and "+
+			"rate(aicc_provider_tokens_total[1m]) * 60 with it."))
 	providerRateLimit, _ = meter.Int64Gauge("aicc_provider_ratelimit_limit",
 		metric.WithDescription("The limit the provider's last upgrade response stated in a "+
 			"rate-limit header, by provider and kind (REQUESTS, TOKENS, UNSPECIFIED for "+
@@ -717,6 +725,24 @@ func RecordProviderDialFailure(provider, status, reason string) {
 		attribute.String("provider", provider),
 		attribute.String("status", status),
 		attribute.String("reason", reason)))
+}
+
+// The kinds of aicc_provider_quota_per_minute.
+const (
+	ProviderQuotaSessions = "SESSIONS"
+	ProviderQuotaTokens   = "TOKENS"
+)
+
+// SetProviderQuota publishes the per-minute quota campaign admission paces
+// itself by, once at startup.
+func SetProviderQuota(provider string, sessionsPerMinute, tokensPerMinute int) {
+	if providerQuota == nil {
+		return
+	}
+	for kind, n := range map[string]int{ProviderQuotaSessions: sessionsPerMinute, ProviderQuotaTokens: tokensPerMinute} {
+		providerQuota.Record(context.Background(), int64(n), metric.WithAttributes(
+			attribute.String("provider", provider), attribute.String("kind", kind)))
+	}
 }
 
 // The directions of aicc_provider_tokens_total.

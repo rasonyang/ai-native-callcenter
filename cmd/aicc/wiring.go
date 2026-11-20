@@ -28,6 +28,7 @@ import (
 	"github.com/rasonyang/ai-native-callcenter/internal/phonenum"
 	"github.com/rasonyang/ai-native-callcenter/internal/provider"
 	"github.com/rasonyang/ai-native-callcenter/internal/provider/doubao"
+	"github.com/rasonyang/ai-native-callcenter/internal/provider/ratemeter"
 	"github.com/rasonyang/ai-native-callcenter/internal/store"
 	"github.com/rasonyang/ai-native-callcenter/internal/telephony"
 	"github.com/rasonyang/ai-native-callcenter/internal/textllm"
@@ -488,7 +489,33 @@ func voiceProfile(cfg config.Config) (provider.Profile, error) {
 		Model:           cfg.ProviderModel,
 		TranscribeModel: transcribeModel,
 		TranscribeOff:   transcribeOff,
+		SessionRPM:      cfg.ProviderSessionRPM,
+		IsSessionRPMSet: cfg.IsProviderSessionRPMSet,
+		TokenRPM:        cfg.ProviderTokenRPM,
+		IsTokenRPMSet:   cfg.IsProviderTokenRPMSet,
 	})
+}
+
+// providerQuotaSummary says, in one line, the per-minute quota this deployment
+// paces campaigns by and where each number came from: the profile's default,
+// the deployment's setting, or neither (#604). aicc doctor and the startup log
+// print it.
+func providerQuotaSummary(cfg config.Config, profile provider.Profile) string {
+	describe := func(n int, isSet bool, unit, setting string) string {
+		switch {
+		case isSet && n == 0:
+			return unit + ": off (" + setting + "=0)"
+		case isSet:
+			return fmt.Sprintf("%s: %d (%s)", unit, n, setting)
+		case n > 0:
+			return fmt.Sprintf("%s: %d (profile default for %s)", unit, n, profile.Model)
+		default:
+			return unit + ": unknown (set " + setting + " to the account's)"
+		}
+	}
+	return "quota per minute, " +
+		describe(profile.SessionRPM, cfg.IsProviderSessionRPMSet, "session starts", "AICC_PROVIDER_SESSION_RPM") + ", " +
+		describe(profile.TokenRPM, cfg.IsProviderTokenRPMSet, "tokens", "AICC_PROVIDER_TOKEN_RPM")
 }
 
 // flowPublishRules is what this deployment demands of a flow before it will let
@@ -564,7 +591,8 @@ func botUAS(cfg config.Config, slots *voice.BotSlots) voice.Config {
 	return uas
 }
 
-// voiceSession opens one conversation with the provider this deployment runs.
+// voiceSessions is how this process opens one conversation with the provider
+// this deployment runs.
 //
 // Which client answers is decided here, in the composition root, because it
 // cannot be decided anywhere lower: the clients that are not the Realtime one
@@ -578,13 +606,27 @@ func botUAS(cfg config.Config, slots *voice.BotSlots) voice.Config {
 // client that speaks it, which is the rule this file has always followed; the
 // switch has a case per protocol, not per vendor, and it has one because one
 // other protocol is spoken here.
-func voiceSession(profile provider.Profile, log *slog.Logger) (provider.VoiceSession, error) {
-	obs.RecordProviderSessionStarted(profile.Name)
-	switch profile.Name {
-	case provider.NameDoubao:
-		return doubao.New(profile, log)
-	default:
-		return provider.New(profile, log)
+//
+// Every session is counted here, before it dials, inbound and outbound alike:
+// on aicc_provider_sessions_started_total and, when the process has one, on the
+// rate meter campaign admission reads (#604). The session itself reports to the
+// same meter what its turns cost and whether the provider refused it for its
+// quota. A nil meter (aicc doctor, which opens one session and paces nothing)
+// leaves only the counter.
+func voiceSessions(meter *ratemeter.Meter) aicall.SessionFactory {
+	var opts []provider.Option
+	if meter != nil {
+		opts = append(opts, provider.WithMeter(meter))
+	}
+	return func(profile provider.Profile, log *slog.Logger) (provider.VoiceSession, error) {
+		obs.RecordProviderSessionStarted(profile.Name)
+		meter.SessionStarted()
+		switch profile.Name {
+		case provider.NameDoubao:
+			return doubao.New(profile, log, opts...)
+		default:
+			return provider.New(profile, log, opts...)
+		}
 	}
 }
 
@@ -615,7 +657,7 @@ func reportMissingProviderKey(log *slog.Logger, profile provider.Profile, getenv
 // Logger is deliberately not a parameter: the orchestrator fills it with its
 // own default, and passing it from here would mean this process could disagree
 // with every test that builds one. Sessions used to be left the same way, and
-// is not any more — see voiceSession for why the choice of client belongs to
+// is not any more — see voiceSessions for why the choice of client belongs to
 // the composition root.
 // botSwitch is the switch as the bot uses it: the adapter, with the caller's
 // transfer taken through the coordinator, so the bot's handover and an agent's
@@ -650,10 +692,13 @@ func botConfig(
 	isEchoSuppressionEnabled bool,
 	countryCode string,
 	dialForm phonenum.DialForm,
+	quotaMeter *ratemeter.Meter,
 ) aicall.OrchestratorConfig {
 	return aicall.OrchestratorConfig{
-		UAS:                uas,
-		Sessions:           voiceSession,
+		UAS: uas,
+		// Every session is counted on the process's rate meter, which campaign
+		// admission reads (#604).
+		Sessions:           voiceSessions(quotaMeter),
 		Catalog:            catalogSvc,
 		Flows:              flows,
 		Switch:             sw,
