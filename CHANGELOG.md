@@ -5,7 +5,7 @@ under one tag, `rasonyang/ai-native-callcenter` and `rasonyang/freeswitch-aicc`;
 run them together. From v0.2.0 on, the GitHub release of the same tag also
 carries the one-line installer's files.
 
-## Unreleased
+## v0.9.1 - 2026-11-20
 
 ### Upgrade notes
 
@@ -23,6 +23,22 @@ carries the one-line installer's files.
   is not a positive duration stops the application at startup with a message
   naming the setting. Empty keeps the profile's default and `0` turns a limit
   off, as before.
+- The dialer's provider-hold log lines ("dialer: admission held by the
+  provider's quota", "dialer: the provider's quota admits calls again") carry
+  `starts`, `startsWaiting`, `tokens`, `sessionLimit`, `sessionPeriod`,
+  `tokenLimit` and `tokenPeriod` in place of `startsLastMinute`,
+  `tokensLastMinute`, `sessionRpm` and `tokenRpm`: a log query or alert that
+  reads the old keys needs the new ones. `starts` counts over the window
+  admission judges the session limit by (the session period, or 10 seconds
+  when that is shorter) and `tokens` over the token period; both are a minute
+  unless a period is set (#644).
+- No migration.
+- API contract: no change. `make api-breaking BASE=v0.9.0` reports "No changes
+  detected": `docs/openapi.json` is the same as v0.9.0's.
+- Upgrade both images together, as always: they are published under one tag
+  and the deploy stack names both. The switch image's content is the same as
+  v0.9.0's: nothing under `freeswitch/` that goes into it changed, so a switch
+  installed natively needs no file copied in and no `reloadxml`.
 
 ### Changed
 
@@ -39,17 +55,17 @@ carries the one-line installer's files.
   order of arrival and at most 2 seconds, for the oldest start to leave it;
   past that it starts as before and the provider decides. The callee hears
   silence meanwhile, as during the provider's own setup. A call that ends while
-  it waits counts no start. Inbound and internal calls are counted and never
-  wait. Each campaign start's wait is recorded on
-  `aicc_provider_session_start_wait_ms{provider,outcome}`, and a start that
-  waited logs `provider session start waited for the session window`.
+  it waits counts no start. Every other call (inbound, internal, or an AI
+  outbound call placed through the API) is counted and never waits. The wait
+  needs a session limit: on qwen and doubao the profile's default is one, so
+  it applies without a setting; on openai, grok and the gateway it applies
+  once the account's session limit is set. Each campaign start's wait is
+  recorded on `aicc_provider_session_start_wait_ms{provider,outcome}`
+  (`ROOM`, `BOUND`, `CALL_ENDED`), and a start that waited logs `provider
+  session start waited for the session window`.
 - The startup line and `aicc doctor` state each limit with its period (`60 per
   60s`), and `aicc_provider_quota_per_minute` publishes each limit scaled to a
-  minute. The dialer's provider-hold log lines carry `starts`,
-  `startsWaiting`, `tokens`, `sessionLimit`, `sessionPeriod`, `tokenLimit` and
-  `tokenPeriod` in place of `startsLastMinute`, `tokensLastMinute`,
-  `sessionRpm` and `tokenRpm`.
-- No migration. API contract: no change.
+  minute (#644).
 - A running campaign whose next call waits on one of the dialer's limits no
   longer reads as a stopped campaign: its state now says it is at a
   concurrency or rate limit and continues by itself, in English and Chinese.
