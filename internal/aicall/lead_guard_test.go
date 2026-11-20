@@ -93,15 +93,19 @@ type leadRig struct {
 	hold *holdModel
 	// quiet is the model when the rig answers quietly.
 	quiet *quietModel
-	// opening is the call's opening line, as written (leadRigOptions.opening).
-	opening string
+	// opening is the call's opening line, as written (leadRigOptions.opening),
+	// openingFrames its length in 20 ms frames.
+	opening       string
+	openingFrames int
 }
 
 type leadRigOptions struct {
 	profile provider.Profile
 	lang    string
-	// opening is the call's opening line; empty for none.
-	opening string
+	// opening is the call's opening line; empty for none. openingFrames is
+	// its length in 20 ms frames, heldOpeningFrames (11 s) for none.
+	opening       string
+	openingFrames int
 	// flow replaces leadGuardFlow.
 	flow string
 	// isQuiet gives the model quiet tool answers (provider.QuietToolAnswerer).
@@ -119,8 +123,11 @@ func newLeadRig(t *testing.T, opts leadRigOptions) *leadRig {
 	if opts.flow == "" {
 		opts.flow = leadGuardFlow
 	}
+	if opts.openingFrames == 0 {
+		opts.openingFrames = heldOpeningFrames
+	}
 	r := &leadRig{finalWait: newVerdictWait(), cut: newVerdictWait(), replay: &holdClock{}, leads: &guardLeads{},
-		opening: opts.opening}
+		opening: opts.opening, openingFrames: opts.openingFrames}
 	wrap := func(m *fakeModel) provider.VoiceSession {
 		switch {
 		case opts.profile.ControlsInterruption:
@@ -370,14 +377,14 @@ func TestABlankFinalIsAsNoFinal(t *testing.T) {
 }
 
 // openingGenerated makes the call's opening (r.opening: heldOpeningLine, two
-// sentences, the second the offer, or twoPartOpeningLine), 11 s long
-// (heldOpeningFrames), and queues all of it.
+// sentences, the second the offer, or twoPartOpeningLine), r.openingFrames
+// long (11 s unless the rig says otherwise), and queues all of it.
 func (r *leadRig) openingGenerated(t *testing.T) (frameBytes int) {
 	t.Helper()
 	r.leg.holdFrames(1 << 20)
 	frameBytes = 2 * media.RateProviderOut / 50
 	r.started()
-	for sent := 0; sent < heldOpeningFrames; sent += 50 {
+	for sent := 0; sent < r.openingFrames; sent += 50 {
 		r.send(provider.Event{Type: provider.EventTypeAudioDelta, Audio: make([]byte, 50*frameBytes)})
 	}
 	r.send(provider.Event{Type: provider.EventTypeOutputTranscript, Text: r.opening, IsFinal: true})
@@ -385,7 +392,7 @@ func (r *leadRig) openingGenerated(t *testing.T) (frameBytes int) {
 	waitLong(t, "the opening to be queued", func() bool {
 		r.session.mu.Lock()
 		defer r.session.mu.Unlock()
-		return r.session.turnSeq == 1 && !r.session.isResponding && r.session.framesQueued >= heldOpeningFrames-2
+		return r.session.turnSeq == 1 && !r.session.isResponding && r.session.framesQueued >= r.openingFrames-2
 	})
 	return frameBytes
 }
@@ -1113,6 +1120,149 @@ func TestAnOpeningWithNoCommaInItsLastSentenceIsHeardAsBefore(t *testing.T) {
 	r.assertAgreed(t, r.result(t, 1))
 	r.assertLine(t, 1, "guard=B", "verdict=WORDS", "isRefused=false")
 	r.assertNothingSaidAgain(t)
+}
+
+// acknowledgeLeadFlow is leadGuardFlow with the tool #633's flow calls on an
+// acknowledgement: acknowledge, a slot tool that moves the offer into a phase
+// declaring a MEDIUM lead.
+const acknowledgeLeadFlow = `{
+	"id": "lead-guard-acknowledge",
+	"specVersion": "v2",
+	"initialNode": "offer",
+	"global": {"persona": "You renew plans.", "closingTarget": "bye"},
+	"tools": {
+		"classify": {"kind": "slot", "slot": "answer", "description": "Record the decision.",
+			"enum": ["agree", "decline"]},
+		"acknowledge": {"kind": "slot", "slot": "heard", "description": "Record that the callee acknowledged the offer."},
+		"note": {"kind": "slot", "slot": "note", "description": "Record a note."}
+	},
+	"nodes": {
+		"offer": {
+			"instruction": "Offer the renewal.",
+			"tools": ["classify", "acknowledge", "note", "hangup"],
+			"isFlowHangupAllowed": true,
+			"transitions": [
+				{"on": "TOOL_RESULT", "tool": "classify", "condition": {"slot": "answer", "op": "EQ", "value": "agree"}, "target": "agreed"},
+				{"on": "TOOL_RESULT", "tool": "classify", "condition": {"slot": "answer", "op": "EQ", "value": "decline"}, "target": "declined"},
+				{"on": "TOOL_RESULT", "tool": "acknowledge", "target": "interested"},
+				{"on": "TOOL_RESULT", "tool": "hangup", "target": "bye"}
+			]
+		},
+		"agreed": {"instruction": "Tell them how to order.", "tools": ["note"],
+			"lead": {"intent": "HIGH", "notes": "Agreed to renew."}},
+		"interested": {"instruction": "Tell them more about the renewal.", "tools": ["note"],
+			"lead": {"intent": "MEDIUM", "notes": "Acknowledged the offer."}},
+		"declined": {"instruction": "Thank them.", "tools": ["note"],
+			"lead": {"intent": "LOW", "notes": "Declined."}},
+		"bye": {"instruction": "Close.", "announce": {"en": "Goodbye.", "zh": "再见。"}, "tools": [], "isTerminal": true}
+	}
+}`
+
+// The opening of #633 has twoPartOpeningLine's shape and lasts about 9 s
+// (greetedOpeningFrames): its greeting sentence, 12 of its 52 letters, ends
+// about 2.1 s in, and the callee's 「好。」 cut it at 2320 ms
+// (greetedHeardFrames), just after that sentence.
+const (
+	greetedOpeningFrames = 450 // 9 s
+	greetedHeardFrames   = 116 // 2320 ms
+)
+
+// #633, a production call on v0.8.9 that #598's final clause fixes. The callee
+// said 「好。」 just after the greeting of a two-part opening: inside its final
+// sentence, the long one that carries the offer and ends in the question, and
+// well before its final clause, the question. The engine (qwen) cut the
+// opening, and the reply to the cut called the agreement, refused by the cut
+// refusals as an acknowledgement. Dated by the final sentence the cut did not
+// owe the opening, so nothing was said again; a later response, with no new
+// words from the callee, called the flow's acknowledgement tool, rule A did
+// not see the words as said over the unheard opening, rule B found them words,
+// and the MEDIUM lead was written although the callee had heard none of the
+// offer. Dated by the final clause the opening is owed and said again on the
+// reply, and the later call is refused under A, with no second replay and no
+// lead.
+func TestAnAcknowledgementJustAfterTheOpeningsGreetingRecordsNoLead(t *testing.T) {
+	r := newLeadRig(t, leadRigOptions{opening: twoPartOpeningLine, openingFrames: greetedOpeningFrames,
+		flow: acknowledgeLeadFlow})
+	r.cutOpeningWithWords(t, greetedHeardFrames, "好。")
+
+	// The moment of #633: in the final sentence, before the final clause.
+	played, unplayed := r.cutTimes(t)
+	if played != 2320*time.Millisecond || played+unplayed != 9*time.Second {
+		t.Fatalf("the cut came %v into a line of %v, want 2.32 s of 9 s", played, played+unplayed)
+	}
+	if _, ok := cutInFinalSentence(twoPartOpeningLine, played, unplayed); !ok {
+		t.Fatalf("a cut %v in with %v left is not in the final sentence: not the case of #633", played, unplayed)
+	}
+	if _, ok := cutInFinalClause(twoPartOpeningLine, played, unplayed); ok {
+		t.Fatalf("a cut %v in with %v left is in the final clause: not the case of #633", played, unplayed)
+	}
+
+	// 1. The reply to the cut calls the agreement: refused as an
+	// acknowledgement, and the opening, owed, is said again with the reply
+	// muted. The cut refusals judge it, not the lead guard.
+	r.agree("fc_1")
+	out := r.result(t, 1)
+	line := r.cutDecisionLine(t)
+	for _, want := range []string{"tool=classify", "verdict=ACKNOWLEDGEMENT", "isOpening=true", "playedMs=2320",
+		"isRefused=true", "isOpeningSaidAgain=true"} {
+		if !strings.Contains(line, want) {
+			t.Errorf("the cut's decision line %q lacks %s", line, want)
+		}
+	}
+	assertAcknowledgementRefusal(t, out, true)
+	waitFor(t, "the opening to be said again", func() bool { return len(r.model.spokenLines()) >= 1 })
+	r.ended()
+	r.assertRefused(t, out, "只是应了一声")
+	if got := r.model.spokenLines(); !slices.Equal(got, []string{twoPartOpeningLine}) {
+		t.Errorf("spoken = %v, want the opening once, as written", got)
+	}
+	if !r.session.isOpeningSaidAgain() {
+		t.Error("the opening was said again outside the once-per-call budget")
+	}
+	r.session.mu.Lock()
+	muted := r.session.mutedTurn
+	r.session.mu.Unlock()
+	if muted != 2 {
+		t.Errorf("muted turn = %d, want the reply to the cut (2)", muted)
+	}
+	if got := r.guardLines(); len(got) != 0 {
+		t.Errorf("the lead guard judged the reply's call too: %q", got)
+	}
+
+	// The replay, a line of its own, still playing.
+	frameBytes := 2 * media.RateProviderOut / 50
+	r.leg.holdFrames(1 << 20)
+	r.send(provider.Event{Type: provider.EventTypeResponseStarted, IsSpokenLine: true})
+	r.send(provider.Event{Type: provider.EventTypeAudioDelta, Audio: make([]byte, 100*frameBytes)})
+	r.send(provider.Event{Type: provider.EventTypeOutputTranscript, Text: twoPartOpeningLine, IsFinal: true})
+	r.ended()
+
+	// 2. A later response, the callee silent since 「好。」, calls the
+	// acknowledgement tool: the words it answers are still the ones that cut
+	// the opening before its final clause, so A refuses it, and the budget is
+	// spent.
+	r.started()
+	waitFor(t, "the later response", func() bool {
+		r.session.mu.Lock()
+		defer r.session.mu.Unlock()
+		return r.session.turnSeq == 4
+	})
+	r.call("fc_2", "acknowledge", `{"value":"heard"}`)
+	r.ended()
+	r.assertRefused(t, r.result(t, 2), "先确认对方听清了内容")
+	r.assertLine(t, 1, "tool=acknowledge", "turn=4", "callerTurn=1", "guard=A", "verdict=OPENING_UNHEARD",
+		"isRefused=true", "final=BEFORE_CALL", "isOpeningSaidAgain=false")
+	if got := len(r.finalWait.waits()); got != 0 {
+		t.Errorf("guard A waited %d times for a final", got)
+	}
+	r.leg.holdFrames(0)
+	r.probe(t)
+	if got := r.model.spokenLines(); len(got) != 1 {
+		t.Errorf("spoken = %v, want the opening said again once", got)
+	}
+	if got := r.leads.intents(); len(got) != 0 {
+		t.Errorf("leads written = %v, want none", got)
+	}
 }
 
 //

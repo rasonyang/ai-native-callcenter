@@ -20,7 +20,7 @@ carries the one-line installer's files.
   so that a call recording their interest is refused (#612), where it used to
   be the last sentence too: words early in that long sentence, such as
   background speech transcribed as 「好吧」, no longer record a `HIGH` lead
-  (#598).
+  (#598, #633).
 
 ## v0.8.9 - 2026-11-19
 
