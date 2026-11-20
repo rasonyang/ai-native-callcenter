@@ -949,7 +949,7 @@
       "WAITING_RETRY": "等待重试",
       "WAITING_FREQUENCY": "被其他活动的呼叫占用",
       "WAITING_DAILY_CAP": "受每日呼叫上限限制",
-      "AT_CAPACITY": "受容量限制暂缓"
+      "AT_CAPACITY": "已达并发或速率上限，有空位后自动继续"
     },
     "activitiesWhen": {
       "DIALING": "正在外呼",
@@ -957,7 +957,7 @@
       "WAITING_RETRY": "等待重试（{{when}}）",
       "WAITING_FREQUENCY": "被其他活动的呼叫占用，至 {{when}}",
       "WAITING_DAILY_CAP": "受每日呼叫上限限制，至 {{when}}",
-      "AT_CAPACITY": "受容量限制暂缓"
+      "AT_CAPACITY": "已达并发或速率上限，有空位后自动继续"
     },
     "when": {
       "today": "今天 {{time}}",
