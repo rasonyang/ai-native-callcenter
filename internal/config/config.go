@@ -129,6 +129,21 @@ type Config struct {
 	// before the flow gets NO_INPUT. Between 2s and 60s; there is no off.
 	BotNoInputTimeout time.Duration
 	botNoInputErr     error // a malformed value, refused by validate
+	// BotMaxCallDuration is AICC_BOT_MAX_CALL_DURATION: the maximum for the
+	// part of a call a bot serves (#637). A flow's global.maxDurationSec may
+	// not exceed it: publishing one that sets 0 or more is refused, and a
+	// revision stored with such a value runs at it
+	// (flow.Global.EffectiveMaxDuration). The switch ends the leg a grace
+	// after it if the application has not. Between 60s and 3600s; there is no
+	// off.
+	BotMaxCallDuration    time.Duration
+	botMaxCallDurationErr error // a malformed value, refused by validate
+	// AgentMaxCallDuration is AICC_AGENT_MAX_CALL_DURATION: the maximum the
+	// switch enforces on the part of a call an agent serves, counted from the
+	// call's first queue entry, or from the agent's answer on a call an agent
+	// places (#637). Between 60s and 86400s; there is no off.
+	AgentMaxCallDuration    time.Duration
+	agentMaxCallDurationErr error // a malformed value, refused by validate
 	// BotEchoDumpDir is AICC_BOT_ECHO_DUMP_DIR: a directory (absolute) that
 	// receives each AI call's two signals as a stereo WAV named by call id,
 	// the bot's own audio on the left and the uplink on the right. A
@@ -423,6 +438,22 @@ const (
 	MaxBotNoInputTimeout     = 60 * time.Second
 )
 
+// The maximum for the part of a call a bot serves
+// (AICC_BOT_MAX_CALL_DURATION): its default and bounds.
+const (
+	DefaultBotMaxCallDuration = 300 * time.Second
+	MinBotMaxCallDuration     = 60 * time.Second
+	MaxBotMaxCallDuration     = 3600 * time.Second
+)
+
+// The maximum for the part of a call an agent serves
+// (AICC_AGENT_MAX_CALL_DURATION): its default and bounds.
+const (
+	DefaultAgentMaxCallDuration = 3600 * time.Second
+	MinAgentMaxCallDuration     = 60 * time.Second
+	MaxAgentMaxCallDuration     = 86400 * time.Second
+)
+
 // The text model (AICC_TEXT_LLM_*): its defaults and bounds.
 const (
 	DefaultTextLLMTimeout      = 20 * time.Second
@@ -441,6 +472,14 @@ func Load() (Config, error) {
 	noInput, isNoInputSet, noInputErr := envDurationIfSet("AICC_BOT_NO_INPUT_TIMEOUT")
 	if !isNoInputSet {
 		noInput = DefaultBotNoInputTimeout
+	}
+	botMaxCall, isBotMaxCallSet, botMaxCallErr := envDurationIfSet("AICC_BOT_MAX_CALL_DURATION")
+	if !isBotMaxCallSet {
+		botMaxCall = DefaultBotMaxCallDuration
+	}
+	agentMaxCall, isAgentMaxCallSet, agentMaxCallErr := envDurationIfSet("AICC_AGENT_MAX_CALL_DURATION")
+	if !isAgentMaxCallSet {
+		agentMaxCall = DefaultAgentMaxCallDuration
 	}
 	ringTimeout, isRingSet, ringErr := envDurationIfSet("AICC_OUTBOUND_RING_TIMEOUT")
 	if !isRingSet {
@@ -486,6 +525,10 @@ func Load() (Config, error) {
 		botGreetingWaitErr:              greetingErr,
 		BotNoInputTimeout:               noInput,
 		botNoInputErr:                   noInputErr,
+		BotMaxCallDuration:              botMaxCall,
+		botMaxCallDurationErr:           botMaxCallErr,
+		AgentMaxCallDuration:            agentMaxCall,
+		agentMaxCallDurationErr:         agentMaxCallErr,
 		BotEchoDumpDir:                  env("AICC_BOT_ECHO_DUMP_DIR", ""),
 		BotBackendBase:                  env("AICC_BOT_BACKEND_BASE", ""),
 		ToolAllowedHosts:                env("AICC_TOOL_ALLOWED_HOSTS", ""),
@@ -778,6 +821,20 @@ func (c Config) validate() error {
 		errs = append(errs, fmt.Errorf(
 			"AICC_BOT_NO_INPUT_TIMEOUT must be between %ds and %ds, got %s",
 			int(MinBotNoInputTimeout.Seconds()), int(MaxBotNoInputTimeout.Seconds()), c.BotNoInputTimeout))
+	}
+	if c.botMaxCallDurationErr != nil {
+		errs = append(errs, c.botMaxCallDurationErr)
+	} else if c.BotMaxCallDuration < MinBotMaxCallDuration || c.BotMaxCallDuration > MaxBotMaxCallDuration {
+		errs = append(errs, fmt.Errorf(
+			"AICC_BOT_MAX_CALL_DURATION must be between %ds and %ds, got %s",
+			int(MinBotMaxCallDuration.Seconds()), int(MaxBotMaxCallDuration.Seconds()), c.BotMaxCallDuration))
+	}
+	if c.agentMaxCallDurationErr != nil {
+		errs = append(errs, c.agentMaxCallDurationErr)
+	} else if c.AgentMaxCallDuration < MinAgentMaxCallDuration || c.AgentMaxCallDuration > MaxAgentMaxCallDuration {
+		errs = append(errs, fmt.Errorf(
+			"AICC_AGENT_MAX_CALL_DURATION must be between %ds and %ds, got %s",
+			int(MinAgentMaxCallDuration.Seconds()), int(MaxAgentMaxCallDuration.Seconds()), c.AgentMaxCallDuration))
 	}
 	if c.BotEchoDumpDir != "" && !filepath.IsAbs(c.BotEchoDumpDir) {
 		// A relative path resolves against the working directory, which on a

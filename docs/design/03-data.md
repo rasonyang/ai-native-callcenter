@@ -109,7 +109,7 @@ cdrs(call_id uuid pk, started_at, answered_at, ended_at,
      agent_ids uuid[], primary_agent_id uuid,
      ring_sec int, bot_sec int, queue_wait_sec int, talk_sec int, total_sec int,
      status varchar check in ('ANSWERED','NO_ANSWER','BUSY','FAILED'),
-     hangup_cause text,                                           -- FS Q.850 token (already SCREAMING_SNAKE upstream); platform tokens sit beside them: OVERFLOW, BOT_BRIDGE_UNCONFIRMED, SESSION_LIMIT, BOT_START_FAILED
+     hangup_cause text,                                           -- FS Q.850 token (already SCREAMING_SNAKE upstream); platform tokens sit beside them: OVERFLOW, BOT_BRIDGE_UNCONFIRMED, SESSION_LIMIT, BOT_START_FAILED, MAX_CALL_DURATION (the switch ended the call at the deployment's maximum, #637)
      missed_reason varchar null check in ('SHORT_ABANDONED','ABANDONED_RINGING','ABANDONED_WAITING',
                                           'AGENTS_DID_NOT_ANSWER','NO_AVAILABLE_AGENT'),
                                        -- amended 2026-08-25 (00023): OUT_OF_HOURS left the vocabulary.

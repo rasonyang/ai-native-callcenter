@@ -604,6 +604,7 @@ func TestEveryBotDependencyIsPlumbed(t *testing.T) {
 		true,
 		3*time.Second,
 		8*time.Second,
+		300*time.Second,
 		"/var/tmp/aicc-echo",
 		true,
 		"86",
@@ -674,7 +675,7 @@ func TestBotConfigCarriesTheGreetingMediaWait(t *testing.T) {
 			}
 			got := botConfig(botUAS(cfg, nil), nil, nil, nil, nil, nil, nil, provider.Profile{},
 				nil, nil, nil, nil, nil, cfg.IsBotGreetingGated, cfg.BotGreetingMediaWait, cfg.BotNoInputTimeout,
-				cfg.BotEchoDumpDir, cfg.IsBotEchoSuppressionEnabled, cfg.DefaultCountryCode, cfg.OutboundDialForm, nil)
+				cfg.BotMaxCallDuration, cfg.BotEchoDumpDir, cfg.IsBotEchoSuppressionEnabled, cfg.DefaultCountryCode, cfg.OutboundDialForm, nil)
 			if got.IsGreetingGated != tc.wantGated || got.GreetingMediaWait != tc.wantWait {
 				t.Errorf("orchestrator gate = %v, %s, want %v, %s",
 					got.IsGreetingGated, got.GreetingMediaWait, tc.wantGated, tc.wantWait)
@@ -708,9 +709,44 @@ func TestBotConfigCarriesTheNoInputTimeout(t *testing.T) {
 			}
 			got := botConfig(botUAS(cfg, nil), nil, nil, nil, nil, nil, nil, provider.Profile{},
 				nil, nil, nil, nil, nil, cfg.IsBotGreetingGated, cfg.BotGreetingMediaWait, cfg.BotNoInputTimeout,
-				cfg.BotEchoDumpDir, cfg.IsBotEchoSuppressionEnabled, cfg.DefaultCountryCode, cfg.OutboundDialForm, nil)
+				cfg.BotMaxCallDuration, cfg.BotEchoDumpDir, cfg.IsBotEchoSuppressionEnabled, cfg.DefaultCountryCode, cfg.OutboundDialForm, nil)
 			if got.NoInput != tc.want {
 				t.Errorf("orchestrator NoInput = %s, want %s", got.NoInput, tc.want)
+			}
+		})
+	}
+}
+
+// The cap on every call's time limit must come from configuration, default
+// 300 s (#637).
+func TestBotConfigCarriesTheMaxCallDuration(t *testing.T) {
+	cases := []struct {
+		name  string
+		value *string
+		want  time.Duration
+	}{
+		{"unset is the default", nil, 300 * time.Second},
+		{"a deployment's value", ptr("20m"), 20 * time.Minute},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("AICC_ENV", "dev")
+			if tc.value == nil {
+				t.Setenv("AICC_BOT_MAX_CALL_DURATION", "")
+				os.Unsetenv("AICC_BOT_MAX_CALL_DURATION")
+			} else {
+				t.Setenv("AICC_BOT_MAX_CALL_DURATION", *tc.value)
+			}
+			cfg, err := config.Load()
+			if err != nil {
+				t.Fatalf("load: %v", err)
+			}
+			got := botConfig(botUAS(cfg, nil), nil, nil, nil, nil, nil, nil, provider.Profile{},
+				nil, nil, nil, nil, nil, cfg.IsBotGreetingGated, cfg.BotGreetingMediaWait, cfg.BotNoInputTimeout,
+				cfg.BotMaxCallDuration, cfg.BotEchoDumpDir, cfg.IsBotEchoSuppressionEnabled, cfg.DefaultCountryCode,
+				cfg.OutboundDialForm, nil)
+			if got.MaxCallDuration != tc.want {
+				t.Errorf("orchestrator MaxCallDuration = %s, want %s", got.MaxCallDuration, tc.want)
 			}
 		})
 	}

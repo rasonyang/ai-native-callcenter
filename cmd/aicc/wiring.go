@@ -127,6 +127,9 @@ type composition struct {
 	// Spool probes the recording spool on every connect (S3 backend with a
 	// spool). Nil otherwise.
 	Spool *spoolCheck
+	// CallCaps gives the switch the deployment's maximum call durations on
+	// every connect (#637). Nil in tests that do not care.
+	CallCaps *switchCallCaps
 }
 
 // systemPublisher is the slice of the hub used to announce facts about the
@@ -169,6 +172,13 @@ func (c composition) connect() {
 	c.Agents.AttachWrapUps(c.WrapUps)
 	if c.Drafter != nil {
 		c.Agents.AttachDrafter(c.Drafter)
+	}
+
+	// First: the scripts read the maximum call durations on every call that
+	// arrives from now on, so the deployment's own should be there before
+	// anything slower runs (#637).
+	if c.CallCaps != nil {
+		c.Link.OnConnect(c.CallCaps.onConnect)
 	}
 
 	// The switch forgets its agents when it restarts, and we are the source of
@@ -526,12 +536,16 @@ func providerQuotaSummary(cfg config.Config, profile provider.Profile) string {
 // never open a session with would be a rule inventing its own reason.
 //
 // With it on, a flow whose HTTP tools reference a secret this process does not
-// have is refused: the tool would fail on every call (issue #286).
+// have is refused: the tool would fail on every call (issue #286). So is one
+// whose global.maxDurationSec is 0 or above AICC_BOT_MAX_CALL_DURATION (#637).
 func flowPublishRules(cfg config.Config, profile provider.Profile) []flow.Rule {
 	if !cfg.IsBotEnabled {
 		return nil
 	}
 	rules := flowDraftChecks(cfg)
+	// No flow may turn its time limit off or set one above what a bot serves
+	// on this deployment (#637).
+	rules = append(rules, flow.RequireMaxDurationWithin(cfg.BotMaxCallDuration))
 	if profile.RequiresTerminalAnnounce {
 		rules = append(rules, flow.RequireTerminalAnnounce)
 	}
@@ -688,6 +702,7 @@ func botConfig(
 	isGreetingGated bool,
 	greetingMediaWait time.Duration,
 	noInput time.Duration,
+	maxCallDuration time.Duration,
 	echoDumpDir string,
 	isEchoSuppressionEnabled bool,
 	countryCode string,
@@ -722,6 +737,9 @@ func botConfig(
 		GreetingMediaWait: greetingMediaWait,
 		// Dead air before NO_INPUT: the deployment's AICC_BOT_NO_INPUT_TIMEOUT.
 		NoInput: noInput,
+		// The cap on every call's time limit: the deployment's
+		// AICC_BOT_MAX_CALL_DURATION (#637).
+		MaxCallDuration: maxCallDuration,
 		// Development aid: the deployment's AICC_BOT_ECHO_DUMP_DIR, empty off.
 		EchoDumpDir: echoDumpDir,
 		// The deployment's AICC_BOT_ECHO_SUPPRESS, off by default.

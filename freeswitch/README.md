@@ -16,10 +16,10 @@ tree onto a FreeSWITCH you built yourself.
 | `conf/` | The complete FreeSWITCH configuration tree, 184 files. Its baseline is `git archive v1.11.3 conf/vanilla`; this project's changes are made in the files themselves |
 | `CONF-DEVIATIONS.md` | The file-by-file record of every difference from that baseline, and of what was left vanilla that could still surprise a deployment. Read it before changing anything under `conf/` |
 | `scripts/aicc_xml.lua` | Serves the `directory` section (SIP users) and `callcenter.conf` from the database |
-| `scripts/aicc_inbound.lua` | Inbound entry point: answers every external number with a bot |
+| `scripts/aicc_inbound.lua` | Inbound entry point: answers every external number with a bot, and schedules the switch's own end to the part of the call the bot serves (#637). Test: `lua freeswitch/tests/aicc_inbound_test.lua` |
 | `scripts/aicc_did_route.lua` | Delivers a platform number (`luacc.dids`) dialled from an agent's phone to the public doorway; any other number falls through |
 | `scripts/aicc_outbound.lua` | Run by a deployment's outbound dialplan before its trunk `bridge`: starts the call's recording and stamps the caller-id DID as `aicc_did` on the call, appended to `export_vars` so the trunk leg inherits it (the per-DID outbound line count reads it). Test: `lua freeswitch/tests/aicc_outbound_test.lua` |
-| `scripts/aicc_queue.lua` | Queue entry point and overflow handling |
+| `scripts/aicc_queue.lua` | Queue entry point and overflow handling; the first entry fixes the switch's own end to the part of the call an agent serves, and every entry keeps that deadline (#637). Test: `lua freeswitch/tests/aicc_queue_test.lua` |
 | `scripts/aicc_spool.lua` | Run by the application through `lua`: removes a booked recording from the spool (S3 backend), because the switch owns the spool's directories; also the probe the connect check and `aicc doctor` use. Test: `lua freeswitch/tests/aicc_spool_test.lua` |
 | `scripts/aicc_track.lua` | Names the agent an internal call is ringing, so mod_callcenter stops offering them queue calls |
 | `Dockerfile` | Builds FreeSWITCH v1.11.3 from source, with this tree and `mod_audio_stream` inside it |

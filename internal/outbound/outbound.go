@@ -128,6 +128,15 @@ type Config struct {
 	// before the do-not-call check. Empty: a national number cannot be
 	// completed and is not checked.
 	DefaultCountryCode string
+	// BotMaxCallDuration is AICC_BOT_MAX_CALL_DURATION. The customer leg of an
+	// AI call carries the switch's own kill at this plus
+	// telephony.MaxCallDurationGrace from its answer (#637). Default
+	// config.DefaultBotMaxCallDuration.
+	BotMaxCallDuration time.Duration
+	// AgentMaxCallDuration is AICC_AGENT_MAX_CALL_DURATION. The agent leg of a
+	// click-to-dial carries the switch's own kill at this from the agent's
+	// answer (#637). Default config.DefaultAgentMaxCallDuration.
+	AgentMaxCallDuration time.Duration
 }
 
 func (c Config) withDefaults() Config {
@@ -153,6 +162,14 @@ func (c Config) withDefaults() Config {
 	}
 	if c.RingTimeout <= 0 {
 		c.RingTimeout = config.DefaultOutboundRingTimeout
+	}
+	// A leg must never go out without the switch's maximum, and one that
+	// rendered a zero cap would be ended a grace after its answer.
+	if c.BotMaxCallDuration <= 0 {
+		c.BotMaxCallDuration = config.DefaultBotMaxCallDuration
+	}
+	if c.AgentMaxCallDuration <= 0 {
+		c.AgentMaxCallDuration = config.DefaultAgentMaxCallDuration
 	}
 	return c
 }
@@ -234,6 +251,13 @@ type slotHold struct {
 // slot could take. It is this platform's own word, not the switch's: the leg
 // is stamped with it (telephony.VarHangupCause) before it is hung up.
 const OverflowCause = "OVERFLOW"
+
+// answeredParkTimeout is the park_timeout of an AI outbound customer leg: how
+// long, after it is answered, it may wait in park for the bridge to the bot
+// before the switch ends it with ReconcileCause (#637). Well above the
+// longest wait this application puts it through (the overflow hold, at most
+// config.MaxOverflowHold).
+const answeredParkTimeout = "30:" + ReconcileCause
 
 // LateAnswerCause is the hangup cause stamped on a leg that was answered after
 // its window closed. It reaches the CDR's hangupCause (a free string) as the
@@ -643,6 +667,14 @@ func (s *Service) Dial(ctx context.Context, req AgentDialRequest) (uuid.UUID, er
 		// about the window, which leaves an answer on either side of it.
 		"originate_timeout": ringTimeoutVar(ring),
 	}
+	// The switch's own end to the part of this call the agent serves, counted
+	// from the agent's answer (#637). The application raises only this leg;
+	// the customer's is the deployment's trunk rule bridged from it, so it is
+	// this leg that carries the kill, and the customer's leg ends when this
+	// one leaves the bridge. Under a name of its own: the switch runs every
+	// execute_on_answer* variable, so the unset above still runs beside it.
+	agentKill, agentKillAt := telephony.AgentKillOnAnswer(s.cfg.AgentMaxCallDuration)
+	vars[agentKill] = agentKillAt
 	// Tell mod_callcenter this agent is on a call, so its queues stop offering
 	// them one while it lasts.
 	//
@@ -1002,7 +1034,20 @@ func (s *Service) PlaceAI(ctx context.Context, req AIDialRequest) (Placement, er
 		"aicc_flow_id": did.FlowID.String(),
 		// Explicit and below the answer window; see Dial.
 		"originate_timeout": ringTimeoutVar(ring),
+		// Answered and never handed to the bot: the leg waits in park for
+		// this application, and an application that died or lost the switch
+		// in that moment would leave the customer in silence for good. The
+		// park ends it with the cause recovery uses (#637). It counts from
+		// entering park, so from the answer; a bridge to the bot takes the
+		// leg out of park, and park reads the variable once.
+		"park_timeout": answeredParkTimeout,
 	}
+	// The switch's own end to the part of this call the bot serves, a grace
+	// after the bot cap and counted from the answer, so it holds when this
+	// application is dead or its call is stuck (#637). A handover to a queue
+	// replaces it with the agent cap (aicc_queue.lua).
+	botKill, botKillAt := telephony.BotKillOnAnswer(s.cfg.BotMaxCallDuration)
+	vars[botKill] = botKillAt
 	if req.CampaignID != uuid.Nil {
 		vars[telephony.VarCampaignID] = req.CampaignID.String()
 		vars[telephony.VarAttemptID] = req.AttemptID.String()

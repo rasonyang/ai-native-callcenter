@@ -377,6 +377,9 @@ func run() error {
 		RingTimeout:    cfg.OutboundRingTimeout,
 
 		DefaultCountryCode: cfg.DefaultCountryCode,
+
+		BotMaxCallDuration:   cfg.BotMaxCallDuration,
+		AgentMaxCallDuration: cfg.AgentMaxCallDuration,
 	}, adapter, catalogSvc, catalogSvc,
 		st.Ledger().HasCDR,
 		func(callID uuid.UUID) bool {
@@ -484,6 +487,8 @@ func run() error {
 		SwitchUUID:  switchUUID,
 		BotRTPRange: botRTPRange,
 		Spool:       spoolProbe,
+		CallCaps: newSwitchCallCaps(adapter.SetMaxCallDurations,
+			cfg.BotMaxCallDuration, cfg.AgentMaxCallDuration, slog.Default()),
 		Reconcile: reconcileLive(coordinator, outboundSvc, hasBotSession,
 			link.IsUp, slog.Default(), reconcileBackoffMin),
 	}.connect()
@@ -540,6 +545,7 @@ func run() error {
 			cfg.IsBotGreetingGated,
 			cfg.BotGreetingMediaWait,
 			cfg.BotNoInputTimeout,
+			cfg.BotMaxCallDuration,
 			cfg.BotEchoDumpDir,
 			cfg.IsBotEchoSuppressionEnabled,
 			cfg.DefaultCountryCode,

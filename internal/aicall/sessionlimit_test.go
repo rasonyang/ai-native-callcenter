@@ -481,7 +481,7 @@ func TestTheBudgetStopsWhenTheCallEnds(t *testing.T) {
 func TestTheBudgetCountsFromTheAnswer(t *testing.T) {
 	seconds := 100
 	spec := &flow.Spec{Global: flow.Global{MaxDurationSec: &seconds}}
-	budget := budgetFor(spec)
+	budget := budgetFor(spec, 300*time.Second)
 	if budget.limitAfter != 100*time.Second || budget.wrapUpAfter != 80*time.Second {
 		t.Fatalf("budget = %+v, want the limit at 100s and the wrap-up at 80s", budget)
 	}
@@ -491,13 +491,88 @@ func TestTheBudgetCountsFromTheAnswer(t *testing.T) {
 	if shifted.limitAfter != 10*time.Second || shifted.wrapUpAfter <= 0 || shifted.wrapUpAfter > time.Millisecond {
 		t.Errorf("shifted = %+v, want the limit in 10s and the wrap-up due now", shifted)
 	}
+}
 
-	off := 0
-	if got := budgetFor(&flow.Spec{Global: flow.Global{MaxDurationSec: &off}}); got != (sessionBudget{}) {
-		t.Errorf("budget with the limit off = %+v, want none", got)
+// There is no off (#637): a flow that sets 0, which used to turn the limit
+// off, or more than the deployment's cap runs at the cap, and one that leaves
+// the field out runs at 300 s, or at the cap when that is shorter.
+func TestEveryCallHasABudgetInsideTheDeploymentsCap(t *testing.T) {
+	zero, nineHundred, sixHundred := 0, 900, 600
+	for _, tc := range []struct {
+		name          string
+		maxDuration   *int
+		deploymentCap time.Duration
+		want          time.Duration
+	}{
+		{"left out at the default cap", nil, 300 * time.Second, 300 * time.Second},
+		{"0 at the default cap", &zero, 300 * time.Second, 300 * time.Second},
+		{"900 at the default cap", &nineHundred, 300 * time.Second, 300 * time.Second},
+		{"left out under a shorter cap", nil, 120 * time.Second, 120 * time.Second},
+		{"600 at the widest cap", &sixHundred, time.Hour, 600 * time.Second},
+		{"0 at the widest cap", &zero, time.Hour, time.Hour},
+		{"left out at the widest cap", nil, time.Hour, 300 * time.Second},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			budget := budgetFor(&flow.Spec{Global: flow.Global{MaxDurationSec: tc.maxDuration}}, tc.deploymentCap)
+			if budget.limitAfter != tc.want || budget.wrapUpAfter != time.Duration(float64(tc.want)*wrapUpShare) ||
+				budget.floorWait != actionGraceCap {
+				t.Errorf("budget = %+v, want the limit at %v and the wrap-up at 80%% of it", budget, tc.want)
+			}
+		})
 	}
-	if got := budgetFor(&flow.Spec{}).limitAfter; got != 900*time.Second {
-		t.Errorf("default limit = %v, want 900s", got)
+}
+
+// A revision stored before the cap existed, with the field left out, with 0
+// or with 900, runs at the default cap's 300 s (#637): drive asks the clock
+// for the wrap-up at 240 s and the limit at 300 s, and when the limit falls
+// due the handover to the number's open queue is armed and the model asked
+// for its line, as at any limit.
+func TestAStoredRevisionRunsAtTheDeploymentsCap(t *testing.T) {
+	zero, nineHundred := 0, 900
+	for _, tc := range []struct {
+		name        string
+		maxDuration *int
+	}{
+		{"left out", nil},
+		{"0, which used to turn the limit off", &zero},
+		{"900, the old default", &nineHundred},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newLimitHarness(t, limitSetup{queue: "support", hasClosingTarget: true})
+			clock := &manualClock{}
+			h.o.budgetAfter = clock.after
+			h.o.cfg.MaxCallDuration = 300 * time.Second
+
+			stored := &flow.Spec{Global: flow.Global{MaxDurationSec: tc.maxDuration}}
+			budget := budgetFor(stored, h.o.cfg.MaxCallDuration)
+			done := make(chan struct{})
+			go func() {
+				defer close(done)
+				h.o.drive(t.Context(), h.session, h.runtime, h.actions, h.recorder, budget, h.log)
+			}()
+
+			clock.fire(t, 240*time.Second)
+			waitFor(t, "the wrap-up steer", func() bool {
+				got := h.instructions()
+				return len(got) > 0 && strings.Contains(got[len(got)-1], "close to its time limit")
+			})
+			if cues := h.model.recordedUserText(); len(cues) != 0 || h.sw.variable("aicc_bot_reason") != "" {
+				t.Fatalf("cues = %v, reason %q before the limit", cues, h.sw.variable("aicc_bot_reason"))
+			}
+
+			clock.fire(t, 300*time.Second)
+			waitFor(t, "the handover cue at the limit", func() bool { return len(h.model.recordedUserText()) == 1 })
+			if got := h.sw.variable("aicc_bot_reason"); got != "SESSION_LIMIT" {
+				t.Errorf("aicc_bot_reason = %q, want SESSION_LIMIT", got)
+			}
+
+			h.session.Close(context.Background())
+			select {
+			case <-done:
+			case <-time.After(2 * time.Second):
+				t.Fatal("drive did not return after the call ended")
+			}
+		})
 	}
 }
 

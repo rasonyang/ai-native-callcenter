@@ -1513,10 +1513,14 @@ type CDR struct {
 	EndedAt     time.Time           `json:"endedAt"`
 
 	// FlowID The conversation the call was for: the DID's flow. Recorded on every call the bot answered, when it starts the conversation, and on an AI outbound call from the moment it is placed, so one whose bridge to the bot never ran still names it. When the bot answered and never started the conversation, the row takes the DID's flow at the moment it is written. Absent where no flow was resolved for the call: one that never reached a bot number (a person's call out, a caller sent straight to a queue), a number with no flow, a person's call to a bot number the bot never answered, and a row written before this was recorded.
-	FlowID       *openapi_types.UUID `json:"flowId,omitempty"`
-	FromNumber   string              `json:"fromNumber"`
-	HangupCause  *string             `json:"hangupCause,omitempty"`
-	HasRecording bool                `json:"hasRecording"`
+	FlowID     *openapi_types.UUID `json:"flowId,omitempty"`
+	FromNumber string              `json:"fromNumber"`
+
+	// HangupCause How the call ended: the switch's cause name (NORMAL_CLEARING, USER_BUSY and the like) of the leg that decides it, or a word of this platform's own, such as OVERFLOW, SESSION_LIMIT or MAX_CALL_DURATION. A free string: a client must accept a value it does not know.
+	//
+	// MAX_CALL_DURATION: the switch ended the call because it reached the deployment's maximum duration: AICC_BOT_MAX_CALL_DURATION plus a 60 s grace for the part a bot serves, or AICC_AGENT_MAX_CALL_DURATION for the part an agent serves, counted from the call's first queue entry or, on a call an agent placed, from the agent's answer. A late answer is ALLOTTED_TIMEOUT, never this. It shows on a call handed to a person and on a call an agent placed; on a call a bot kept to the end the record comes from the bot, and a switch-side ending does not show here.
+	HangupCause  *string `json:"hangupCause,omitempty"`
+	HasRecording bool    `json:"hasRecording"`
 
 	// IsContained True when the bot finished the conversation without a human.
 	IsContained bool    `json:"isContained"`

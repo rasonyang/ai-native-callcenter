@@ -123,6 +123,33 @@ session:setVariable("sip_h_X-AICC-Channel-ID", session:getVariable("uuid"))
 
 session:answer()
 
+-- The switch's own end to the part of this call a bot serves (#637). The
+-- application ends the call at the flow's time limit, inside
+-- AICC_BOT_MAX_CALL_DURATION; this is for when it cannot. A process that died,
+-- or one whose call is stuck, keeps the bot leg sending silence, and no RTP
+-- timeout fires on that. So a task on this channel transfers it, a grace after
+-- the cap, to the extension in dialplan/aicc.xml that marks the leg
+-- MAX_CALL_DURATION and hangs it up; the bot leg bridged to it ends with it.
+-- A queue entry replaces the task with the agent cap (aicc_queue.lua), and the
+-- task dies with the channel.
+--
+-- The seconds are the application's, pushed on every connect; until then, and
+-- for a value that is not a positive whole number, the shipped default: 300 s
+-- plus the 60 s grace. Always with the +: without it the number is an absolute
+-- time, and the transfer would run at once.
+local BOT_KILL_DEFAULT_SEC = 360
+
+local function seconds_setting(name, default)
+  local n = tonumber(freeswitch.getGlobalVariable(name) or "")
+  if n == nil or n < 1 or n ~= math.floor(n) then
+    return default
+  end
+  return math.floor(n)
+end
+
+session:execute("sched_transfer", string.format("+%d aicc_max_call_duration_bot XML aicc",
+  seconds_setting("aicc_max_call_duration_bot_sec", BOT_KILL_DEFAULT_SEC)))
+
 if route.is_recording_enabled == "t" or route.is_recording_enabled == true then
   -- One continuous stereo file per call: the caller on the left channel, the
   -- bot and then the agent on the right, following the call through transfers.

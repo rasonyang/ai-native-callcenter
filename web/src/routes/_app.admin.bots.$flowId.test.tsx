@@ -87,7 +87,7 @@ const PROBLEMS = [
   'tool "lookup_account_by_postcode" has no description, so the model cannot tell when to use it',
   'tool "open_billing_dispute" declares no path',
   'tool "record_preferred_contact_time" has unknown kind "form"; it is "http" or "slot"',
-  'global.maxDurationSec is 5400; it is a number of seconds from 60 to 3600, 0 to turn the limit off',
+  'global.maxDurationSec is 5400; it is a number of seconds from 60 to 3600, or left out for the default',
   'global.toolWaitLine "Could you bear with me for a moment while I pull up the billing history on your NovaNet Broadband account and check whether the October fibre upgrade credit has already been applied to it?" is a question; it must be a statement, because a caller answers a question and the answer talks over the result',
   'global.toolWaitLine "请您稍等一下，我这边帮您查一下 NovaNet 宽带账户最近三个月的账单记录，看看十月份光纤升级的优惠是不是已经返还到您的账户上了，还有上个月因为片区停网补偿的那笔费用有没有一起到账，可以吗？" is a question; it must be a statement, because a caller answers a question and the answer talks over the result',
   'cannot parse nodes.refund_already_issued_goodbye.announce: it is number, want string or an object keyed by language',

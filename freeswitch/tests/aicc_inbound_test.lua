@@ -24,7 +24,8 @@ end
 
 local SOUNDS = "/usr/local/freeswitch/sounds"
 
--- opts: language, fallback, finished, sounds_dir (use false for unset).
+-- opts: language, fallback, finished, sounds_dir (use false for unset),
+-- globals (the switch's other global variables by name).
 local function run(opts)
   local executed, hangups, logs = {}, {}, {}
   local vars = { destination_number = "95001", caller_id_number = "13800000000" }
@@ -44,6 +45,7 @@ local function run(opts)
     getGlobalVariable = function(name)
       if name == "aicc_lua_dsn" then return "dsn" end
       if name == "sounds_dir" then return sounds end
+      if opts.globals then return opts.globals[name] end
       return nil
     end,
     Dbh = function()
@@ -121,6 +123,44 @@ do
   local executed, hangups = run({ language = "zh", sounds_dir = "" })
   check("empty sounds_dir: no playback", #playbacks(executed), 0)
   check("empty sounds_dir: hangs up", hangups[#hangups], "NORMAL_TEMPORARY_FAILURE")
+end
+
+-- The switch's own end to the part of the call a bot serves (#637): a
+-- scheduled transfer to the marking extension, armed before the bridge, at the
+-- application's pushed seconds or, without a usable value, the shipped
+-- default of 300 s plus the 60 s grace. Always with the +.
+local function sched_transfers(executed)
+  local out, bridge_at, sched_at = {}, nil, nil
+  for i, e in ipairs(executed) do
+    if e.app == "sched_transfer" then out[#out + 1] = e.arg; sched_at = sched_at or i end
+    if e.app == "bridge" then bridge_at = bridge_at or i end
+  end
+  return out, sched_at, bridge_at
+end
+
+local function expectKill(name, globals, want)
+  local executed = run({ language = "zh", globals = globals })
+  local s, sched_at, bridge_at = sched_transfers(executed)
+  check(name .. ": one kill scheduled", #s, 1)
+  check(name .. ": the kill", s[1], want)
+  check(name .. ": armed before the bridge", sched_at ~= nil and bridge_at ~= nil and sched_at < bridge_at, true)
+end
+
+local DEFAULT_KILL = "+360 aicc_max_call_duration_bot XML aicc"
+expectKill("kill: never pushed", nil, DEFAULT_KILL)
+expectKill("kill: pushed", { aicc_max_call_duration_bot_sec = "1260" }, "+1260 aicc_max_call_duration_bot XML aicc")
+expectKill("kill: empty", { aicc_max_call_duration_bot_sec = "" }, DEFAULT_KILL)
+expectKill("kill: not a number", { aicc_max_call_duration_bot_sec = "abc" }, DEFAULT_KILL)
+expectKill("kill: zero", { aicc_max_call_duration_bot_sec = "0" }, DEFAULT_KILL)
+expectKill("kill: negative", { aicc_max_call_duration_bot_sec = "-5" }, DEFAULT_KILL)
+expectKill("kill: a fraction", { aicc_max_call_duration_bot_sec = "12.5" }, DEFAULT_KILL)
+
+do
+  -- The bot finished the call and the fallback paths: the kill was armed all
+  -- the same, before any of them.
+  local executed = run({ language = "zh", fallback = "7001" })
+  local s = sched_transfers(executed)
+  check("kill: armed on a call that falls back", s[1], DEFAULT_KILL)
 end
 
 if failures > 0 then

@@ -8,7 +8,9 @@ import (
 	"fmt"
 	"math"
 	"slices"
+	"strconv"
 	"strings"
+	"time"
 )
 
 // A flow is configuration that decides how a phone call goes. Everything that
@@ -150,7 +152,7 @@ func (s *Spec) validate() error {
 		report("global.maxTurnsWithoutTool is set but global.closingTarget is empty, so the wall has nowhere to send the call")
 	}
 	if d := s.Global.MaxDurationSec; d != nil && *d != 0 && (*d < MinDurationLimitSec || *d > MaxDurationLimitSec) {
-		report("global.maxDurationSec is %d; it is a number of seconds from %d to %d, 0 to turn the limit off", *d, MinDurationLimitSec, MaxDurationLimitSec)
+		report("global.maxDurationSec is %d; it is a number of seconds from %d to %d, or left out for the default", *d, MinDurationLimitSec, MaxDurationLimitSec)
 	}
 
 	for _, line := range []string{s.Global.ToolWaitLine.ZH, s.Global.ToolWaitLine.EN} {
@@ -316,6 +318,44 @@ func RequireTerminalAnnounce(spec *Spec) error {
 	}
 	slices.Sort(nodes)
 	return &MissingAnnounceError{FlowID: spec.ID, Nodes: nodes}
+}
+
+// RequireMaxDurationWithin refuses a flow whose global.maxDurationSec is 0 or
+// above the deployment's cap, AICC_BOT_MAX_CALL_DURATION (#637).
+//
+// 0 used to turn the limit off, and nothing may: the cap is the most a bot
+// serves a call on this deployment, and the switch ends the leg shortly after
+// it whatever the flow says. A value above the cap is refused rather than
+// lowered, so what the author wrote is what the call does. A flow that leaves
+// the field out is accepted: it runs at DefaultMaxDurationSec, or at the cap
+// when that is shorter (Global.EffectiveMaxDuration).
+//
+// A publish rule and not a load check, like RequireTerminalAnnounce: the cap is
+// a property of the deployment, and a revision already stored with such a
+// value must keep loading. It runs at the cap. A cap of zero or less is no
+// deployment cap, and the DSL's own ceiling stands in.
+func RequireMaxDurationWithin(deploymentCap time.Duration) Rule {
+	deploymentCap = durationCapOrCeiling(deploymentCap)
+	capText := strconv.FormatFloat(deploymentCap.Seconds(), 'f', -1, 64) + "s"
+	return func(spec *Spec) error {
+		d := spec.Global.MaxDurationSec
+		if d == nil {
+			return nil
+		}
+		var problem string
+		switch limit := time.Duration(*d) * time.Second; {
+		case *d == 0:
+			problem = fmt.Sprintf("global.maxDurationSec is 0, which no longer turns the limit off: "+
+				"no call may run longer than this deployment's AICC_BOT_MAX_CALL_DURATION (%s); "+
+				"leave the field out, or set it to a number of seconds up to the cap", capText)
+		case limit > deploymentCap:
+			problem = fmt.Sprintf("global.maxDurationSec is %d, above this deployment's "+
+				"AICC_BOT_MAX_CALL_DURATION (%s); set it to the cap or less, or leave it out", *d, capText)
+		default:
+			return nil
+		}
+		return &ValidationError{FlowID: spec.ID, Problems: []string{problem}}
+	}
 }
 
 // MissingAnnounceError names every terminal phase that would have nothing to

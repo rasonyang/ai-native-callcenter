@@ -46,6 +46,39 @@ if not session:answered() then
   session:answer()
 end
 
+-- The switch's own end to the part of this call an agent serves (#637),
+-- counted from the call's first queue entry and never moved after it. The
+-- first entry fixes the deadline on the channel (aicc_max_call_duration_agent_at,
+-- epoch seconds); a transfer to another queue, a FORWARD overflow, or a bot in
+-- between and a queue again, finds it there and keeps it. Every entry deletes
+-- the channel's scheduled tasks, so the bot-side kill a bot left goes (the
+-- call is not the bot's any more), and schedules the transfer to the extension
+-- in dialplan/aicc.xml that marks the leg MAX_CALL_DURATION and hangs it up at
+-- that deadline; the agent leg bridged to it ends with it. A wait in the queue
+-- counts: a caller nobody answers is ended too.
+--
+-- The cap is the application's, pushed on every connect; until then, and for a
+-- value that is not a positive whole number, the shipped default of 3600 s.
+-- Always with the +: without it the number is an absolute time.
+local AGENT_CAP_DEFAULT_SEC = 3600
+
+local function seconds_setting(name, default)
+  local n = tonumber(freeswitch.getGlobalVariable(name) or "")
+  if n == nil or n < 1 or n ~= math.floor(n) then
+    return default
+  end
+  return math.floor(n)
+end
+
+local deadline = tonumber(session:getVariable("aicc_max_call_duration_agent_at") or "")
+if deadline == nil then
+  deadline = os.time() + seconds_setting("aicc_max_call_duration_agent_sec", AGENT_CAP_DEFAULT_SEC)
+  session:setVariable("aicc_max_call_duration_agent_at", string.format("%d", deadline))
+end
+freeswitch.API():executeString("sched_del " .. session:getVariable("uuid"))
+session:execute("sched_transfer", string.format("+%d aicc_max_call_duration_agent XML aicc",
+  math.max(math.floor(deadline - os.time()), 1)))
+
 -- A caller transferred in from the bot is already being recorded, and
 -- recording_follow_transfer keeps that file going. Only a call that reached
 -- the queue without a bot leg needs recording started here.

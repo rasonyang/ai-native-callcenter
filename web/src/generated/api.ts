@@ -2756,6 +2756,11 @@ export interface components {
              */
             totalSec: number;
             status: components["schemas"]["CDRStatus"];
+            /**
+             * @description How the call ended: the switch's cause name (NORMAL_CLEARING, USER_BUSY and the like) of the leg that decides it, or a word of this platform's own, such as OVERFLOW, SESSION_LIMIT or MAX_CALL_DURATION. A free string: a client must accept a value it does not know.
+             *
+             *     MAX_CALL_DURATION: the switch ended the call because it reached the deployment's maximum duration: AICC_BOT_MAX_CALL_DURATION plus a 60 s grace for the part a bot serves, or AICC_AGENT_MAX_CALL_DURATION for the part an agent serves, counted from the call's first queue entry or, on a call an agent placed, from the agent's answer. A late answer is ALLOTTED_TIMEOUT, never this. It shows on a call handed to a person and on a call an agent placed; on a call a bot kept to the end the record comes from the bot, and a switch-side ending does not show here.
+             */
             hangupCause?: string;
             missedReason?: components["schemas"]["MissedReason"];
             disposition?: string;
