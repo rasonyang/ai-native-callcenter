@@ -116,6 +116,11 @@ type Realtime struct {
 
 	events chan Event
 	conn   *wsconn.Conn
+	// quota is this session's side of the provider's quota (quota.go), and
+	// handshake what the provider answered the upgrade with, kept for
+	// HandshakeReporter; Start writes it under mu.
+	quota     Quota
+	handshake Handshake
 
 	// ready closes when the provider has accepted the session configuration.
 	ready     chan struct{}
@@ -380,10 +385,14 @@ type atomic[T any] struct {
 func (a *atomic[T]) set(v T) { a.mu.Lock(); a.v = v; a.mu.Unlock() }
 func (a *atomic[T]) get() T  { a.mu.Lock(); defer a.mu.Unlock(); return a.v }
 
+// requestIDHeader is where the Realtime vendors answer an upgrade with the id
+// their support asks for (qwen, OpenAI).
+const requestIDHeader = "X-Request-Id"
+
 // New builds a session for a profile. The credential is read from the
 // environment named by the profile, so a missing key fails here rather than
 // mid-call.
-func New(profile Profile, log *slog.Logger) (*Realtime, error) {
+func New(profile Profile, log *slog.Logger, opts ...Option) (*Realtime, error) {
 	apiKey := os.Getenv(profile.APIKeyEnv)
 	if apiKey == "" {
 		return nil, fmt.Errorf("provider %s: %s is not set", profile.Name, profile.APIKeyEnv)
@@ -391,12 +400,14 @@ func New(profile Profile, log *slog.Logger) (*Realtime, error) {
 	if log == nil {
 		log = slog.Default()
 	}
+	options := ApplyOptions(opts)
 	return &Realtime{
 		profile: profile,
 		apiKey:  apiKey,
 		log:     log.With("provider", profile.Name, "model", profile.Model),
 		events:  make(chan Event, eventBuffer),
 		ready:   make(chan struct{}),
+		quota:   NewQuota(profile.Name, requestIDHeader, options.Meter),
 
 		firstAudioDeadline:      firstAudioTimeout,
 		deltaStallDeadline:      deltaStallTimeout,
@@ -407,7 +418,19 @@ func New(profile Profile, log *slog.Logger) (*Realtime, error) {
 
 func (r *Realtime) Events() <-chan Event { return r.events }
 
+// Handshake is what the provider answered this session's upgrade with; empty
+// before Start has connected.
+func (r *Realtime) Handshake() Handshake {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.handshake
+}
+
 // Start connects, configures the session, and asks for the opening turn.
+//
+// A failure before the session is confirmed is a StartFailure (quota.go):
+// classified, counted and logged with the upgrade's request id, so a refusal
+// for a spent quota is a number rather than one more failed call (#604).
 func (r *Realtime) Start(ctx context.Context, cfg SessionConfig) error {
 	r.mu.Lock()
 	r.cfg = cfg
@@ -419,9 +442,17 @@ func (r *Realtime) Start(ctx context.Context, cfg SessionConfig) error {
 
 	conn, err := wsconn.Dial(ctx, r.profile.endpointURL(), headers, r.log)
 	if err != nil {
-		return err
+		return r.quota.Refused(ctx, r.log, nil, err)
 	}
 	r.conn = conn
+	// Once per session, before anything else can log: the id a support ticket
+	// is answered from, and any rate limit the vendor stated.
+	handshake := r.quota.Upgraded(conn.Header())
+	r.mu.Lock()
+	r.handshake = handshake
+	r.mu.Unlock()
+	r.log.Info("provider connection upgraded",
+		append([]any{"requestId", handshake.RequestID}, handshake.LogAttrs()...)...)
 	r.dog = NewWatchdog(WatchdogConfig{
 		FirstAudioDeadline: r.firstAudioDeadline,
 		DeltaStallDeadline: r.deltaStallDeadline,
@@ -435,7 +466,7 @@ func (r *Realtime) Start(ctx context.Context, cfg SessionConfig) error {
 
 	if err := r.sendEvent(r.buildSessionUpdate(cfg, false)); err != nil {
 		r.conn.Close()
-		return fmt.Errorf("configure session: %w", err)
+		return r.quota.Refused(ctx, r.log, conn.Header(), fmt.Errorf("configure session: %w", err))
 	}
 
 	// The configuration must be accepted before any audio is sent, because on
@@ -449,13 +480,14 @@ func (r *Realtime) Start(ctx context.Context, cfg SessionConfig) error {
 	case <-time.After(wsconn.DialTimeout):
 		r.conn.Close()
 		if err := r.startErr.get(); err != nil {
-			return fmt.Errorf("session rejected: %w", err)
+			return r.quota.Refused(ctx, r.log, conn.Header(), fmt.Errorf("session rejected: %w", err))
 		}
-		return errors.New("provider did not confirm the session configuration")
+		return r.quota.Refused(ctx, r.log, conn.Header(),
+			StartTimedOut("provider did not confirm the session configuration"))
 	}
 	if err := r.startErr.get(); err != nil {
 		r.conn.Close()
-		return fmt.Errorf("session rejected: %w", err)
+		return r.quota.Refused(ctx, r.log, conn.Header(), fmt.Errorf("session rejected: %w", err))
 	}
 
 	// The session is ready; the request for the first turn may still be held
@@ -2704,6 +2736,16 @@ func (r *Realtime) handleError(event *wireEvent) {
 		}
 	}
 
+	// After the start, a refusal the session survives (a turn refused for a
+	// spent token quota) still says the quota is spent, and admission backs off
+	// for it as for a refused start. Before it, Start reports the refusal.
+	select {
+	case <-r.ready:
+		if r.startErr.get() == nil {
+			r.quota.RefusedMidCall(r.log, err)
+		}
+	default:
+	}
 	r.finishStart(err)
 	r.emit(Event{Type: EventTypeError, Err: err, Text: err.Message})
 }

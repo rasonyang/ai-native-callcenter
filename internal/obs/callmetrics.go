@@ -39,6 +39,9 @@ var (
 	turnUnanswered     metric.Int64Counter
 	providerErrors     metric.Int64Counter
 	providerSessions   metric.Int64Counter
+	providerDialFails  metric.Int64Counter
+	providerRateLimit  metric.Int64Gauge
+	providerRateLeft   metric.Int64Gauge
 	providerUnanswered metric.Int64Counter
 	botInterruptions   metric.Int64Counter
 	echoDelay          metric.Int64Histogram
@@ -151,6 +154,24 @@ func init() {
 			"rate-limit session creation rather than concurrency — doubao allows 60 a "+
 			"minute per application id — so the rate of opening them is a quota a busy "+
 			"minute can exhaust while every other number here looks healthy."))
+	providerDialFails, _ = meter.Int64Counter("aicc_provider_dial_failures_total",
+		metric.WithDescription("Provider sessions that could not be started, by provider, "+
+			"status and reason. status is the HTTP status of a refused upgrade (429, 401, "+
+			"...; HTTP_OTHER outside 100-599), CLOSE_<code> for a socket the provider "+
+			"closed during setup after accepting the upgrade, ERROR_EVENT for an error "+
+			"event during setup, TIMEOUT for a setup the provider never confirmed, "+
+			"NETWORK for no answer to classify. reason is QUOTA_EXCEEDED (a 429, or "+
+			"vendor text that says quota, rate limit or throttling), AUTH_REJECTED "+
+			"(401, 403, or text about the key) or OTHER. A session the call gave up "+
+			"on (the caller hung up during setup) is not counted."))
+	providerRateLimit, _ = meter.Int64Gauge("aicc_provider_ratelimit_limit",
+		metric.WithDescription("The limit the provider's last upgrade response stated in a "+
+			"rate-limit header, by provider and kind (REQUESTS, TOKENS, UNSPECIFIED for "+
+			"an unqualified X-RateLimit-Limit). Absent when the vendor sends none, which "+
+			"is what qwen did on the deployment checked (docs/design/06-capacity.md)."))
+	providerRateLeft, _ = meter.Int64Gauge("aicc_provider_ratelimit_remaining",
+		metric.WithDescription("What the provider's last upgrade response said remains of "+
+			"that limit, by provider and kind, when it says."))
 	providerUnanswered, _ = meter.Int64Counter("aicc_provider_response_unanswered_total",
 		metric.WithDescription("Requests for a response (response.create) the provider never "+
 			"created within the client's bound, by provider, kind (OPENING, LINE, TOOL, CUE, "+
@@ -673,6 +694,34 @@ func RecordProviderSessionStarted(provider string) {
 	}
 	providerSessions.Add(context.Background(), 1,
 		metric.WithAttributes(attribute.String("provider", provider)))
+}
+
+// RecordProviderDialFailure counts one session that could not be started, by
+// the bounded status and reason the provider client classified it under
+// (provider.StartFailure). A quota refusal is the one this exists for: without
+// it a refused handshake looks like any other failed call, and the first sign
+// of a spent quota is a run of rescued callers (#604).
+func RecordProviderDialFailure(provider, status, reason string) {
+	if providerDialFails == nil {
+		return
+	}
+	providerDialFails.Add(context.Background(), 1, metric.WithAttributes(
+		attribute.String("provider", provider),
+		attribute.String("status", status),
+		attribute.String("reason", reason)))
+}
+
+// SetProviderRateLimit publishes what a provider's upgrade response said about
+// one of its rate limits. A value the header did not carry, or that is not a
+// whole number, is left as it was (hasLimit, hasRemaining false).
+func SetProviderRateLimit(provider, kind string, limit int64, hasLimit bool, remaining int64, hasRemaining bool) {
+	attrs := metric.WithAttributes(attribute.String("provider", provider), attribute.String("kind", kind))
+	if hasLimit && providerRateLimit != nil {
+		providerRateLimit.Record(context.Background(), limit, attrs)
+	}
+	if hasRemaining && providerRateLeft != nil {
+		providerRateLeft.Record(context.Background(), remaining, attrs)
+	}
 }
 
 // RecordProviderError counts a session that ended badly. A rise here is the

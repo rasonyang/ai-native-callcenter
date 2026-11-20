@@ -13,8 +13,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -64,7 +66,7 @@ func Dial(ctx context.Context, endpoint string, headers http.Header, log *slog.L
 	conn, response, err := dialer.DialContext(ctx, endpoint, headers)
 	if err != nil {
 		if response != nil {
-			return nil, fmt.Errorf("dial %s: %w (http %d)", endpoint, err, response.StatusCode)
+			return nil, refusal(endpoint, response, err)
 		}
 		return nil, fmt.Errorf("dial %s: %w", endpoint, err)
 	}
@@ -84,6 +86,47 @@ func Dial(ctx context.Context, endpoint string, headers http.Header, log *slog.L
 // Header is what the provider answered the upgrade with. Some protocols put
 // the session's identity there rather than in a frame.
 func (c *Conn) Header() http.Header { return c.header }
+
+// HandshakeError is an upgrade the server answered with something other than
+// 101: its HTTP status, its headers (where a vendor puts the request id its
+// support asks for, and a rate limit if it sends one) and the start of its
+// body. What any of it means is the client's business; this package only keeps
+// it, because a dial that drops it leaves a quota refusal (429) looking like any
+// other failed call (#604).
+type HandshakeError struct {
+	Endpoint   string
+	StatusCode int
+	Header     http.Header
+	// Body is at most maxRefusalBody bytes of the answer, trimmed.
+	Body string
+	Err  error
+}
+
+// maxRefusalBody bounds what is kept of a refused upgrade's body: enough for a
+// vendor's error code and message, never a page.
+const maxRefusalBody = 512
+
+// Error is the text a refused dial has always had, so logs and records that
+// carry it read as before.
+func (e *HandshakeError) Error() string {
+	return fmt.Sprintf("dial %s: %v (http %d)", e.Endpoint, e.Err, e.StatusCode)
+}
+
+func (e *HandshakeError) Unwrap() error { return e.Err }
+
+// refusal keeps what a server that refused the upgrade answered with. The body
+// is already buffered by the WebSocket library (it reads at most 1 KiB of it),
+// so reading it does not wait on the network.
+func refusal(endpoint string, response *http.Response, err error) *HandshakeError {
+	refused := &HandshakeError{
+		Endpoint: endpoint, StatusCode: response.StatusCode, Header: response.Header, Err: err,
+	}
+	if response.Body != nil {
+		body, _ := io.ReadAll(io.LimitReader(response.Body, maxRefusalBody))
+		refused.Body = strings.TrimSpace(string(body))
+	}
+	return refused
+}
 
 // Done closes when the session has ended, however it ended.
 func (c *Conn) Done() <-chan struct{} { return c.done }

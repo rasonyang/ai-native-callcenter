@@ -62,6 +62,42 @@ func TestARefusedDialCarriesTheStatus(t *testing.T) {
 	}
 }
 
+// A refusal is kept whole: the status says what kind it was, the headers carry
+// the request id the vendor's support asks for, and the body says why in the
+// vendor's words. A quota refusal (429) is the one that has to be told apart
+// from every other failed call (#604).
+func TestARefusedDialKeepsWhatTheServerAnswered(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("X-Request-Id", "req-429")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(`  {"code":"Throttling.RateQuota","message":"Requests rate limit exceeded"}` + "\n" + strings.Repeat("x", 2000)))
+	}))
+	t.Cleanup(server.Close)
+
+	_, err := Dial(t.Context(), "ws"+strings.TrimPrefix(server.URL, "http"), nil, testLogger())
+	var refused *HandshakeError
+	if !errors.As(err, &refused) {
+		t.Fatalf("error = %v (%T), want a HandshakeError", err, err)
+	}
+	if refused.StatusCode != http.StatusTooManyRequests {
+		t.Errorf("status = %d, want 429", refused.StatusCode)
+	}
+	if got := refused.Header.Get("x-request-id"); got != "req-429" {
+		t.Errorf("request id = %q, want the server's", got)
+	}
+	if !strings.HasPrefix(refused.Body, `{"code":"Throttling.RateQuota"`) || len(refused.Body) > maxRefusalBody {
+		t.Errorf("body = %q (%d bytes), want the trimmed start of the answer, at most %d bytes",
+			refused.Body, len(refused.Body), maxRefusalBody)
+	}
+	if !errors.Is(err, websocket.ErrBadHandshake) {
+		t.Errorf("error = %v, want the library's own cause still in the chain", err)
+	}
+	if !strings.Contains(err.Error(), "http 429") {
+		t.Errorf("error = %q, want the refusal's status in its text as before", err)
+	}
+}
+
 // Some protocols put the session's identity in the handshake rather than in a
 // frame, so what the provider answered with has to survive the dial.
 func TestTheHandshakeAnswerIsKept(t *testing.T) {

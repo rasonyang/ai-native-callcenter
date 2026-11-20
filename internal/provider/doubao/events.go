@@ -379,6 +379,15 @@ func (s *Session) onError(event *wireEvent) {
 			"code", err.Code, "message", err.Message)
 	}
 
+	// After the start, an error that says the quota is spent is reported to
+	// the meter as a refusal; before it, Start reports it.
+	select {
+	case <-s.ready:
+		if s.failure() == nil {
+			s.quota.RefusedMidCall(s.log, err)
+		}
+	default:
+	}
 	s.setOutcome(failedOutcome(err.Code))
 	s.finishStart(err)
 	s.emit(provider.Event{

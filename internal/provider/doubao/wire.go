@@ -245,6 +245,11 @@ func (e *wireError) Error() string {
 	return e.Message
 }
 
+// EventCode and EventMessage make a decoded error a provider.EventError,
+// which is what a start failure is classified by.
+func (e *wireError) EventCode() string    { return e.Code }
+func (e *wireError) EventMessage() string { return e.Message }
+
 // kind is how the code reads in a log line.
 func (e *wireError) kind() string {
 	if e.Code == "" {

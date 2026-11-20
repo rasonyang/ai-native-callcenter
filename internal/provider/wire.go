@@ -87,6 +87,11 @@ func (e *wireError) Error() string {
 	return e.Message
 }
 
+// EventCode and EventMessage make a decoded error event an EventError, which
+// is what a start failure is classified by (quota.go).
+func (e *wireError) EventCode() string    { return e.Code }
+func (e *wireError) EventMessage() string { return e.Message }
+
 // sendEvent encodes one outbound event and writes it.
 func (r *Realtime) sendEvent(payload any) error {
 	data, err := json.Marshal(payload)
