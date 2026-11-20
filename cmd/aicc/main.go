@@ -413,11 +413,18 @@ func run() error {
 			InboundReserve:          cfg.CampaignInboundReserve(),
 			OverflowTightenRate:     cfg.OverflowTightenRate,
 			OverflowStopRate:        cfg.OverflowStopRate,
+			// The provider's quota per minute, as the profile and the
+			// deployment's settings resolved it (#604).
+			ProviderSessionRPM: profile.SessionRPM,
+			ProviderTokenRPM:   profile.TokenRPM,
 		}, dialer.Deps{
 			Store:  st.Dialer(),
 			Placer: outboundSvc,
 			Slots:  botSlots,
 			Lines:  outboundSvc,
+			// Every bot session's starts, tokens and quota refusals, inbound
+			// ones included.
+			ProviderRate: quotaMeter,
 			// A placement the switch has not confirmed counts as live: the
 			// customer may be ringing, and the backstop waits for what the
 			// switch does rather than settling the attempt as UNKNOWN (#221).

@@ -338,8 +338,12 @@ func init() {
 	dialerBlocked, _ = meter.Int64Counter("aicc_dialer_admission_blocked_total",
 		metric.WithDescription("Times the dialer had a contact to dial and did not, by "+
 			"reason: CAMPAIGN_CONCURRENCY, OUTBOUND_RINGING, BOT_CAPACITY (the expected "+
-			"answers would not fit in the bot's free capacity) or DID_LINES (the campaign's "+
-			"DID is at its outbound line limit)."))
+			"answers would not fit in the bot's free capacity), DID_LINES (the campaign's "+
+			"DID is at its outbound line limit), PROVIDER_SESSION_RATE or "+
+			"PROVIDER_TOKEN_RATE (the last minute's provider session starts or tokens, "+
+			"plus what the expected answers would add, would pass the provider's "+
+			"per-minute quota) or PROVIDER_QUOTA_BACKOFF (the provider refused a session "+
+			"for its quota less than a minute ago)."))
 	didOutboundInUse, _ = meter.Int64UpDownCounter("aicc_did_outbound_in_use",
 		metric.WithDescription("Outbound lines held on a DID: calls the platform placed "+
 			"or is placing from it, plus hand-dialled legs it observed. Compare with "+
@@ -921,6 +925,12 @@ const (
 	DialerBlockedRinging  = "OUTBOUND_RINGING"
 	DialerBlockedBot      = "BOT_CAPACITY"
 	DialerBlockedDIDLines = "DID_LINES"
+	// The provider rule (#604): the speech provider's session starts or tokens
+	// per minute would pass its quota, or it refused a session for its quota
+	// less than a minute ago.
+	DialerBlockedProviderSessions = "PROVIDER_SESSION_RATE"
+	DialerBlockedProviderTokens   = "PROVIDER_TOKEN_RATE"
+	DialerBlockedProviderBackoff  = "PROVIDER_QUOTA_BACKOFF"
 )
 
 // DIDOutboundInUseChanged moves the outbound-lines gauge of a DID.
