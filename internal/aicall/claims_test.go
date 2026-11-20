@@ -114,6 +114,63 @@ func TestClaimWatchReportsOnlyWhatNoToolBacks(t *testing.T) {
 		}
 	})
 
+	// A tool result backs what the reply to it reports, never a goodbye: only an
+	// ending makes a goodbye true (#630).
+	t.Run("a goodbye in the reply to the tool's result", func(t *testing.T) {
+		goodbyes := map[string]string{
+			"en": "Okay, I won't take any more of your time. Have a great day!",
+			"zh": "好的，那就不打扰您了，祝您生活愉快！",
+		}
+		transfers := map[string]string{"en": line, "zh": "好的，我帮您转接人工客服。"}
+		isGoodbye := func(found []claim) bool {
+			return len(found) == 1 && found[0].kind == store.UnbackedClaimFarewell
+		}
+		for _, lang := range []string{"en", "zh"} {
+			goodbye, transfer := goodbyes[lang], transfers[lang]
+
+			var w claimWatch
+			w.onTurnDone(3, true, false)
+			w.onBotSaid(4, transfer+" "+goodbye)
+			if found := w.onTurnDone(4, false, false); !isGoodbye(found) {
+				t.Errorf("%s: claims = %+v in the reply to the tool, want the goodbye alone", lang, found)
+			}
+			if !w.hasFarewellWithoutHangup() || w.standingClaim() != nil {
+				t.Errorf("%s: unhung = %v, standing = %v; want the goodbye unhung and the transfer backed",
+					lang, w.hasFarewellWithoutHangup(), w.standingClaim())
+			}
+
+			var late claimWatch
+			late.onTurnDone(3, true, false)
+			late.onTurnDone(4, false, false)
+			if found := late.onBotSaid(4, transfer); len(found) != 0 {
+				t.Errorf("%s: claims = %+v for a late transfer line of the reply to the tool", lang, found)
+			}
+			if found := late.onBotSaid(4, goodbye); !isGoodbye(found) || !late.hasFarewellWithoutHangup() {
+				t.Errorf("%s: claims = %+v for a late goodbye of the reply to the tool, want it unhung",
+					lang, found)
+			}
+
+			// The tool's own turn, and the reply over an armed ending, hang it.
+			var own claimWatch
+			own.onBotSaid(3, goodbye)
+			if found := own.onTurnDone(3, true, false); len(found) != 0 {
+				t.Errorf("%s: claims = %+v for a goodbye in the tool's own turn", lang, found)
+			}
+			if found := own.onBotSaid(3, goodbye); len(found) != 0 || own.hasFarewellWithoutHangup() {
+				t.Errorf("%s: claims = %+v for a late goodbye of the tool's own turn", lang, found)
+			}
+			var armed claimWatch
+			armed.onTurnDone(3, true, false)
+			armed.onBotSaid(4, goodbye)
+			if found := armed.onTurnDone(4, false, true); len(found) != 0 {
+				t.Errorf("%s: claims = %+v for a goodbye over an armed ending", lang, found)
+			}
+			if found := armed.onBotSaid(4, goodbye); len(found) != 0 || armed.hasFarewellWithoutHangup() {
+				t.Errorf("%s: claims = %+v for a late goodbye over an armed ending", lang, found)
+			}
+		}
+	})
+
 	t.Run("while an ending is armed", func(t *testing.T) {
 		var w claimWatch
 		w.onBotSaid(6, "Goodbye.")
