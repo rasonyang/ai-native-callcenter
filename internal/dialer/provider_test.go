@@ -190,10 +190,10 @@ type providerRun struct {
 	startsAfter, refusalsAfter int
 }
 
-func runAgainstProvider(t *testing.T, isGated bool, prov simProvider, sessionRPM, tokenRPM int, warmUp, d time.Duration) providerRun {
+func runAgainstProvider(t *testing.T, isGated bool, prov simProvider, capacity, sessionRPM, tokenRPM int, warmUp, d time.Duration) providerRun {
 	t.Helper()
 	p := prov
-	s := newSim(t, simSpec{capacity: 60, inboundReserve: 4, campaigns: 1, seed: 21, maxConcurrent: 1000,
+	s := newSim(t, simSpec{capacity: capacity, inboundReserve: 4, campaigns: 1, seed: 21, maxConcurrent: 1000,
 		rates: []func(time.Duration) float64{constRate(0.5)}, provider: &p,
 		isGated: isGated, sessionRPM: sessionRPM, tokenRPM: tokenRPM})
 	p.measureFrom = s.start.Add(warmUp)
@@ -204,19 +204,31 @@ func runAgainstProvider(t *testing.T, isGated bool, prov simProvider, sessionRPM
 	}
 }
 
-// The deployment of #604, scaled down: more bot capacity than the provider's
-// connect rate can feed, a list that answers half its calls, and a provider
-// that takes 20 connects a minute. Admission by expected answers alone fills
-// the bot, the starts run far above the connect rate and most answered callers
-// meet a refusal (each one frees its slot a second later, which admits the
-// next). With the provider rule the starts stay at the rate and refusals near
-// zero, and the rate is still used.
+// The deployment of #604 at the quota the qwen and doubao profiles document:
+// a provider that takes 60 connects a minute, a list that answers half its
+// calls, and more bot capacity than that rate can feed (160 slots, where 60
+// sessions a minute of 60-130 s calls hold about 95). Admission by expected
+// answers alone fills the bot, the starts run far above the connect rate and
+// most answered callers meet a refusal (each one frees its slot a second
+// later, which admits the next). With the provider rule the starts stay at the
+// rate and refusals near zero, and the rate is still used.
+//
+// Not zero: the rule counts a ringing leg as p_c of an answer, p_c an upper
+// bound on the campaign's answer rate, and a burst of fresh legs that answer
+// above it can still put a start over the limit, and the rest of the burst
+// behind it (a refused start counts as a connect too). The bursts are few, so
+// the share they leave is chance unless the run holds many starts: scaled down
+// to 20 connects a minute for 15 minutes, 9 seeds in 100 went over 2%; at the
+// documented rate for half an hour, none of 300 did (#604).
 func TestTheConnectRateGateKeepsRefusalsNearZero(t *testing.T) {
-	const minutes, rate = 15, 20
+	const rate, capacity, minutes = 60, 160, 30
 	prov := simProvider{connectLimit: rate}
 
-	open := runAgainstProvider(t, false, prov, 0, 0, 0, minutes*time.Minute)
-	gated := runAgainstProvider(t, true, prov, rate, 0, 0, minutes*time.Minute)
+	// Without the gate the minute's 60 connects are spent within the first
+	// one, and every start after that is refused: a refused start counts as a
+	// connect, so the window never empties. Two minutes show it.
+	open := runAgainstProvider(t, false, prov, capacity, 0, 0, 0, 2*time.Minute)
+	gated := runAgainstProvider(t, true, prov, capacity, rate, 0, 0, minutes*time.Minute)
 	t.Logf("without the gate: %d starts, %d refused", open.starts, open.refusals)
 	t.Logf("with the gate:    %d starts, %d refused", gated.starts, gated.refusals)
 
@@ -224,9 +236,6 @@ func TestTheConnectRateGateKeepsRefusalsNearZero(t *testing.T) {
 		t.Fatalf("without the gate only %d of %d starts were refused: the scenario proves nothing",
 			open.refusals, open.starts)
 	}
-	// Not zero: the rule counts a ringing leg as p_c of an answer, p_c an
-	// upper bound on the campaign's rate, and a run of answers above it can
-	// still put one start over the limit.
 	if gated.refusals*50 > gated.starts {
 		t.Errorf("with the gate %d of %d starts were refused, want at most 2%%", gated.refusals, gated.starts)
 	}
@@ -247,8 +256,8 @@ func TestTheTokenRateGateStopsRefusalsOnceUsageIsKnown(t *testing.T) {
 	warmUp := 5 * time.Minute
 	prov := simProvider{tokenLimit: 100000, tokensPerTurn: 900, turnEvery: 15 * time.Second}
 
-	open := runAgainstProvider(t, false, prov, 0, 0, warmUp, minutes*time.Minute)
-	gated := runAgainstProvider(t, true, prov, 0, 100000, warmUp, minutes*time.Minute)
+	open := runAgainstProvider(t, false, prov, 60, 0, 0, warmUp, minutes*time.Minute)
+	gated := runAgainstProvider(t, true, prov, 60, 0, 100000, warmUp, minutes*time.Minute)
 	t.Logf("without the gate: %d starts, %d refused (%d of %d after the warm-up)",
 		open.starts, open.refusals, open.refusalsAfter, open.startsAfter)
 	t.Logf("with the gate:    %d starts, %d refused (%d of %d after the warm-up)",
