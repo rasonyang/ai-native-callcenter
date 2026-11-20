@@ -218,6 +218,74 @@ func TestBotNoInputTimeout(t *testing.T) {
 	}
 }
 
+// The two maximum call durations (#637) follow the dead-air timeout's rules:
+// unset is the default, the bounds are inclusive, there is no off, and a
+// value outside the range or not a duration stops the application at startup,
+// naming the setting.
+func TestMaxCallDurations(t *testing.T) {
+	type tc struct {
+		name    string
+		value   *string
+		want    time.Duration
+		wantErr bool
+	}
+	settings := []struct {
+		key   string
+		read  func(Config) time.Duration
+		cases []tc
+	}{
+		{"AICC_BOT_MAX_CALL_DURATION", func(c Config) time.Duration { return c.BotMaxCallDuration }, []tc{
+			{name: "unset is 300s", want: 300 * time.Second},
+			{name: "empty is unset", value: ptrTo(""), want: 300 * time.Second},
+			{name: "a value", value: ptrTo("10m"), want: 10 * time.Minute},
+			{name: "the lower bound", value: ptrTo("60s"), want: time.Minute},
+			{name: "the upper bound", value: ptrTo("3600s"), want: time.Hour},
+			{name: "below the bound is refused", value: ptrTo("59s"), wantErr: true},
+			{name: "above the bound is refused", value: ptrTo("3601s"), wantErr: true},
+			{name: "zero is refused, there is no off", value: ptrTo("0"), wantErr: true},
+			{name: "negative is refused", value: ptrTo("-5m"), wantErr: true},
+			{name: "a malformed value is refused, not read as the default", value: ptrTo("300"), wantErr: true},
+		}},
+		{"AICC_AGENT_MAX_CALL_DURATION", func(c Config) time.Duration { return c.AgentMaxCallDuration }, []tc{
+			{name: "unset is 3600s", want: time.Hour},
+			{name: "empty is unset", value: ptrTo(""), want: time.Hour},
+			{name: "a value", value: ptrTo("2h"), want: 2 * time.Hour},
+			{name: "the lower bound", value: ptrTo("60s"), want: time.Minute},
+			{name: "the upper bound", value: ptrTo("86400s"), want: 24 * time.Hour},
+			{name: "below the bound is refused", value: ptrTo("59s"), wantErr: true},
+			{name: "above the bound is refused", value: ptrTo("86401s"), wantErr: true},
+			{name: "zero is refused, there is no off", value: ptrTo("0"), wantErr: true},
+			{name: "negative is refused", value: ptrTo("-1h"), wantErr: true},
+			{name: "a malformed value is refused, not read as the default", value: ptrTo("one hour"), wantErr: true},
+		}},
+	}
+	for _, setting := range settings {
+		for _, tt := range setting.cases {
+			t.Run(setting.key+"/"+tt.name, func(t *testing.T) {
+				if tt.value == nil {
+					t.Setenv(setting.key, "")
+					os.Unsetenv(setting.key)
+				} else {
+					t.Setenv(setting.key, *tt.value)
+				}
+				c, err := Load()
+				if tt.wantErr {
+					if err == nil || !strings.Contains(err.Error(), setting.key) {
+						t.Fatalf("Load() error = %v, want one naming the setting", err)
+					}
+					return
+				}
+				if err != nil {
+					t.Fatalf("Load() error = %v", err)
+				}
+				if got := setting.read(c); got != tt.want {
+					t.Errorf("got %s, want %s", got, tt.want)
+				}
+			})
+		}
+	}
+}
+
 func ptrTo[T any](v T) *T { return &v }
 
 func TestParsePeers(t *testing.T) {
@@ -458,6 +526,12 @@ func TestValidate(t *testing.T) {
 			}
 			if tt.cfg.BotNoInputTimeout == 0 {
 				tt.cfg.BotNoInputTimeout = DefaultBotNoInputTimeout
+			}
+			if tt.cfg.BotMaxCallDuration == 0 {
+				tt.cfg.BotMaxCallDuration = DefaultBotMaxCallDuration
+			}
+			if tt.cfg.AgentMaxCallDuration == 0 {
+				tt.cfg.AgentMaxCallDuration = DefaultAgentMaxCallDuration
 			}
 			if tt.cfg.BotMaxCalls == 0 {
 				tt.cfg.BotMaxCalls = 220

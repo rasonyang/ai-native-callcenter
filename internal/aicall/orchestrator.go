@@ -172,6 +172,11 @@ type OrchestratorConfig struct {
 	// last word before the flow gets NO_INPUT; see Config. Zero means the
 	// session's default (8 s).
 	NoInput time.Duration
+	// MaxCallDuration is AICC_BOT_MAX_CALL_DURATION, the deployment's cap on
+	// every call's time limit: a flow's own global.maxDurationSec runs inside
+	// it (flow.Global.EffectiveMaxDuration, #637). Zero is no deployment cap,
+	// and the DSL's own ceiling stands in.
+	MaxCallDuration time.Duration
 	// EchoDumpDir is AICC_BOT_ECHO_DUMP_DIR; see Config.EchoDumpDir. Empty is
 	// off.
 	EchoDumpDir string
@@ -504,8 +509,12 @@ func (o *Orchestrator) runCall(ctx context.Context, dialog *voice.Dialog) error 
 	// mark, so the time to the first word does not count this stamp.
 	recorder.markStarted()
 	actions.stampSessionStarted()
+	budget := budgetFor(spec, o.cfg.MaxCallDuration)
 	log.Info("ai conversation started", "flowId", spec.ID,
-		"provider", profile.Name, "language", language)
+		"provider", profile.Name, "language", language,
+		// The time limit in effect: the flow's own, bounded by the
+		// deployment's AICC_BOT_MAX_CALL_DURATION (#637).
+		"maxDuration", budget.limitAfter)
 	// Only now. Everything before this point could still have ended with the
 	// caller being rescued to a queue without a word being said to them.
 	if announce := o.cfg.AnnounceBotSession; announce != nil {
@@ -516,7 +525,7 @@ func (o *Orchestrator) runCall(ctx context.Context, dialog *voice.Dialog) error 
 	}
 
 	o.drive(ctx, session, runtime, actions, recorder,
-		budgetFor(spec).since(recorder.botAnsweredAt, time.Now()), log)
+		budget.since(recorder.botAnsweredAt, time.Now()), log)
 	// The call is over. Whatever was waiting for a closing line to be heard
 	// will never hear it, and the caller's channel is gone with the call.
 	actions.disarm()

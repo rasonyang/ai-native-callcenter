@@ -9,6 +9,44 @@ carries the one-line installer's files.
 
 ### Upgrade notes
 
+- **An AI call ends after 5 minutes unless its flow asks for less** (#637).
+  The new setting `AICC_BOT_MAX_CALL_DURATION` (a Go duration, default `300s`,
+  `60s` to `3600s`) is the most a bot serves one call. A flow that leaves
+  `maxDurationSec` out now ends its calls after 300 seconds instead of 900
+  (or at the setting, when that is shorter), flows already published
+  included. A flow can no longer turn the limit off: one already published
+  with `maxDurationSec` set to `0`, or above the setting, keeps answering and
+  ends its calls at the setting, and publishing such a flow, through the API
+  or `aicc flowadd`, is refused with `VALIDATION_FAILED` naming the setting
+  and its value. Before upgrading, look for flows that set `maxDurationSec` to
+  `0` or above 300: lower the field or leave it out, or raise the setting. The
+  shipped flows publish unchanged. A bot's detail page shows a stored `0` as
+  the deployment maximum.
+- **The switch ends a call that outlasts the deployment's maximum, even when
+  the application cannot** (#637). The application's own limit runs in the
+  application, and a process that died or a call that got stuck kept the
+  line up for good. Now the switch holds a deadline on the customer's channel:
+  60 seconds after `AICC_BOT_MAX_CALL_DURATION`, counted from the answer, on
+  every AI call, outbound and inbound; `AICC_AGENT_MAX_CALL_DURATION` from the
+  call's first queue entry, waiting included, on every call that reaches a
+  queue (a later transfer to another queue keeps that deadline); and the same
+  from the agent's answer on a click-to-dial. An AI outbound call answered and
+  never connected to the bot is hung up after 30 seconds
+  (`RECOVERY_ON_TIMER_EXPIRE`, `BOT_FAILED` for a campaign). **Calls with an
+  agent are now ended after one hour by default**: if yours run longer, raise
+  `AICC_AGENT_MAX_CALL_DURATION` (up to `86400s`) before upgrading. Run the
+  switch image of this release with this application; a native switch needs
+  this release's `dialplan/aicc.xml`, `scripts/aicc_inbound.lua` and
+  `scripts/aicc_queue.lua`, then `reloadxml`. A call so ended that was handed
+  to a person or placed by an agent has `hangupCause` `MAX_CALL_DURATION`; one
+  the bot kept to the end shows only in the metric and the log below.
+- Two settings added: `AICC_BOT_MAX_CALL_DURATION` (above) and
+  `AICC_AGENT_MAX_CALL_DURATION` (default `3600s`, `60s` to `86400s`), the
+  maximum the switch enforces on the part of a call an agent serves. Neither
+  has an off value; a value outside its range, or one that is not a duration,
+  stops the application at startup. The application gives both to the switch
+  each time it connects to it; a switch it has not reached yet uses the
+  defaults.
 - **Campaigns are paced by the speech provider's per-minute quota** (#604).
   The vendors limit session starts and tokens per minute, not sessions held at
   once, and on qwen a session refused for its quota looked like any other
@@ -30,9 +68,16 @@ carries the one-line installer's files.
   model), `0` turns that limit off, and a positive number replaces it with the
   account's. Anything else stops the application at startup. A qwen deployment
   in another region, on another model or with a raised quota sets them.
-- API contract: unchanged.
+- API contract: no schema change. `CDR.hangupCause` now says what it holds,
+  `MAX_CALL_DURATION` among the platform's own words (#637).
 
 ### Added
+
+- A leg the switch ended at the deployment's maximum call duration is counted,
+  `aicc_call_max_duration_kills_total{side}` (`BOT`, `AGENT`), and logged at
+  WARN with its `callId` ("the switch ended a call at the deployment's maximum
+  call duration"). A `BOT` one means the application's own ending at the
+  flow's time limit did not run (#637).
 
 - A provider session that could not be started is counted by what the
   provider said: `aicc_provider_dial_failures_total{provider,status,reason}`,

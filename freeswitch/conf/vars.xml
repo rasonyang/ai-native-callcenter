@@ -519,4 +519,14 @@
        AICC_RECORDINGS_DIR. -->
   <X-PRE-PROCESS cmd="set" data="aicc_recordings_dir=/var/lib/freeswitch/recordings"/>
 
+  <!-- Deliberately not set here: aicc_max_call_duration_bot_sec and
+       aicc_max_call_duration_agent_sec, the seconds after which the switch
+       ends the part of a call a bot serves (AICC_BOT_MAX_CALL_DURATION plus a
+       60 s grace) and the part an agent serves (AICC_AGENT_MAX_CALL_DURATION),
+       read by aicc_inbound.lua and aicc_queue.lua. The application sets both
+       with global_setvar on every connect. A line here would be put back over
+       its values by every reloadxml, until the next connect; without one, the
+       scripts use the shipped defaults, 360 and 3600, until the application
+       has connected. -->
+
 </include>

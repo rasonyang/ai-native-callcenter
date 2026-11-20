@@ -150,8 +150,11 @@ export interface FlowTool {
   }
 }
 
-/** What an unset global.maxDurationSec means, as the engine reads it. */
-export const DEFAULT_MAX_DURATION_SEC = 900
+/**
+ * What an unset global.maxDurationSec means, as the engine reads it: 300
+ * seconds, or the deployment's AICC_BOT_MAX_CALL_DURATION when that is shorter.
+ */
+export const DEFAULT_MAX_DURATION_SEC = 300
 
 export interface FlowGlobal {
   persona?: FlowText
@@ -185,7 +188,9 @@ export interface FlowGlobal {
    * The call's time budget in seconds, counted from the bot answering. At 80%
    * the model is told to wrap up; at 100% the platform ends the call: a
    * transfer to the number's queue when it is open, otherwise closingTarget.
-   * Unset (or null) is DEFAULT_MAX_DURATION_SEC, 0 is off, anything else 60–3600.
+   * Unset (or null) is DEFAULT_MAX_DURATION_SEC, anything else 60–3600 and no
+   * more than the deployment's AICC_BOT_MAX_CALL_DURATION: publishing 0 or a
+   * value above it is refused, and a revision stored with one runs at it.
    */
   maxDurationSec?: number
   /**

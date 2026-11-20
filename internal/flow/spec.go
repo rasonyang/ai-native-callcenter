@@ -541,8 +541,12 @@ type Global struct {
 	// engine ends the call itself: a transfer to the DID's queue when that
 	// queue is open, otherwise ClosingTarget (or a plain goodbye when there is
 	// none). Absent, or null (the same thing to encoding/json), means
-	// DefaultMaxDurationSec, not off; 0 turns the limit off;
-	// anything else must lie between MinDurationLimitSec and MaxDurationLimitSec.
+	// DefaultMaxDurationSec, not off; anything else must lie between
+	// MinDurationLimitSec and MaxDurationLimitSec. The deployment's cap
+	// (AICC_BOT_MAX_CALL_DURATION) bounds it: publishing 0 or a value above
+	// the cap is refused (RequireMaxDurationWithin), and a revision stored
+	// with one runs at the cap (EffectiveMaxDuration). Load still accepts 0,
+	// which used to turn the limit off, so such a revision keeps loading.
 	// A pointer, because absent and 0 mean different things.
 	MaxDurationSec *int `json:"maxDurationSec,omitempty"`
 	// IsCallerFirst makes a call this platform placed to a customer listen
@@ -585,20 +589,45 @@ const MaxTemperatureExclusive = 2.0
 
 // The bounds of Global.MaxDurationSec.
 const (
-	DefaultMaxDurationSec = 900
+	// DefaultMaxDurationSec is the limit of a flow that sets none, lowered to
+	// the deployment's cap when that is shorter (#637).
+	DefaultMaxDurationSec = 300
 	// MinDurationLimitSec keeps the wrap-up window (the last 20%) at twelve
 	// seconds or more, long enough for one reply.
 	MinDurationLimitSec = 60
 	MaxDurationLimitSec = 3600
 )
 
-// MaxDuration is the call's time budget; zero means the flow turned the
-// limit off.
-func (g Global) MaxDuration() time.Duration {
+// EffectiveMaxDuration is the time budget a call on this flow runs with under
+// the deployment's cap (AICC_BOT_MAX_CALL_DURATION, #637):
+//
+//   - the field left out: DefaultMaxDurationSec, or the cap when it is shorter;
+//   - 0, or a value above the cap: the cap. Publishing either is refused
+//     (RequireMaxDurationWithin), so only a revision stored before that rule,
+//     or under a larger cap, carries one;
+//   - anything else: the flow's own value.
+//
+// There is no off: every call has a budget. A cap of zero or less is no
+// deployment cap, and the DSL's own ceiling (MaxDurationLimitSec) stands in.
+func (g Global) EffectiveMaxDuration(deploymentCap time.Duration) time.Duration {
+	deploymentCap = durationCapOrCeiling(deploymentCap)
 	if g.MaxDurationSec == nil {
-		return DefaultMaxDurationSec * time.Second
+		return min(DefaultMaxDurationSec*time.Second, deploymentCap)
 	}
-	return time.Duration(*g.MaxDurationSec) * time.Second
+	limit := time.Duration(*g.MaxDurationSec) * time.Second
+	if limit <= 0 || limit > deploymentCap {
+		return deploymentCap
+	}
+	return limit
+}
+
+// durationCapOrCeiling is the deployment's cap on a flow's time limit, or the
+// DSL's ceiling when there is none.
+func durationCapOrCeiling(deploymentCap time.Duration) time.Duration {
+	if deploymentCap <= 0 {
+		return MaxDurationLimitSec * time.Second
+	}
+	return deploymentCap
 }
 
 // Spec is one complete call flow.

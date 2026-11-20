@@ -953,19 +953,32 @@ func TestTheFlowCarriesTheBotsVoice(t *testing.T) {
 	}
 }
 
-// global.maxDurationSec: absent is the design's 900 seconds, 0 turns the limit
-// off, and the bounds themselves load.
-func TestTheTimeLimitDefaultsAndCanBeTurnedOff(t *testing.T) {
+// global.maxDurationSec: load accepts the field left out, 0 (which used to turn
+// the limit off, so a revision stored with it keeps loading) and the bounds;
+// the call runs with what the deployment's cap allows (#637). Left out is 300
+// seconds, or the cap when it is shorter; 0 or a value above the cap is the
+// cap; anything else is the flow's own.
+func TestTheTimeLimitIsBoundedByTheDeploymentsCap(t *testing.T) {
 	t.Parallel()
+	const defaultCap, widestCap = 300 * time.Second, 3600 * time.Second
 	cases := []struct {
-		name   string
-		insert string
-		want   time.Duration
+		name          string
+		insert        string
+		deploymentCap time.Duration
+		want          time.Duration
 	}{
-		{"absent", "", 900 * time.Second},
-		{"off", `"maxDurationSec": 0,`, 0},
-		{"shortest", `"maxDurationSec": 60,`, time.Minute},
-		{"longest", `"maxDurationSec": 3600,`, time.Hour},
+		{"absent at the default cap", "", defaultCap, 300 * time.Second},
+		{"0 at the default cap", `"maxDurationSec": 0,`, defaultCap, 300 * time.Second},
+		{"900 at the default cap", `"maxDurationSec": 900,`, defaultCap, 300 * time.Second},
+		{"301 at the default cap", `"maxDurationSec": 301,`, defaultCap, 300 * time.Second},
+		{"the cap itself", `"maxDurationSec": 300,`, defaultCap, 300 * time.Second},
+		{"shortest", `"maxDurationSec": 60,`, defaultCap, time.Minute},
+		{"absent under a shorter cap", "", 120 * time.Second, 120 * time.Second},
+		{"absent under the widest cap is still 300", "", widestCap, 300 * time.Second},
+		{"600 under the widest cap", `"maxDurationSec": 600,`, widestCap, 600 * time.Second},
+		{"longest under the widest cap", `"maxDurationSec": 3600,`, widestCap, time.Hour},
+		{"0 under the widest cap", `"maxDurationSec": 0,`, widestCap, time.Hour},
+		{"no deployment cap is the DSL's ceiling", `"maxDurationSec": 0,`, 0, time.Hour},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -975,10 +988,78 @@ func TestTheTimeLimitDefaultsAndCanBeTurnedOff(t *testing.T) {
 			if err != nil {
 				t.Fatalf("load: %v", err)
 			}
-			if got := spec.Global.MaxDuration(); got != tc.want {
-				t.Errorf("MaxDuration = %v, want %v", got, tc.want)
+			if got := spec.Global.EffectiveMaxDuration(tc.deploymentCap); got != tc.want {
+				t.Errorf("EffectiveMaxDuration(%v) = %v, want %v", tc.deploymentCap, got, tc.want)
 			}
 		})
+	}
+}
+
+// Publishing a flow whose maxDurationSec is 0 or above the deployment's cap is
+// refused (#637), with a ValidationError that names the setting and its value,
+// so the API answers 422 VALIDATION_FAILED. The rule judges every flow alike:
+// testFlow offers a transfer, so it can never run under a campaign. A flow
+// that leaves the field out publishes, and so does everything up to the cap.
+func TestPublishingAMaxDurationAboveTheCapIsRefused(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name          string
+		insert        string
+		deploymentCap time.Duration
+		isRefused     bool
+	}{
+		{"0 at the default cap", `"maxDurationSec": 0,`, 300 * time.Second, true},
+		{"301 at the default cap", `"maxDurationSec": 301,`, 300 * time.Second, true},
+		{"900 at the default cap", `"maxDurationSec": 900,`, 300 * time.Second, true},
+		{"300 at the default cap", `"maxDurationSec": 300,`, 300 * time.Second, false},
+		{"60 at the default cap", `"maxDurationSec": 60,`, 300 * time.Second, false},
+		{"absent at the default cap", "", 300 * time.Second, false},
+		{"0 at the widest cap", `"maxDurationSec": 0,`, time.Hour, true},
+		{"60 at the widest cap", `"maxDurationSec": 60,`, time.Hour, false},
+		{"900 at the widest cap", `"maxDurationSec": 900,`, time.Hour, false},
+		{"3600 at the widest cap", `"maxDurationSec": 3600,`, time.Hour, false},
+		{"absent at the widest cap", "", time.Hour, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			spec, err := Load([]byte(strings.Replace(testFlow, `"maxTurns": 6,`,
+				`"maxTurns": 6, `+tc.insert, 1)))
+			if err != nil {
+				t.Fatalf("load: %v", err)
+			}
+			if !CanTransfer(spec) {
+				t.Fatal("the fixture must be a flow no campaign could run")
+			}
+			err = RequireMaxDurationWithin(tc.deploymentCap)(spec)
+			if !tc.isRefused {
+				if err != nil {
+					t.Fatalf("refused: %v", err)
+				}
+				return
+			}
+			var invalid *ValidationError
+			if !errors.As(err, &invalid) || len(invalid.Problems) != 1 {
+				t.Fatalf("error = %v, want a ValidationError with one problem", err)
+			}
+			capText := fmt.Sprintf("(%ds)", int(tc.deploymentCap.Seconds()))
+			if p := invalid.Problems[0]; !strings.Contains(p, "AICC_BOT_MAX_CALL_DURATION") ||
+				!strings.Contains(p, capText) || !strings.Contains(p, "global.maxDurationSec") {
+				t.Errorf("problem = %q, want it to name the field, the setting and %s", p, capText)
+			}
+			if invalid.FlowID != "billing" {
+				t.Errorf("FlowID = %q, want the spec's own id", invalid.FlowID)
+			}
+		})
+	}
+
+	// Every value the DSL accepts publishes under the widest cap, except 0.
+	rule := RequireMaxDurationWithin(time.Hour)
+	for seconds := MinDurationLimitSec; seconds <= MaxDurationLimitSec; seconds++ {
+		spec := &Spec{ID: "x", Global: Global{MaxDurationSec: &seconds}}
+		if err := rule(spec); err != nil {
+			t.Fatalf("%d s refused under the widest cap: %v", seconds, err)
+		}
 	}
 }
 

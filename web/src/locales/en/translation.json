@@ -784,6 +784,7 @@
     "closingTarget": "Closing target",
     "maxTurnsWithoutTool": "Max tool-less replies per phase",
     "maxDurationSec": "Time limit (seconds)",
+    "maxDurationAtCap": "Deployment maximum",
     "off": "Off",
     "on": "On",
     "isCallerFirst": "Listen before opening (outbound)",

@@ -12,12 +12,14 @@ import (
 )
 
 // sessionBudget is how long one AI call may run (flow global.maxDurationSec,
-// 02 §7): a wrap-up steer once most of it is used, then the platform ends the
-// call itself. Without it a call that loops, or a caller who simply keeps
-// talking, runs until the provider cuts the session — at the provider's
-// duration and the provider's cost, and with the caller rescued mid-sentence.
+// bounded by the deployment's AICC_BOT_MAX_CALL_DURATION; 02 §7, #637): a
+// wrap-up steer once most of it is used, then the platform ends the call
+// itself. Without it a call that loops, or a caller who simply keeps talking,
+// runs until the provider cuts the session — at the provider's duration and
+// the provider's cost, and with the caller rescued mid-sentence.
 //
-// The zero value is no budget: the flow turned the limit off.
+// Every call has one: budgetFor never returns the zero value, which is no
+// budget and is left to tests that drive a call without a clock.
 type sessionBudget struct {
 	// wrapUpAfter and limitAfter are measured from now; zero is never.
 	wrapUpAfter time.Duration
@@ -31,12 +33,11 @@ type sessionBudget struct {
 // up (02 §7: at 80%).
 const wrapUpShare = 0.8
 
-// budgetFor is a flow's time budget, measured from the bot answering.
-func budgetFor(spec *flow.Spec) sessionBudget {
-	limit := spec.Global.MaxDuration()
-	if limit <= 0 {
-		return sessionBudget{}
-	}
+// budgetFor is a flow's time budget under the deployment's cap, measured from
+// the bot answering. There is no off: a flow that sets 0, or more than the
+// cap, runs at the cap (flow.Global.EffectiveMaxDuration).
+func budgetFor(spec *flow.Spec, deploymentCap time.Duration) sessionBudget {
+	limit := spec.Global.EffectiveMaxDuration(deploymentCap)
 	return sessionBudget{
 		wrapUpAfter: time.Duration(float64(limit) * wrapUpShare),
 		limitAfter:  limit,

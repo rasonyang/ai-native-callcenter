@@ -856,6 +856,23 @@ hand instead of pulling it.
   (the wait after the bot's last word before the flow gets `NO_INPUT`) is 8 s by
   default; set `AICC_BOT_NO_INPUT_TIMEOUT` (2s to 60s) to change it. The log
   line `dead air` shows it as `afterMs`.
+- **AI calls are wrapped up after five minutes.** That is the default
+  `AICC_BOT_MAX_CALL_DURATION` (300s), the most a bot serves one call, and
+  the limit of a flow that sets no `maxDurationSec`. Raise the setting (60s to
+  3600s) and set the flow's `maxDurationSec` up to it. The log line
+  `ai conversation started` shows the limit a call runs with as `maxDuration`.
+- **A call ends by itself after an hour with an agent, or a minute after
+  `AICC_BOT_MAX_CALL_DURATION` with a bot.** The switch ends every call at the deployment's maximum, even
+  when the application cannot: 60 s after `AICC_BOT_MAX_CALL_DURATION` while a
+  bot serves it, `AICC_AGENT_MAX_CALL_DURATION` (default 3600s, up to 86400s)
+  from the first queue entry, or from the agent's answer on a call the agent
+  placed. The application logs `the switch ended a call at the deployment's
+  maximum call duration` with the `callId` and the `side` (`BOT` or `AGENT`) and
+  counts it in `aicc_call_max_duration_kills_total`; the call's `hangupCause` is
+  `MAX_CALL_DURATION` when it was with a person. A `BOT` one means the
+  application's own ending did not run: read that call's log. For agent calls
+  that legitimately run longer, raise `AICC_AGENT_MAX_CALL_DURATION`; the
+  application gives the switch the new value when it next connects to it.
 - **The bot speaks, then about 5 s later the call goes to a queue.** The
   caller's audio does not reach the switch, so the bot leg receives no media
   and ends. The application logs `media went dead` (media that was flowing

@@ -8,8 +8,10 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/rasonyang/ai-native-callcenter/internal/catalog"
+	"github.com/rasonyang/ai-native-callcenter/internal/config"
 	"github.com/rasonyang/ai-native-callcenter/internal/flow"
 	"github.com/rasonyang/ai-native-callcenter/internal/switchsyntax"
 )
@@ -186,6 +188,34 @@ func TestEveryShippedFlowSpeaksItsOpeningAndItsEndings(t *testing.T) {
 		for id, node := range spec.Nodes {
 			if node.IsTerminal {
 				hasBothLanguages(t, file, id, node.Announce)
+			}
+		}
+	}
+}
+
+// Every shipped flow publishes under the default AICC_BOT_MAX_CALL_DURATION
+// and runs at 300 seconds (#637): the campaign flow sets exactly that, the
+// others leave the field out. The seed publishes through the deployment's
+// rules, so a flow above the cap would leave a default installation empty.
+func TestEveryShippedFlowPublishesUnderTheDefaultCallCap(t *testing.T) {
+	t.Parallel()
+	rule := flow.RequireMaxDurationWithin(config.DefaultBotMaxCallDuration)
+	for file, spec := range shippedFlows(t) {
+		if err := rule(spec); err != nil {
+			t.Errorf("%s: %v", file, err)
+		}
+		if got := spec.Global.EffectiveMaxDuration(config.DefaultBotMaxCallDuration); got != 300*time.Second {
+			t.Errorf("%s runs at %v, want 300s", file, got)
+		}
+		d := spec.Global.MaxDurationSec
+		switch file {
+		case "campaign_lead_followup.json":
+			if d == nil || *d != 300 {
+				t.Errorf("%s: maxDurationSec = %v, want 300", file, d)
+			}
+		default:
+			if d != nil {
+				t.Errorf("%s: maxDurationSec = %d, want it left out", file, *d)
 			}
 		}
 	}

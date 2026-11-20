@@ -341,6 +341,12 @@ type SwitchEvent struct {
 	// Hangup detail.
 	HangupCause     string
 	HangupCauseQ850 int
+	// MaxCallDurationSide is set when the switch ended this leg because the
+	// call reached the deployment's maximum duration (HangupCause is then
+	// MaxCallDurationCause): which part of the call it was, BOT or AGENT
+	// (MaxCallDurationSide*). Empty on every other hangup, a late answer's
+	// ALLOTTED_TIMEOUT included.
+	MaxCallDurationSide string
 	// BilledSec is the switch's own count of the seconds this leg was
 	// answered, read from its billsec at hangup. It is not what the ledger
 	// records — that is derived from the leg's own timestamps — but a second,
@@ -590,6 +596,10 @@ func normalizeChannel(ev *esl.Event, out SwitchEvent) (SwitchEvent, bool) {
 		// the leg first and it replaces the switch's word here.
 		if own := ev.Variable(VarHangupCause); own != "" {
 			out.HangupCause = own
+		}
+		// The switch's own maximum stamps the side beside the cause (#637).
+		if out.HangupCause == MaxCallDurationCause {
+			out.MaxCallDurationSide = maxCallDurationSide(ev.Variable(varMaxCallDurationSide))
 		}
 		if q850, ok := ev.GetInt("variable_hangup_cause_q850"); ok {
 			out.HangupCauseQ850 = int(q850)

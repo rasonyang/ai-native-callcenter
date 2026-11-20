@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -133,5 +134,60 @@ func TestThePublishRuleFollowsTheDeploymentsEngine(t *testing.T) {
 				t.Errorf("params.nodes = %v, want only the ending with no line", body.Error.Params["nodes"])
 			}
 		})
+	}
+}
+
+// A flow whose time limit is above the deployment's AICC_BOT_MAX_CALL_DURATION
+// is refused at publish as a malformed spec would be (#637): 422
+// VALIDATION_FAILED, with a problem that names the setting and its value. The
+// draft itself saves, as any loadable draft does.
+func TestAPublishAboveTheCallCapIsAValidationFailure(t *testing.T) {
+	ctx := context.Background()
+	st, err := store.Open(ctx, testdb.ScratchDSN(t, "pubcap"), 4)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(st.Close)
+	if err := st.Migrate(ctx); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	st.FlowPublishRules = []flow.Rule{flow.RequireMaxDurationWithin(300 * time.Second)}
+	s := &Server{flows: st.Flows()}
+
+	spec := strings.Replace(flowWithOneSilentEnding, `"alwaysAllowedTools"`, `"maxDurationSec": 900, "alwaysAllowedTools"`, 1)
+	created := httptest.NewRecorder()
+	s.CreateFlow(created, post(`{"slug":"billing","name":"Billing","spec":`+spec+`}`))
+	if created.Code != http.StatusCreated {
+		t.Fatalf("create: status = %d: %s", created.Code, created.Body.String())
+	}
+	var summary struct {
+		ID uuid.UUID `json:"flowId"`
+	}
+	if err := json.Unmarshal(created.Body.Bytes(), &summary); err != nil {
+		t.Fatalf("decode summary: %v", err)
+	}
+
+	rec := httptest.NewRecorder()
+	s.PublishFlow(rec, httptest.NewRequest(http.MethodPost, "/", strings.NewReader("")), summary.ID)
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("publish: status = %d, want 422: %s", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Error struct {
+			Code   string `json:"code"`
+			Params struct {
+				Problems []string `json:"problems"`
+			} `json:"params"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body.Error.Code != "VALIDATION_FAILED" {
+		t.Errorf("code = %q, want VALIDATION_FAILED", body.Error.Code)
+	}
+	if p := body.Error.Params.Problems; len(p) != 1 || !strings.Contains(p[0], "AICC_BOT_MAX_CALL_DURATION") ||
+		!strings.Contains(p[0], "(300s)") {
+		t.Errorf("params.problems = %q, want one naming AICC_BOT_MAX_CALL_DURATION and 300s", p)
 	}
 }

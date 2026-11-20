@@ -4,6 +4,7 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"log/slog"
 	"os"
@@ -17,6 +18,7 @@ import (
 
 	"github.com/rasonyang/ai-native-callcenter/internal/config"
 	"github.com/rasonyang/ai-native-callcenter/internal/events"
+	"github.com/rasonyang/ai-native-callcenter/internal/flow"
 	"github.com/rasonyang/ai-native-callcenter/internal/provider"
 	"github.com/rasonyang/ai-native-callcenter/internal/provider/doubao"
 	"github.com/rasonyang/ai-native-callcenter/internal/provider/ratemeter"
@@ -94,7 +96,8 @@ func TestAPlacedCallsLineIsReleasedOnFinishAndOnRetire(t *testing.T) {
 // What a deployment demands of a flow follows from what answers its calls.
 //
 // Every deployment that answers calls demands that a flow's tool secrets are
-// set (one rule). The three engines reached over the Realtime protocol can all
+// set and that its time limit lies inside AICC_BOT_MAX_CALL_DURATION (two
+// rules, #637). The three engines reached over the Realtime protocol can all
 // be prompted into a turn, so they demand nothing more. Doubao cannot be,
 // so every ending a call can stop at has to carry its own words — and a
 // deployment with the AI leg switched off demands nothing at all, whatever
@@ -109,8 +112,8 @@ func TestWhatAPublishMustSatisfyFollowsFromWhatAnswersTheCalls(t *testing.T) {
 		profile      provider.Profile
 		wantRules    int
 	}{
-		{"a provider that can be cued asks only for the secrets", true, provider.OpenAIProfile(), 1},
-		{"a provider that cannot needs every ending written", true, speaksOnDemand, 2},
+		{"a provider that can be cued asks only for the secrets and the time limit", true, provider.OpenAIProfile(), 2},
+		{"a provider that cannot needs every ending written", true, speaksOnDemand, 3},
 		{"with no AI leg there is nothing to satisfy", false, speaksOnDemand, 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -118,6 +121,58 @@ func TestWhatAPublishMustSatisfyFollowsFromWhatAnswersTheCalls(t *testing.T) {
 			rules := flowPublishRules(config.Config{IsBotEnabled: tc.isBotEnabled}, tc.profile)
 			if len(rules) != tc.wantRules {
 				t.Errorf("%d publish rules, want %d", len(rules), tc.wantRules)
+			}
+		})
+	}
+}
+
+// The time-limit rule a deployment publishes by is built from its own
+// AICC_BOT_MAX_CALL_DURATION (#637): at the default 300 s a flow asking for
+// 900 s, or for 0, is refused naming the setting; at 3600 s the 900 s flow
+// publishes and 0 is still refused. A flow that leaves the field out publishes
+// under either.
+func TestThePublishedTimeLimitFollowsTheDeploymentsCap(t *testing.T) {
+	t.Setenv("AICC_ENV", "dev")
+	t.Setenv("AICC_BOT_MAX_CALL_DURATION", "")
+	os.Unsetenv("AICC_BOT_MAX_CALL_DURATION")
+	defaults, err := config.Load()
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	widest := defaults
+	widest.BotMaxCallDuration = time.Hour
+
+	seconds := func(n int) *int { return &n }
+	for _, tc := range []struct {
+		name        string
+		cfg         config.Config
+		maxDuration *int
+		isRefused   bool
+	}{
+		{"900 at the default cap", defaults, seconds(900), true},
+		{"0 at the default cap", defaults, seconds(0), true},
+		{"300 at the default cap", defaults, seconds(300), false},
+		{"left out at the default cap", defaults, nil, false},
+		{"900 at the widest cap", widest, seconds(900), false},
+		{"0 at the widest cap", widest, seconds(0), true},
+		{"left out at the widest cap", widest, nil, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			spec := &flow.Spec{ID: "support", Global: flow.Global{MaxDurationSec: tc.maxDuration}}
+			var refusal error
+			for _, rule := range flowPublishRules(tc.cfg, provider.OpenAIProfile()) {
+				if err := rule(spec); err != nil {
+					refusal = err
+					break
+				}
+			}
+			var invalid *flow.ValidationError
+			switch {
+			case !tc.isRefused && refusal != nil:
+				t.Errorf("refused: %v", refusal)
+			case tc.isRefused && (!errors.As(refusal, &invalid) ||
+				!strings.Contains(refusal.Error(), "AICC_BOT_MAX_CALL_DURATION")):
+				t.Errorf("refusal = %v, want a ValidationError naming AICC_BOT_MAX_CALL_DURATION", refusal)
 			}
 		})
 	}

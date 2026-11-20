@@ -82,6 +82,8 @@ var (
 	campaignOverflow      metric.Int64Counter
 
 	switchRTPExhausted metric.Int64Counter
+
+	callMaxDurationKills metric.Int64Counter
 )
 
 // CallKind labels a live call. The two populations overlap rather than sum:
@@ -367,6 +369,13 @@ func init() {
 		metric.WithDescription("Legs the switch could not give an RTP port because its range "+
 			"is used up, by media (audio, video, text). The switch raises no event for it; "+
 			"the leg just fails to set up, so this is the only place it shows."))
+	callMaxDurationKills, _ = meter.Int64Counter("aicc_call_max_duration_kills_total",
+		metric.WithDescription("Legs the switch ended because the call reached the deployment's "+
+			"maximum duration (hangupCause MAX_CALL_DURATION), by side: BOT, the bot cap "+
+			"(AICC_BOT_MAX_CALL_DURATION) plus its grace, which means the application's own "+
+			"ending at the flow's time limit did not run; AGENT, the agent cap "+
+			"(AICC_AGENT_MAX_CALL_DURATION). Counted when the leg's hangup reaches the "+
+			"application, so a kill while it is down is not counted."))
 	transcribeFramesSent, _ = meter.Int64Counter("aicc_transcribe_frames_sent_total",
 		metric.WithDescription("Audio frames handed to a recognition session, by speaker."))
 	transcribeFramesDropped, _ = meter.Int64Counter("aicc_transcribe_frames_dropped_total",
@@ -1116,4 +1125,19 @@ func RecordSwitchRTPExhausted(media string) {
 	}
 	switchRTPExhausted.Add(context.Background(), 1,
 		metric.WithAttributes(attribute.String("media", media)))
+}
+
+// RecordMaxCallDurationKill counts one leg the switch ended at the
+// deployment's maximum call duration, by side (telephony's
+// MaxCallDurationSide*: BOT, AGENT, or UNKNOWN for a side this build does not
+// know).
+//
+// A bot-side one is a failure of the application's own ending, which runs a
+// grace earlier: every one is worth reading in the log.
+func RecordMaxCallDurationKill(side string) {
+	if callMaxDurationKills == nil {
+		return
+	}
+	callMaxDurationKills.Add(context.Background(), 1,
+		metric.WithAttributes(attribute.String("side", side)))
 }

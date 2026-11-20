@@ -58,7 +58,7 @@ A revision stored before this check existed may still carry such a key. It keeps
 | `maxTurns` | Bound on tool dispatches for the whole call, against a model that loops. |
 | `closingTarget` | The flow's own goodbye: a **terminal** phase the engine moves to by itself (5.3). |
 | `maxTurnsWithoutTool` | Bound on tool-less replies in one phase (5.3). Requires `closingTarget`. |
-| `maxDurationSec` | The call's wall clock (5.4). Absent means 900, `0` is off, otherwise 60 to 3600. |
+| `maxDurationSec` | The call's wall clock (5.4). Absent means 300, or the deployment's `AICC_BOT_MAX_CALL_DURATION` when that is shorter; otherwise 60 to 3600, and no more than `AICC_BOT_MAX_CALL_DURATION`. There is no off: publishing `0` or a value above that setting is refused. |
 | `isCallerFirst` | Optional, boolean. On a call the platform places to a customer, the bot listens before it speaks: the opening line is played once the callee's own greeting ("hello?") has ended, or a fixed wait has passed, so the bot never talks over it (5.2). Ignored on inbound and internal calls, so a flow that also serves an inbound number stays valid. The wait is a platform constant, not a setting. |
 | `toolWaitLine` | The words of the wait line said while a slow HTTP tool runs (2.4.2). Optional, bilingual, said as written, `{slots.x}` allowed; must be a statement. A language left empty keeps that language's default. |
 | `alwaysAllowedTools` | Tools allowed in every phase, so a request for a person is never blocked by the phase. |
@@ -635,7 +635,9 @@ These are backstops for a model that ignores the closing instruction, not the me
 
 ### 5.4 The wall clock
 
-`maxDurationSec` counts from the moment the bot answers. At 80% a wrap-up line is added to the standing instructions; at 100% the call goes to the number's queue with `reason=SESSION_LIMIT` if that queue is open, otherwise to `closingTarget`. Absent means 900 seconds, not unlimited. Long-running flows (4.3) should keep this in mind. With no open queue and no `closingTarget`, the call gets a plain goodbye and a hangup.
+`maxDurationSec` counts from the moment the bot answers. At 80% a wrap-up line is added to the standing instructions; at 100% the call goes to the number's queue with `reason=SESSION_LIMIT` if that queue is open, otherwise to `closingTarget`. Absent means 300 seconds, not unlimited. Long-running flows (4.3) should keep this in mind. With no open queue and no `closingTarget`, the call gets a plain goodbye and a hangup.
+
+Every call is bounded by the deployment's `AICC_BOT_MAX_CALL_DURATION` (default 300 seconds, at most 3600), the maximum for the part of a call a bot serves. A flow may ask for less, never for more, and cannot turn the limit off: publishing a flow whose `maxDurationSec` is `0` or above that setting is refused with `VALIDATION_FAILED`, and the problem names the setting and its value. A flow that leaves the field out runs at 300 seconds, or at the setting when it is shorter. A revision published before this rule with `0` or a larger value keeps answering and runs at the setting. Behind it, the switch ends the bot's leg 60 seconds after the setting if the platform has not ended the call by then.
 
 ### 5.5 Keep the standing prompt short
 

@@ -29,6 +29,55 @@
   <context name="aicc">
 
     <!--
+      The switch's own end to a call that outlasted the deployment's maximum
+      duration (#637). Nothing dials these: a call is sent here by a task the
+      switch scheduled on the call's own channel, so the call still ends when
+      the application is dead or stuck.
+
+        aicc_max_call_duration_bot     the part of a call a bot serves. Scheduled
+                                       when the customer answers an AI call:
+                                       on the originate of an AI outbound leg,
+                                       and by aicc_inbound.lua for every DID.
+                                       It fires AICC_BOT_MAX_CALL_DURATION plus
+                                       a 60 s grace after the answer, so the
+                                       application's own ending runs first.
+        aicc_max_call_duration_agent   the part an agent serves. Scheduled by
+                                       aicc_queue.lua at the call's first queue
+                                       entry (later entries keep that deadline),
+                                       and on the agent leg of a click-to-dial
+                                       at the agent's answer, at
+                                       AICC_AGENT_MAX_CALL_DURATION.
+
+      The task is a transfer here, not sched_hangup, because the mark has to be
+      stamped when the kill happens and only then: sched_hangup reads a cause
+      it does not know as NORMAL_CLEARING without a word, its default is the
+      ALLOTTED_TIMEOUT this product already uses for a late answer, and nothing
+      in a hangup event says the scheduler did it. aicc_hangup_cause replaces
+      the switch's cause in the application (OVERFLOW rides the same variable),
+      and the side says which cap it was. A partner leg in a bridge with this
+      one is hung up when this leg leaves the bridge, so the whole call ends.
+
+      First in the context on purpose: nothing above can match the name first,
+      and no rule a deployment adds through the include below is reached
+      before it.
+    -->
+    <extension name="aicc_max_call_duration_bot">
+      <condition field="destination_number" expression="^aicc_max_call_duration_bot$">
+        <action application="set" data="aicc_hangup_cause=MAX_CALL_DURATION"/>
+        <action application="set" data="aicc_max_call_duration_side=BOT"/>
+        <action application="hangup" data="NORMAL_CLEARING"/>
+      </condition>
+    </extension>
+
+    <extension name="aicc_max_call_duration_agent">
+      <condition field="destination_number" expression="^aicc_max_call_duration_agent$">
+        <action application="set" data="aicc_hangup_cause=MAX_CALL_DURATION"/>
+        <action application="set" data="aicc_max_call_duration_side=AGENT"/>
+        <action application="hangup" data="NORMAL_CLEARING"/>
+      </condition>
+    </extension>
+
+    <!--
       Queue extensions. The bot transfers a caller here when it calls
       transfer_to_agent, and aicc_inbound falls back here when the bot cannot
       take a call at all. Which queue serves which extension is a database

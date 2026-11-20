@@ -1113,7 +1113,9 @@ function Persona({ spec, lang }: { spec: FlowSpec; lang: SpecLang }) {
           </Fact>
           <Fact label={t('bots.maxDurationSec')}>
             <span className="tabular">
-              {(spec.global?.maxDurationSec ?? DEFAULT_MAX_DURATION_SEC) || t('bots.off')}
+              {spec.global?.maxDurationSec === 0
+                ? t('bots.maxDurationAtCap')
+                : (spec.global?.maxDurationSec ?? DEFAULT_MAX_DURATION_SEC)}
             </span>
           </Fact>
           <Fact label={t('bots.isCallerFirst')}>

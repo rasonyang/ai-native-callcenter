@@ -386,6 +386,11 @@ func (c *Coordinator) Handle(ctx context.Context, ev SwitchEvent) {
 	var ended *endedLeg
 	if ev.Kind == KindChannelHangup {
 		ended = c.agentLegEnded(ev.ChannelID)
+		// Before the dispatch for the same reason: the last hangup retires
+		// the call, and the log line names it.
+		if ev.MaxCallDurationSide != "" {
+			c.reportMaxCallDuration(ctx, ev)
+		}
 	}
 
 	// Everything, including the events above, still drives the state machines
@@ -410,6 +415,32 @@ func (c *Coordinator) Handle(ctx context.Context, ev SwitchEvent) {
 			c.agents.BeginAfterCallWork(ctx, ended.agentID, ended.callID, ended.partyID)
 		}
 	}
+}
+
+// reportMaxCallDuration answers a leg the switch ended because the call
+// reached the deployment's maximum duration (#637): one count by side and one
+// WARN naming the call, once per leg, since each leg hangs up once. Only the
+// stamped leg carries the mark; the leg bridged to it ends with the switch's
+// own cause and counts nothing.
+//
+// A bot-side kill means the application's own ending, a grace earlier, did
+// not run: a stuck call, or a process that was not there to run it. An
+// agent-side one is the agent cap doing its job.
+func (c *Coordinator) reportMaxCallDuration(ctx context.Context, ev SwitchEvent) {
+	obs.RecordMaxCallDurationKill(ev.MaxCallDurationSide)
+	callID, ok := c.registry.CallForChannel(ev.ChannelID)
+	if !ok {
+		callID = ev.PlacedCallID
+	}
+	attrs := []any{"channelId", ev.ChannelID, "side", ev.MaxCallDurationSide}
+	if callID != uuid.Nil {
+		attrs = append([]any{"callId", callID}, attrs...)
+	}
+	msg := "the switch ended a call at the deployment's maximum call duration"
+	if ev.MaxCallDurationSide == MaxCallDurationSideBot {
+		msg += "; the application's own ending at the flow's time limit did not run"
+	}
+	slog.WarnContext(ctx, msg, attrs...)
 }
 
 // endedLeg is what an agent's hangup means for that agent: which call it was,

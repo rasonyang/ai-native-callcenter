@@ -1086,6 +1086,29 @@ What is guaranteed, and what is not:
 This replaces #89's acceptance line "no contact is dialled twice and no attempt is lost", which
 cannot be met as written.
 
+**Amended 2026-11-20 — the switch ends what the application cannot (#637).** Adoption needs an
+application to run it. Two limits now ride the customer leg itself, set on the originate, so the
+switch enforces them with the application dead, restarting or stuck:
+
+- `park_timeout=30:RECOVERY_ON_TIMER_EXPIRE`. Counted from entering park, which is the answer: a
+  customer answered and never bridged to the bot is hung up after 30 s, the "answered but still
+  parked" row above without anyone to run it. The bridge takes the leg out of park, the switch reads
+  the variable once, and no wait of this application's (the overflow hold, at most 10 s) comes near
+  it. The cause is the one recovery's reap uses, so an attempt whose CDR carries it is `BOT_FAILED`
+  (§7.2, an answered leg). One that ends while no application is up leaves no CDR and finishes
+  `UNKNOWN` at the next adoption.
+- `execute_on_answer_aicc_max_call_duration=sched_transfer +<N> aicc_max_call_duration_bot XML aicc`,
+  `N` = `AICC_BOT_MAX_CALL_DURATION` plus a 60 s grace, in whole seconds. At the answer the switch
+  schedules a transfer of the leg to an extension of the `aicc` context that stamps
+  `aicc_hangup_cause=MAX_CALL_DURATION` and `aicc_max_call_duration_side=BOT` and hangs up; the bot
+  leg bridged to it ends with it. The flow's own time limit, inside the same cap, ends the call a
+  grace earlier, so this fires only when the application's ending did not run. A handover to a
+  queue replaces it with the agent cap (`aicc_queue.lua`). The application counts each such leg
+  (`aicc_call_max_duration_kills_total{side}`) and logs it with the `callId`. A campaign call never
+  reaches an agent and its row is the bot's ledger, which does not read the switch's cause, so the
+  attempt keeps whatever its row says (or `UNKNOWN` with no row); the outcome for a switch-side kill
+  is deliberately left for a later change.
+
 ---
 
 ## 9. Numbers and import
