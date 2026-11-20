@@ -1,9 +1,14 @@
 import { describe } from 'vitest'
 
-import type { Campaign } from '@/lib/campaigns'
+import {
+  CAMPAIGN_STATUSES, type Campaign, type CampaignActivity, type CampaignPauseReason,
+} from '@/lib/campaigns'
+import i18n from '@/lib/i18n'
 import { renderApp, waitForRows } from '@/test/app'
-import { asciiRun, chineseRun, digits, longUrl, maxLengthOf, mixedNote } from '@/test/hostile'
-import { expectLayout, layoutTest, restoreLanguage } from '@/test/layout'
+import { asciiRun, chineseRun, digits, longUrl, maxLengthOf, mixedNote, words } from '@/test/hostile'
+import {
+  expectLayout, layoutTest, LayoutViolation, restoreLanguage, type LayoutContext,
+} from '@/test/layout'
 
 /**
  * The campaign list. A campaign's name is bounded by the contract (200
@@ -48,6 +53,82 @@ function statusRows(overrides: Partial<Campaign> = {}): Campaign[] {
     campaign(4, { status: 'DRAFT', contacts: { total: 0, active: 0, done: 0, exhausted: 0, invalidNumber: 0, dnc: 0 }, ...overrides }),
     campaign(5, { status: 'CANCELLED', ...overrides }),
   ]
+}
+
+/** Each activity of a running campaign, and whether it reads with a time. */
+const ACTIVITIES: Record<CampaignActivity, boolean> = {
+  DIALING: false,
+  WAITING_WINDOW: true,
+  WAITING_RETRY: true,
+  WAITING_FREQUENCY: true,
+  WAITING_DAILY_CAP: true,
+  AT_CAPACITY: false,
+}
+
+const PAUSE_REASONS: Record<CampaignPauseReason, true> = {
+  MANUAL: true,
+  TRUNK_FAILURE: true,
+  PROVIDER_FAILURE: true,
+  OUTBOUND_NOT_CONFIGURED: true,
+}
+
+/**
+ * A row for every sentence the State column can read: each activity (a waiting
+ * one with its time, in a zone other than the browser's, where the time also
+ * carries the zone's name) and each pause reason.
+ */
+function everyStateRows(overrides: Partial<Campaign> = {}): Campaign[] {
+  const activities = Object.entries(ACTIVITIES) as Array<[CampaignActivity, boolean]>
+  const reasons = Object.keys(PAUSE_REASONS) as CampaignPauseReason[]
+  return [
+    ...activities.map(([activity, hasTime], i) => campaign(i + 1, {
+      status: 'RUNNING',
+      activity,
+      nextDialAt: hasTime ? '2026-10-30T01:00:00Z' : undefined,
+      timeZone: 'America/Los_Angeles',
+      inFlight: 5,
+      ...overrides,
+    })),
+    ...reasons.map((pauseReason, i) => campaign(activities.length + i + 1, {
+      status: 'PAUSED', pauseReason, ...overrides,
+    })),
+  ]
+}
+
+const MILLIONS = {
+  total: 99999999, active: 88888888, done: 77777777, exhausted: 66666666, invalidNumber: 55555555, dnc: 44444444,
+}
+
+/**
+ * The status word ("Running", 「运行中」) is one line high in every row: the
+ * activity or pause text after it is what wraps (#648). A Chinese word has a
+ * break between every two characters, so a squeezed one stacks.
+ */
+function expectStatusWordOnOneLine(ctx: LayoutContext) {
+  const statusWords = new Set(CAMPAIGN_STATUSES.map((s) => i18n.t(`campaign.statuses.${s}`)))
+  const problems: string[] = []
+  const rows = [...document.querySelectorAll('tbody tr')]
+  if (rows.length === 0) problems.push('  no table rows to measure')
+  for (const [r, tr] of rows.entries()) {
+    const cell = tr.querySelectorAll('td')[1]
+    const word = [...cell.querySelectorAll('span')]
+      .find((span) => span.childElementCount === 0 && statusWords.has(span.textContent ?? ''))
+    if (!word) {
+      problems.push(`  row ${r + 1}: no status word in "${cell.textContent}"`)
+      continue
+    }
+    const height = word.getBoundingClientRect().height
+    const line = Number.parseFloat(getComputedStyle(word).lineHeight)
+    if (height > line + 1) {
+      problems.push(`  row ${r + 1}: "${word.textContent}" is ${height}px high, a line is ${line}px `
+        + `(width ${word.getBoundingClientRect().width}px), in "${cell.textContent}"`)
+    }
+  }
+  if (problems.length > 0) {
+    throw new LayoutViolation(
+      `${ctx.screen} @ ${ctx.viewport.width}x${ctx.viewport.height} [${ctx.lang}]: the status word wraps:\n${problems.join('\n')}`,
+    )
+  }
 }
 
 function render(rows: Campaign[], total = rows.length) {
@@ -107,13 +188,29 @@ describe('campaign list with hostile DID numbers and counters', () => {
 
   // Counters in the millions: the "37 active · 120 done ..." sentence grows.
   layoutTest('campaigns (counters in the millions)', async (ctx) => {
-    render(statusRows({
-      inFlight: 999999,
-      contacts: {
-        total: 99999999, active: 88888888, done: 77777777, exhausted: 66666666, invalidNumber: 55555555, dnc: 44444444,
-      },
-    }))
+    render(statusRows({ inFlight: 999999, contacts: MILLIONS }))
     await waitForRows(5)
     await expectLayout(ctx)
   })
+})
+
+// The status word stays one line however much the activity or pause text after
+// it wraps (#648): every activity and pause reason, beside long names and
+// counters in the millions, which leave the State column least room.
+describe('campaign list in every state', () => {
+  const names: Array<[string, string]> = [
+    ['ordinary names', 'October renewal reminders'],
+    ['200-character names, English', words(200)],
+    ['200-character names, no spaces', maxLengthOf('CampaignWrite', 'name')],
+    ['200-character names, Chinese', chineseRun(200)],
+  ]
+  for (const [kind, name] of names) {
+    layoutTest(`campaigns (every activity and pause reason, ${kind})`, async (ctx) => {
+      const rows = everyStateRows({ name, inFlight: 999999, contacts: MILLIONS })
+      render(rows)
+      await waitForRows(rows.length)
+      await expectLayout(ctx)
+      expectStatusWordOnOneLine(ctx)
+    })
+  }
 })

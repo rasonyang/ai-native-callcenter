@@ -55,6 +55,12 @@ carries the one-line installer's files.
   concurrency or rate limit and continues by itself, in English and Chinese.
   Text only: the `AT_CAPACITY` activity is unchanged (#645).
 
+### Fixed
+
+- In the campaign list's State column, the status word (「运行中」, 「已暂停」)
+  no longer breaks one character per line when the text after it wraps: the
+  word stays on one line, level with that text's first line (#648).
+
 ## v0.9.0 - 2026-11-20
 
 ### Upgrade notes

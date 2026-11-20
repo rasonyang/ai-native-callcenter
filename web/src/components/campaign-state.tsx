@@ -16,7 +16,8 @@ export const STATUS_COLOR: Record<CampaignStatus, string> = {
 /**
  * Status dot and the sentence the dialer's state reads as: "Running · waiting
  * for calling hours (tomorrow 09:00)". A pause by a breaker is red, because it
- * will not end until a person resumes it.
+ * will not end until a person resumes it. Only the text after the status word
+ * wraps; the word stays on one line, level with the text's first line (#648).
  */
 export function CampaignState({
   campaign,
@@ -26,12 +27,12 @@ export function CampaignState({
   const { t, i18n } = useTranslation()
   const words = describeState(campaign, t, { locale: i18n.language })
   return (
-    <span className="inline-flex items-center gap-1.5 text-sm">
+    <span className="inline-flex items-baseline gap-1.5 text-sm">
       <span
         className="inline-block size-2 shrink-0 rounded-full"
         style={{ backgroundColor: words.isBreakerPause ? 'var(--state-breach)' : STATUS_COLOR[campaign.status] }}
       />
-      <span className="font-medium">{words.status}</span>
+      <span className="shrink-0 whitespace-nowrap font-medium">{words.status}</span>
       {(words.activity ?? words.pause) && (
         <span className="text-xs text-muted-foreground">· {words.activity ?? words.pause}</span>
       )}
