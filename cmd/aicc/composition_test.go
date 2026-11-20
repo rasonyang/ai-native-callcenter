@@ -609,7 +609,7 @@ func TestEveryBotDependencyIsPlumbed(t *testing.T) {
 		true,
 		"86",
 		phonenum.FormNational,
-		ratemeter.New(nil),
+		ratemeter.New(nil, ratemeter.Config{}),
 	)
 
 	// The greeting gate is exempt only when unset, which is a real setting

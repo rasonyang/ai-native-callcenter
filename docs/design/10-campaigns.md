@@ -762,6 +762,52 @@ where n = pendingAnswered + Σ_campaigns (p̂_c × ringing_c) + 1
   refusals near zero (a run of answers above `p̂_c` can still put one start over) while the rate is
   used.
 
+**As built (#644): a limit is a count over the vendor's period.** A vendor can state its quota over a
+period shorter than a minute (3 session starts per 1 s and 60,000 tokens per 12 s, read on one
+deployment after a quota raise). Each limit is now a count and a period (`AICC_PROVIDER_SESSION_LIMIT`
+/ `_PERIOD`, `AICC_PROVIDER_TOKEN_LIMIT` / `_PERIOD`; the `_RPM` settings are the same count over
+60 s), and the rule above becomes:
+
+```
+and now ≥ lastQuotaRefusal + backoff
+and starts_W + n ≤ SessionLimit × W / SessionPeriod            -- when SessionLimit > 0
+and tokens_T + n × tokens_T / max(1, botSessionsInUse) ≤ TokenLimit   -- when TokenLimit > 0
+where n = pendingAnswered + startsWaiting + Σ_campaigns (p̂_c × ringing_c) + 1
+      W = max(SessionPeriod, 10 s), T = TokenPeriod
+      backoff = the longer period of the limits in force; 60 s when neither is
+```
+
+- The meter counts starts over `W` and tokens over `T`, and the drop times that wake the dialer
+  follow them. A per-minute limit (the profiles' defaults, the `_RPM` settings) gives `W = T = 60 s`
+  and a 60 s backoff: the rule of #604 unchanged.
+- `W` is not shorter than 10 s (`ratemeter.MinAdmissionWindow`) because `n` counts every ringing
+  leg's expected answer as a start to come, and those answers land over the following seconds, not
+  at once. Over a 1 s window the rule would have to hold all of them inside one second and admits
+  almost nothing (5 starts a minute at 3 per 1 s in the simulation); over a minute it places waves of
+  answers one second cannot take (30 % of starts refused). Tokens keep their own period: they are
+  spent all along by the sessions in progress.
+- **The start gate.** Admission paces the calls it places, but their sessions open when callees answer,
+  and callees answer together. So a campaign call's session start waits, FIFO among campaign calls,
+  for room in the last `SessionPeriod` (fewer than `SessionLimit` starts in it), at most 2 s
+  (`ratemeter.StartWaitBound`); past the bound it is made as before and the provider decides. A
+  start is counted when it is made, in order; a call that ends while it waits leaves the queue
+  without counting one. Inbound and internal calls, and AI calls placed other than by a campaign,
+  are counted and never wait.
+  `startsWaiting` above is the starts in that queue. The wait sits in the orchestrator just before
+  the session is made (`aicall.Orchestrator.startSession`), on the call's own goroutine; the queue
+  is the meter's and holds no lock while it sleeps. `aicc_provider_session_start_wait_ms{outcome}`
+  records each campaign start's wait (`ROOM`, `BOUND`, `CALL_ENDED`).
+- What the callee hears during the wait is the silence of an answered leg whose session is not up,
+  as during the provider's setup that follows. The clocks that start at the answer run through it:
+  the call's time limit (#637) and the switch's, and the opening wait of a call that listens first
+  (#594), whose listener does not run yet, so a greeting said during the wait is not heard as one.
+  The dead-air timer starts after the bot has spoken.
+- In the simulation at 3 per 1 s and 60,000 per 12 s (bot capacity enough that the session window
+  binds), admission alone leaves a share of starts refused and the start gate keeps refusals within
+  the 2 % bound of the per-minute case. The rate admission reaches there is about a third of the
+  quota: `n` counts each ringing leg at `p̂_c` against the 10 s window although a leg nobody answers
+  rings for its whole timeout.
+
 ### 6.4 Take a slot on answer; wait briefly if there is none
 
 The slot is taken **after answer and before the bridge**, not discovered full when the INVITE

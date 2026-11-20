@@ -362,10 +362,14 @@ func run() error {
 		return err
 	}
 	// The provider's quota as this process spends it: session starts and
-	// tokens over the last minute, and its latest quota refusal. Every bot
-	// session feeds it, inbound and outbound; campaign admission reads it
-	// (#604).
-	quotaMeter := ratemeter.New(time.Now)
+	// tokens, each over its limit's period, and its latest quota refusal.
+	// Every bot session feeds it, inbound and outbound; campaign admission
+	// reads it (#604), and a campaign call's session start waits on it for
+	// room in the session window (#644).
+	quotaMeter := ratemeter.New(time.Now, ratemeter.Config{
+		SessionPeriod: profile.SessionPeriod, SessionLimit: profile.SessionLimit,
+		TokenPeriod: profile.TokenPeriod,
+	})
 
 	// Outbound: click-to-dial and the AI outbound leg share one originator.
 	outboundSvc := outbound.New(outbound.Config{
@@ -416,10 +420,12 @@ func run() error {
 			InboundReserve:          cfg.CampaignInboundReserve(),
 			OverflowTightenRate:     cfg.OverflowTightenRate,
 			OverflowStopRate:        cfg.OverflowStopRate,
-			// The provider's quota per minute, as the profile and the
-			// deployment's settings resolved it (#604).
-			ProviderSessionRPM: profile.SessionRPM,
-			ProviderTokenRPM:   profile.TokenRPM,
+			// The provider's quota, each limit over its period, as the
+			// profile and the deployment's settings resolved it (#604, #644).
+			ProviderSessionLimit:  profile.SessionLimit,
+			ProviderSessionPeriod: profile.SessionPeriod,
+			ProviderTokenLimit:    profile.TokenLimit,
+			ProviderTokenPeriod:   profile.TokenPeriod,
 		}, dialer.Deps{
 			Store:  st.Dialer(),
 			Placer: outboundSvc,
@@ -521,7 +527,8 @@ func run() error {
 			// What campaign admission paces itself by, and where each number
 			// came from (#604).
 			"quota", providerQuotaSummary(cfg, profile))
-		obs.SetProviderQuota(profile.Name, profile.SessionRPM, profile.TokenRPM)
+		obs.SetProviderQuota(profile.Name, perMinute(profile.SessionLimit, profile.SessionPeriod),
+			perMinute(profile.TokenLimit, profile.TokenPeriod))
 		reportMissingProviderKey(slog.Default(), profile, os.Getenv)
 
 		backend, err := toolBackend(cfg)

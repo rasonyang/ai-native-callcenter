@@ -43,6 +43,7 @@ var (
 	providerTokens     metric.Int64Counter
 	providerRateLimit  metric.Int64Gauge
 	providerQuota      metric.Int64Gauge
+	providerStartWait  metric.Int64Histogram
 	providerRateLeft   metric.Int64Gauge
 	providerUnanswered metric.Int64Counter
 	botInterruptions   metric.Int64Counter
@@ -176,12 +177,24 @@ func init() {
 			"rate() of this against the profile's token limit is how close a busy minute "+
 			"runs to the cap (aicc_provider_quota_per_minute{kind=\"TOKENS\"})."))
 	providerQuota, _ = meter.Int64Gauge("aicc_provider_quota_per_minute",
-		metric.WithDescription("The provider's quota per minute this process paces campaign "+
-			"admission by, by provider and kind: SESSIONS (session starts) and TOKENS (input "+
-			"and output together). The profile's documented default for its own model, or "+
-			"AICC_PROVIDER_SESSION_RPM / AICC_PROVIDER_TOKEN_RPM; 0 is unknown or off. "+
-			"Compare rate(aicc_provider_sessions_started_total[1m]) * 60 and "+
+		metric.WithDescription("The provider's quota this process paces campaign admission "+
+			"by, as a rate per minute, by provider and kind: SESSIONS (session starts) and "+
+			"TOKENS (input and output together). The profile's documented default for its "+
+			"own model, or the deployment's AICC_PROVIDER_*_LIMIT over AICC_PROVIDER_*_PERIOD "+
+			"(or AICC_PROVIDER_*_RPM), scaled to a minute; a limit stated over a shorter "+
+			"period also caps every such period. 0 is unknown or off. Compare "+
+			"rate(aicc_provider_sessions_started_total[1m]) * 60 and "+
 			"rate(aicc_provider_tokens_total[1m]) * 60 with it."))
+	providerStartWait, _ = meter.Int64Histogram("aicc_provider_session_start_wait_ms",
+		metric.WithDescription("Per campaign call: how long its provider session start waited "+
+			"for room in the provider's session window, in milliseconds, by provider and "+
+			"outcome: ROOM (the window had room, at once or once its oldest start left), "+
+			"BOUND (the wait reached its bound and the start was made with the window "+
+			"full; the provider may refuse it) or CALL_ENDED (the call ended while it "+
+			"waited; no start was made). The callee has answered and hears silence "+
+			"meanwhile. Inbound and internal calls never wait and are not recorded."),
+		metric.WithUnit("ms"),
+		metric.WithExplicitBucketBoundaries(0, 50, 100, 250, 500, 1000, 1500, 2000, 3000))
 	providerRateLimit, _ = meter.Int64Gauge("aicc_provider_ratelimit_limit",
 		metric.WithDescription("The limit the provider's last upgrade response stated in a "+
 			"rate-limit header, by provider and kind (REQUESTS, TOKENS, UNSPECIFIED for "+
@@ -745,6 +758,23 @@ const (
 	ProviderQuotaSessions = "SESSIONS"
 	ProviderQuotaTokens   = "TOKENS"
 )
+
+// The outcomes of aicc_provider_session_start_wait_ms.
+const (
+	SessionStartWaitRoom      = "ROOM"
+	SessionStartWaitBound     = "BOUND"
+	SessionStartWaitCallEnded = "CALL_ENDED"
+)
+
+// RecordProviderSessionStartWait publishes how long one campaign call's
+// session start waited for room in the provider's session window (#644).
+func RecordProviderSessionStartWait(provider, outcome string, ms int64) {
+	if providerStartWait == nil {
+		return
+	}
+	providerStartWait.Record(context.Background(), ms, metric.WithAttributes(
+		attribute.String("provider", provider), attribute.String("outcome", outcome)))
+}
 
 // SetProviderQuota publishes the per-minute quota campaign admission paces
 // itself by, once at startup.

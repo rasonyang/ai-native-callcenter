@@ -3,6 +3,7 @@
 package dialer
 
 import (
+	"cmp"
 	"context"
 	"testing"
 	"time"
@@ -12,7 +13,15 @@ import (
 	"github.com/rasonyang/ai-native-callcenter/internal/provider/ratemeter"
 )
 
-// The provider rule's arithmetic, one condition at a time (#604).
+// perMinute is the quota of the RPM settings, and of the profiles' defaults:
+// each limit over 60 s.
+func perMinute(sessions, tokens int) providerQuota {
+	return providerQuota{sessionLimit: sessions, sessionPeriod: time.Minute, tokenLimit: tokens, tokenPeriod: time.Minute}
+}
+
+// The provider rule's arithmetic, one condition at a time (#604), with limits
+// per minute: what the RPM settings and the profiles' defaults give, the same
+// as in v0.9.0.
 func TestTheProviderRuleArithmetic(t *testing.T) {
 	t0 := time.Date(2026, 11, 19, 10, 0, 0, 0, time.UTC)
 	at := func(d time.Duration) time.Time { return t0.Add(d) }
@@ -53,7 +62,7 @@ func TestTheProviderRuleArithmetic(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, until := providerHold(tt.r, tt.sessionRPM, tt.tokenRPM, tt.pending, tt.expected, tt.active)
+			got, until := providerHold(tt.r, perMinute(tt.sessionRPM, tt.tokenRPM), tt.pending, tt.expected, tt.active)
 			if got != tt.want || !until.Equal(tt.wantUntil) {
 				t.Errorf("providerHold = %q until %v, want %q until %v", got, until, tt.want, tt.wantUntil)
 			}
@@ -62,20 +71,102 @@ func TestTheProviderRuleArithmetic(t *testing.T) {
 }
 
 // No admission for a minute after the latest quota refusal: held at 59.999 s,
-// admitted at 60 s.
+// admitted at 60 s. A minute is the backoff when no limit is in force, and
+// when the limits are per minute (the RPM settings, the profiles' defaults).
 func TestTheQuotaBackoffEndsAtExactlyOneMinute(t *testing.T) {
 	refused := time.Date(2026, 11, 19, 10, 0, 0, 0, time.UTC)
+	for _, q := range []providerQuota{{}, perMinute(60, 100000), perMinute(60, 0), perMinute(0, 100000)} {
+		for _, tt := range []struct {
+			after time.Duration
+			want  string
+		}{
+			{0, obs.DialerBlockedProviderBackoff},
+			{time.Minute - time.Millisecond, obs.DialerBlockedProviderBackoff},
+			{time.Minute, ""},
+			{2 * time.Minute, ""},
+		} {
+			r := ratemeter.Reading{At: refused.Add(tt.after), LastQuotaRefusal: refused}
+			if got, _ := providerHold(r, q, 0, 0, 0); got != tt.want {
+				t.Errorf("%+v, %v after the refusal: %q, want %q", q, tt.after, got, tt.want)
+			}
+		}
+	}
+}
+
+// The quota of #644, a count over a period the vendor chooses: 3 session
+// starts per 1 s and 60,000 tokens per 12 s.
+func TestTheProviderRuleOverTheVendorsPeriods(t *testing.T) {
+	t0 := time.Date(2026, 11, 20, 10, 0, 0, 0, time.UTC)
+	at := func(d time.Duration) time.Time { return t0.Add(d) }
+	q := providerQuota{sessionLimit: 3, sessionPeriod: time.Second, tokenLimit: 60000, tokenPeriod: 12 * time.Second}
+	tests := []struct {
+		name              string
+		q                 providerQuota
+		r                 ratemeter.Reading
+		pending, expected float64
+		active            int
+		want              string
+		wantUntil         time.Time
+	}{
+		// Admission judges starts over ten seconds, 3 per 1 s being 30 per
+		// 10 s (ratemeter.AdmissionWindow); the start gate keeps each second.
+		{name: "the 30th start of the ten seconds fits", q: q,
+			r: ratemeter.Reading{At: t0, Starts: 20, StartsDropAt: at(time.Second)}, pending: 2, expected: 7},
+		{name: "the 31st does not, until the oldest start leaves the ten seconds", q: q,
+			r: ratemeter.Reading{At: t0, Starts: 20, StartsDropAt: at(time.Second)}, pending: 2, expected: 7.5,
+			want: obs.DialerBlockedProviderSessions, wantUntil: at(time.Second)},
+		{name: "a start waiting in the gate is one about to be made", q: q,
+			r: ratemeter.Reading{At: t0, Starts: 20, StartsWaiting: 1, StartsDropAt: at(time.Second)}, pending: 2, expected: 7,
+			want: obs.DialerBlockedProviderSessions, wantUntil: at(time.Second)},
+		{name: "three starts in the last second alone do not hold admission", q: q,
+			r: ratemeter.Reading{At: t0, Starts: 3, StartsDropAt: at(9 * time.Second)}, expected: 2},
+		// Tokens are judged over their own 12 s: 50,000 + 4 x 50,000/40 = 55,000.
+		{name: "the token share over 12 s fits", q: q,
+			r: ratemeter.Reading{At: t0, Tokens: 50000, TokensDropAt: at(3 * time.Second)}, expected: 3, active: 40},
+		// 50,000 + 9 x 50,000/40 = 61,250.
+		{name: "a larger share over 12 s does not, until the oldest tokens leave it", q: q,
+			r: ratemeter.Reading{At: t0, Tokens: 50000, TokensDropAt: at(3 * time.Second)}, expected: 8, active: 40,
+			want: obs.DialerBlockedProviderTokens, wantUntil: at(3 * time.Second)},
+		// The backoff is the longer of the two periods, 12 s.
+		{name: "a refusal holds for the longer period", q: q,
+			r:    ratemeter.Reading{At: t0, LastQuotaRefusal: at(-time.Second)},
+			want: obs.DialerBlockedProviderBackoff, wantUntil: at(11 * time.Second)},
+		{name: "with the token limit off, for the session period", q: providerQuota{sessionLimit: 3, sessionPeriod: time.Second, tokenPeriod: 12 * time.Second},
+			r:    ratemeter.Reading{At: t0, LastQuotaRefusal: at(-500 * time.Millisecond)},
+			want: obs.DialerBlockedProviderBackoff, wantUntil: at(500 * time.Millisecond)},
+		{name: "a period longer than a minute is its own window", q: providerQuota{sessionLimit: 1000, sessionPeriod: time.Hour},
+			r: ratemeter.Reading{At: t0, Starts: 990, StartsDropAt: at(time.Minute)}, expected: 9.5,
+			want: obs.DialerBlockedProviderSessions, wantUntil: at(time.Minute)},
+		{name: "and its backoff", q: providerQuota{sessionLimit: 1000, sessionPeriod: time.Hour},
+			r:    ratemeter.Reading{At: t0, LastQuotaRefusal: at(-time.Minute)},
+			want: obs.DialerBlockedProviderBackoff, wantUntil: at(59 * time.Minute)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, until := providerHold(tt.r, tt.q, tt.pending, tt.expected, tt.active)
+			if got != tt.want || !until.Equal(tt.wantUntil) {
+				t.Errorf("providerHold = %q until %v, want %q until %v", got, until, tt.want, tt.wantUntil)
+			}
+		})
+	}
+}
+
+// After a refusal at 3 per 1 s and 60,000 per 12 s, admission resumes once the
+// longer period has passed: held at 11.999 s, admitted at 12 s.
+func TestTheQuotaBackoffEndsAfterTheLongerPeriod(t *testing.T) {
+	refused := time.Date(2026, 11, 20, 10, 0, 0, 0, time.UTC)
+	q := providerQuota{sessionLimit: 3, sessionPeriod: time.Second, tokenLimit: 60000, tokenPeriod: 12 * time.Second}
 	for _, tt := range []struct {
 		after time.Duration
 		want  string
 	}{
 		{0, obs.DialerBlockedProviderBackoff},
-		{time.Minute - time.Millisecond, obs.DialerBlockedProviderBackoff},
-		{time.Minute, ""},
-		{2 * time.Minute, ""},
+		{time.Second, obs.DialerBlockedProviderBackoff},
+		{12*time.Second - time.Millisecond, obs.DialerBlockedProviderBackoff},
+		{12 * time.Second, ""},
 	} {
 		r := ratemeter.Reading{At: refused.Add(tt.after), LastQuotaRefusal: refused}
-		if got, _ := providerHold(r, 0, 0, 0, 0, 0); got != tt.want {
+		if got, _ := providerHold(r, q, 0, 0, 0); got != tt.want {
 			t.Errorf("%v after the refusal: %q, want %q", tt.after, got, tt.want)
 		}
 	}
@@ -121,14 +212,17 @@ func TestARefusalHoldsAdmissionForAMinuteAndTheDialerWakesForItsEnd(t *testing.T
 	}
 }
 
-// simProvider is a speech provider with a per-minute quota, as the vendor of
-// #604 documents its own: it refuses a session start once the starts, or the
-// tokens, of its own last minute have reached the limit. A refused attempt
-// still counts as a connect. A session it accepts reports tokensPerTurn every
-// turnEvery until the call ends.
+// simProvider is a speech provider with a quota, as the vendor of #604
+// documents its own: it refuses a session start once the starts of its own
+// last connectPeriod, or the tokens of its last tokenPeriod, have reached the
+// limit (a zero period is a minute). A refused attempt still counts as a
+// connect. A session it accepts reports tokensPerTurn every turnEvery until
+// the call ends.
 type simProvider struct {
 	connectLimit  int
+	connectPeriod time.Duration
 	tokenLimit    int64
+	tokenPeriod   time.Duration
 	tokensPerTurn int
 	turnEvery     time.Duration
 
@@ -147,10 +241,11 @@ type simSpend struct {
 }
 
 func (p *simProvider) prune(now time.Time) {
-	for len(p.starts) > 0 && !now.Before(p.starts[0].Add(time.Minute)) {
+	connects, tokens := cmp.Or(p.connectPeriod, time.Minute), cmp.Or(p.tokenPeriod, time.Minute)
+	for len(p.starts) > 0 && !now.Before(p.starts[0].Add(connects)) {
 		p.starts = p.starts[1:]
 	}
-	for len(p.spent) > 0 && !now.Before(p.spent[0].at.Add(time.Minute)) {
+	for len(p.spent) > 0 && !now.Before(p.spent[0].at.Add(tokens)) {
 		p.spent = p.spent[1:]
 	}
 }
@@ -188,20 +283,55 @@ func (p *simProvider) spend(now time.Time, n int) {
 type providerRun struct {
 	starts, refusals           int
 	startsAfter, refusalsAfter int
+	// The start gate's account (#644): the starts that waited, the longest
+	// wait, and the starts made past the bound with the window full.
+	waited, pastBound int
+	longestWait       time.Duration
+}
+
+// providerScenario is what runScenario runs: the list of
+// runAgainstProvider's (one campaign answering half its calls) against prov,
+// with quota as the deployment's limits, applied by admission when isGated and
+// by the start gate when isStartGated.
+type providerScenario struct {
+	seed                  int64
+	prov                  simProvider
+	capacity              int
+	quota                 providerQuota
+	isGated, isStartGated bool
+	warmUp, d             time.Duration
 }
 
 func runAgainstProvider(t *testing.T, isGated bool, prov simProvider, capacity, sessionRPM, tokenRPM int, warmUp, d time.Duration) providerRun {
 	t.Helper()
-	p := prov
-	s := newSim(t, simSpec{capacity: capacity, inboundReserve: 4, campaigns: 1, seed: 21, maxConcurrent: 1000,
+	return runScenario(t, providerScenario{seed: 21, prov: prov, capacity: capacity,
+		quota: perMinute(sessionRPM, tokenRPM), isGated: isGated, warmUp: warmUp, d: d})
+}
+
+func runScenario(t *testing.T, sc providerScenario) providerRun {
+	t.Helper()
+	p := sc.prov
+	s := newSim(t, simSpec{capacity: sc.capacity, inboundReserve: 4, campaigns: 1, seed: sc.seed, maxConcurrent: 1000,
 		rates: []func(time.Duration) float64{constRate(0.5)}, provider: &p,
-		isGated: isGated, sessionRPM: sessionRPM, tokenRPM: tokenRPM})
-	p.measureFrom = s.start.Add(warmUp)
-	s.run(d)
-	return providerRun{
+		isGated: sc.isGated, isStartGated: sc.isStartGated,
+		sessionLimit: sc.quota.sessionLimit, sessionPeriod: sc.quota.sessionPeriod,
+		tokenLimit: sc.quota.tokenLimit, tokenPeriod: sc.quota.tokenPeriod})
+	p.measureFrom = s.start.Add(sc.warmUp)
+	s.run(sc.d)
+	run := providerRun{
 		starts: p.accepted + p.refuse, refusals: p.refuse,
 		startsAfter: p.startedAfter, refusalsAfter: p.refusedAfter,
 	}
+	for _, w := range s.startWaits {
+		if w.Waited > 0 {
+			run.waited++
+		}
+		if w.IsPastBound {
+			run.pastBound++
+		}
+		run.longestWait = max(run.longestWait, w.Waited)
+	}
+	return run
 }
 
 // The deployment of #604 at the quota the qwen and doubao profiles document:
@@ -273,5 +403,49 @@ func TestTheTokenRateGateStopsRefusalsOnceUsageIsKnown(t *testing.T) {
 	}
 	if gated.startsAfter < 100 {
 		t.Errorf("with the gate only %d starts after the warm-up: the token quota is left unused", gated.startsAfter)
+	}
+}
+
+// The quota of #644 over the vendor's own periods: 3 session starts per 1 s
+// and 60,000 tokens per 12 s, with bot capacity enough that the session
+// window is what binds (sessions spend 600 tokens a minute, so the tokens
+// stay near half their limit). Admission judges the starts over ten seconds
+// (ratemeter.AdmissionWindow), but their sessions open when callees answer,
+// and four answers can land in one second: without the start gate a share of
+// starts is refused, and each refusal holds admission for the backoff. With
+// the gate a start waits for the window instead, and refusals stay within the
+// bound of the per-minute scenario above.
+//
+// The rate admission reaches here, about 58 starts a minute, is a third of
+// the quota: it counts every ringing leg's expected answer, in this list half
+// of them, against the ten seconds, although a leg nobody answers rings for
+// thirty. The assertion only keeps it from falling further.
+func TestTheStartGateKeepsRefusalsNearZeroOverShortPeriods(t *testing.T) {
+	const capacity, minutes = 400, 10
+	q := providerQuota{sessionLimit: 3, sessionPeriod: time.Second, tokenLimit: 60000, tokenPeriod: 12 * time.Second}
+	prov := simProvider{connectLimit: 3, connectPeriod: time.Second, tokenLimit: 60000, tokenPeriod: 12 * time.Second,
+		tokensPerTurn: 150, turnEvery: 15 * time.Second}
+
+	open := runScenario(t, providerScenario{seed: 21, prov: prov, capacity: capacity, quota: q, isGated: true,
+		d: minutes * time.Minute})
+	gated := runScenario(t, providerScenario{seed: 21, prov: prov, capacity: capacity, quota: q, isGated: true,
+		isStartGated: true, d: minutes * time.Minute})
+	t.Logf("admission only:      %d starts, %d refused", open.starts, open.refusals)
+	t.Logf("with the start gate: %d starts, %d refused; %d waited (longest %s), %d past the bound",
+		gated.starts, gated.refusals, gated.waited, gated.longestWait, gated.pastBound)
+
+	if open.refusals*50 <= open.starts {
+		t.Fatalf("without the start gate only %d of %d starts were refused: the scenario proves nothing",
+			open.refusals, open.starts)
+	}
+	if gated.refusals*50 > gated.starts {
+		t.Errorf("with the start gate %d of %d starts were refused, want at most 2%%", gated.refusals, gated.starts)
+	}
+	if gated.starts < minutes*45 {
+		t.Errorf("with the start gate only %d starts in %d minutes: the rate of 3 a second is left unused",
+			gated.starts, minutes)
+	}
+	if gated.longestWait > ratemeter.StartWaitBound {
+		t.Errorf("a start waited %s, past the bound of %s", gated.longestWait, ratemeter.StartWaitBound)
 	}
 }

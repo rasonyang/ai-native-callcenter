@@ -30,6 +30,7 @@ import (
 	"github.com/rasonyang/ai-native-callcenter/internal/dayrange"
 	"github.com/rasonyang/ai-native-callcenter/internal/outbound"
 	"github.com/rasonyang/ai-native-callcenter/internal/phonenum"
+	"github.com/rasonyang/ai-native-callcenter/internal/provider/ratemeter"
 	"github.com/rasonyang/ai-native-callcenter/internal/voice"
 )
 
@@ -143,13 +144,17 @@ type Config struct {
 	// thresholds (design 10 section 6.5). Defaults 0.01 and 0.03.
 	OverflowTightenRate float64
 	OverflowStopRate    float64
-	// ProviderSessionRPM and ProviderTokenRPM are the speech provider's quota
-	// per minute (provider.Profile, after AICC_PROVIDER_SESSION_RPM and
-	// AICC_PROVIDER_TOKEN_RPM): session starts, and tokens in and out
-	// together. Zero turns that half of the provider rule off; the refusal
-	// backoff applies whenever Deps.ProviderRate is set (providerHold).
-	ProviderSessionRPM int
-	ProviderTokenRPM   int
+	// ProviderSessionLimit and ProviderTokenLimit are the speech provider's
+	// quota, each a count over its period (provider.Profile, after the
+	// deployment's AICC_PROVIDER_* settings): session starts, and tokens in and
+	// out together. A limit of zero turns that half of the provider rule off; a
+	// zero period is ratemeter.Span. The refusal backoff applies whenever
+	// Deps.ProviderRate is set (providerHold). The meter behind ProviderRate
+	// counts over the same periods.
+	ProviderSessionLimit  int
+	ProviderSessionPeriod time.Duration
+	ProviderTokenLimit    int
+	ProviderTokenPeriod   time.Duration
 	// noOverdial plans every ringing leg as an answer, whatever the history says:
 	// the conservative rule on its own. Unexported on purpose; tests set it to
 	// have the baseline the expected-answer rule is compared with.
@@ -184,6 +189,12 @@ func (c Config) withDefaults() Config {
 	}
 	if c.SafetyScan <= 0 {
 		c.SafetyScan = 60 * time.Second
+	}
+	if c.ProviderSessionPeriod <= 0 {
+		c.ProviderSessionPeriod = ratemeter.Span
+	}
+	if c.ProviderTokenPeriod <= 0 {
+		c.ProviderTokenPeriod = ratemeter.Span
 	}
 	if c.BackstopMargin <= 0 {
 		c.BackstopMargin = 30 * time.Second

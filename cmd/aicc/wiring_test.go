@@ -16,9 +16,11 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/rasonyang/ai-native-callcenter/internal/aicall"
 	"github.com/rasonyang/ai-native-callcenter/internal/config"
 	"github.com/rasonyang/ai-native-callcenter/internal/events"
 	"github.com/rasonyang/ai-native-callcenter/internal/flow"
+	"github.com/rasonyang/ai-native-callcenter/internal/phonenum"
 	"github.com/rasonyang/ai-native-callcenter/internal/provider"
 	"github.com/rasonyang/ai-native-callcenter/internal/provider/doubao"
 	"github.com/rasonyang/ai-native-callcenter/internal/provider/ratemeter"
@@ -233,7 +235,7 @@ func TestTheProviderNameChoosesTheClient(t *testing.T) {
 		{provider.GatewayProfile(), (*provider.Realtime)(nil)},
 	} {
 		t.Run(tc.profile.Name, func(t *testing.T) {
-			session, err := voiceSessions(ratemeter.New(nil))(tc.profile, nil)
+			session, err := voiceSessions(ratemeter.New(nil, ratemeter.Config{}))(tc.profile, nil)
 			if err != nil {
 				t.Fatalf("voiceSessions: %v", err)
 			}
@@ -244,22 +246,67 @@ func TestTheProviderNameChoosesTheClient(t *testing.T) {
 	}
 }
 
-// Every session is counted on the rate meter when it is made, before it dials,
-// whichever client answers it: a start the provider refuses still counted
-// against its connect rate (#604).
-func TestEverySessionIsCountedOnTheMeterBeforeItDials(t *testing.T) {
+// The startup line and aicc doctor say each limit with its period and the
+// setting it came from, and the per-minute gauge carries each limit scaled to
+// a minute (#644).
+func TestTheQuotaSummarySaysEachLimitWithItsPeriod(t *testing.T) {
+	for _, k := range []string{"AICC_PROVIDER_SESSION_RPM", "AICC_PROVIDER_TOKEN_RPM",
+		"AICC_PROVIDER_SESSION_LIMIT", "AICC_PROVIDER_SESSION_PERIOD", "AICC_PROVIDER_TOKEN_LIMIT", "AICC_PROVIDER_TOKEN_PERIOD"} {
+		t.Setenv(k, "")
+	}
+	t.Setenv("AICC_PROVIDER", "qwen")
+	t.Setenv("AICC_PROVIDER_SESSION_LIMIT", "3")
+	t.Setenv("AICC_PROVIDER_SESSION_PERIOD", "1s")
+	t.Setenv("AICC_PROVIDER_TOKEN_RPM", "300000")
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	profile, err := voiceProfile(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "quota, session starts: 3 per 1s (AICC_PROVIDER_SESSION_LIMIT), tokens: 300000 per 60s (AICC_PROVIDER_TOKEN_RPM)"
+	if got := providerQuotaSummary(cfg, profile); got != want {
+		t.Errorf("summary = %q\nwant      %q", got, want)
+	}
+	for _, tt := range []struct {
+		limit  int
+		period time.Duration
+		want   int
+	}{{3, time.Second, 180}, {60000, 12 * time.Second, 300000}, {60, time.Minute, 60}, {1000, time.Hour, 16}, {0, time.Second, 0}} {
+		if got := perMinute(tt.limit, tt.period); got != tt.want {
+			t.Errorf("perMinute(%d, %s) = %d, want %d", tt.limit, tt.period, got, tt.want)
+		}
+	}
+	if got := quotaPeriod(1500 * time.Millisecond); got != "1.5s" {
+		t.Errorf("quotaPeriod(1.5s) = %q", got)
+	}
+}
+
+// Every session start is counted on the rate meter once, by the orchestrator,
+// before the session is made (#644: a campaign call's start waits there for
+// the session window first). The factory, whichever client answers, counts
+// none of its own, or each start would count twice; the orchestrator is wired
+// to the same meter the sessions report their tokens and refusals to.
+func TestEverySessionStartIsCountedOnceOnTheMeter(t *testing.T) {
 	for _, keyEnv := range []string{"ALIYUN_API_KEY", "DOUBAO_API_KEY"} {
 		t.Setenv(keyEnv, "not-a-real-key")
 	}
-	meter := ratemeter.New(nil)
+	meter := ratemeter.New(nil, ratemeter.Config{})
 	sessions := voiceSessions(meter)
 	for _, profile := range []provider.Profile{provider.QwenProfile(), provider.DoubaoProfile()} {
 		if _, err := sessions(profile, nil); err != nil {
 			t.Fatalf("%s: %v", profile.Name, err)
 		}
 	}
-	if got := meter.Read().Starts; got != 2 {
-		t.Errorf("the meter counted %d starts, want 2", got)
+	if got := meter.Read().Starts; got != 0 {
+		t.Errorf("the factory counted %d starts on the meter, want none: the orchestrator counts them", got)
+	}
+	cfg := botConfig(botUAS(config.Config{}, nil), nil, nil, nil, nil, nil, nil, provider.Profile{},
+		nil, nil, nil, nil, nil, false, 0, 0, 0, "", false, "", phonenum.FormE164, meter)
+	if cfg.SessionStarts != aicall.SessionStarts(meter) {
+		t.Errorf("the orchestrator counts starts on %v, want the process's meter", cfg.SessionStarts)
 	}
 	// Doctor's factory has no meter and still works.
 	if _, err := voiceSessions(nil)(provider.QwenProfile(), nil); err != nil {

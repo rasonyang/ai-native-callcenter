@@ -674,7 +674,7 @@ func TestTheProviderChecksSayTheQuotaAndTheRequestID(t *testing.T) {
 	h.session.handshake = provider.Handshake{RequestID: "req-ok"}
 	got := h.run()
 	if msg := got[DoctorCheckProviderKey].Message; !strings.Contains(msg,
-		"session starts: unknown (set AICC_PROVIDER_SESSION_RPM to the account's)") {
+		"session starts: unknown (set AICC_PROVIDER_SESSION_LIMIT and AICC_PROVIDER_SESSION_PERIOD to the account's)") {
 		t.Errorf("key message = %q, want openai's unknown limits named", msg)
 	}
 	if msg := got[DoctorCheckProviderSession].Message; !strings.Contains(msg, "request id req-ok; no rate-limit headers") {
@@ -683,7 +683,7 @@ func TestTheProviderChecksSayTheQuotaAndTheRequestID(t *testing.T) {
 
 	h = newHarness(t)
 	h.deps.cfg.Provider = "qwen"
-	h.deps.cfg.ProviderTokenRPM, h.deps.cfg.IsProviderTokenRPMSet = 0, true
+	h.deps.cfg.ProviderTokenLimit, h.deps.cfg.ProviderTokenLimitFrom = 0, "AICC_PROVIDER_TOKEN_RPM"
 	h.deps.getenv = func(k string) string {
 		if k == "ALIYUN_API_KEY" {
 			return "sk-test"
@@ -697,14 +697,14 @@ func TestTheProviderChecksSayTheQuotaAndTheRequestID(t *testing.T) {
 	got = h.run()
 	wantState(t, got, DoctorCheckProviderSession, DoctorStateFail)
 	if msg := got[DoctorCheckProviderKey].Message; !strings.Contains(msg,
-		"session starts: 60 (profile default for qwen-audio-3.1-realtime-flash), tokens: off (AICC_PROVIDER_TOKEN_RPM=0)") {
+		"session starts: 60 per 60s (profile default for qwen-audio-3.1-realtime-flash), tokens: off (AICC_PROVIDER_TOKEN_RPM=0)") {
 		t.Errorf("key message = %q", msg)
 	}
 	r := got[DoctorCheckProviderSession]
 	if !strings.Contains(r.Message, "(status CLOSE_1007, QUOTA_EXCEEDED, request id req-1007)") {
 		t.Errorf("session message = %q, want the refusal as a number", r.Message)
 	}
-	if !strings.Contains(r.Fix, "per-minute quota is spent") {
+	if !strings.Contains(r.Fix, "the provider's quota is spent") {
 		t.Errorf("fix = %q, want the quota's own", r.Fix)
 	}
 }

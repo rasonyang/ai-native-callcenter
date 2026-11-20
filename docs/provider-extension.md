@@ -65,7 +65,7 @@ Every field of `provider.Profile` exists because a vendor forced it to
 | `AcceptsResponseToolChoice` | Whether a line's `response.create` carries `tool_choice: "none"` in its `response` object, so the turn that says a line (`SpeakText`: an announce, the wait line) does not call a tool. No other request carries it. True on openai (documented, not measured). False on qwen (accepted and ignored, as is `response.tools: []`: a line asked for over an unanswered call repeated the call; qwen-findings W-Q8), grok (undocumented, not measured) and gateway (refused as "Unsupported parameter", which would cost the line). Whatever the profile, the client never hands out a call made in a line's turn and deletes its item when the turn ends; a turn that called a tool and said nothing is asked for once more (see "A line's turn that calls a tool" below). |
 | `NeedsToolFreeLineDirection` | Whether a mid-call line's direction (`SpeakText`) also bans any tool call in its turn and says the tool the line mentions is already running, in place of the plain `SayExactly`. True on qwen only: with `SayExactly` the wait line over a running tool was silent 3 of 3 (the flow's action-claim rule makes "我查一下" need a lookup call), with this direction it was said 6 of 6 with no call (qwen-findings W-Q8). The opening line and a tool result's hint keep `SayExactly`. |
 | `DropsToolResultAfterLine` | Whether a line spoken while a tool call is still owed (`SpeakText` between the call and its result) ends the turn the call belongs to, so the result sent afterwards is dropped with no error and never answered. When it is true the orchestrator says no wait line over a slow HTTP tool (#286). True on doubao only: with no line before it a result was answered 1 of 1; after a line 0 of 3 (SayHello, ChatTTSText, SayHello plus a forced audio commit) and in 3 of 3 live calls (doubao-findings W-D10). The Realtime profiles owe the result's turn past the line and answer it. The orchestrator reads it, not a client. |
-| `SessionRPM` / `TokenRPM` | The account's quota per minute: session starts (connection establishments) and tokens, input and output together. Set only where a vendor document states it for the profile's own default model; 0 is unknown. Campaign admission paces itself by them; `AICC_PROVIDER_SESSION_RPM` / `AICC_PROVIDER_TOKEN_RPM` override them. See [Quota](#quota). |
+| `SessionLimit` / `SessionPeriod`, `TokenLimit` / `TokenPeriod` | The account's quota, each a count over a period: session starts (connection establishments) and tokens, input and output together. Set only where a vendor document states it for the profile's own default model; a limit of 0 is unknown, a zero period is 60 s. Campaign admission and a campaign call's session start pace themselves by them; `AICC_PROVIDER_SESSION_LIMIT` / `_PERIOD` and `AICC_PROVIDER_TOKEN_LIMIT` / `_PERIOD` (or the per-minute `AICC_PROVIDER_SESSION_RPM` / `AICC_PROVIDER_TOKEN_RPM`) override them. See [Quota](#quota). |
 | `AcceptsG711` | Whether telephone audio passes through untouched. True removes conversion from the hot path entirely. |
 | `LinearInput` / `LinearOutput` | The PCM formats used when it does not. Fixed by the vendor, not negotiated. |
 | `CancelsResponseItself` | Whether it stops generating when it hears the caller, or has to be told |
@@ -187,25 +187,30 @@ qwen-findings W-Q10.
 ## Quota
 
 A provider's quota is a rate, not a population (#604): what the vendors here
-document is session starts per minute and tokens per minute, and Qwen's page
-says outright that connections held at once are not limited
-([design 06 §4](design/06-capacity.md)). The profile carries the two numbers
-only where a vendor document gives them for its own default model, and
-`ProfileFor` clears them when `AICC_PROVIDER_MODEL` names another (not on
-doubao, whose client pins its protocol version):
+document is session starts and tokens, each a count over a period (per minute
+in the documents below), and Qwen's page says outright that connections held
+at once are not limited ([design 06 §4](design/06-capacity.md)). The profile
+carries the two limits only where a vendor document gives them for its own
+default model, and `ProfileFor` clears them when `AICC_PROVIDER_MODEL` names
+another (not on doubao, whose client pins its protocol version):
 
-| Profile | `SessionRPM` | `TokenRPM` | Source |
+| Profile | `SessionLimit` per `SessionPeriod` | `TokenLimit` per `TokenPeriod` | Source |
 |---|---|---|---|
-| qwen (`qwen-audio-3.1-realtime-flash`, Beijing) | 60 | 100000 | [Model Studio rate limits](https://help.aliyun.com/zh/model-studio/rate-limit), "Qwen-Audio-Realtime", read 2026-11-18: RPM counts connection establishments, TPM is input plus output, no concurrency limit |
-| doubao (per application id) | 60 | 100000 | DOC-A in [doubao-findings §9](design/doubao-findings.md) |
+| qwen (`qwen-audio-3.1-realtime-flash`, Beijing) | 60 per 60 s | 100000 per 60 s | [Model Studio rate limits](https://help.aliyun.com/zh/model-studio/rate-limit), "Qwen-Audio-Realtime", read 2026-11-18: RPM counts connection establishments, TPM is input plus output, no concurrency limit |
+| doubao (per application id) | 60 per 60 s | 100000 per 60 s | DOC-A in [doubao-findings §9](design/doubao-findings.md) |
 | openai | 0 | 0 | depends on the account's usage tier |
 | grok | 0 | 0 | no vendor number sourced |
 | gateway | 0 | 0 | the gateway's own deployment |
 
 A deployment on another model, another region or another plan states its own
-with `AICC_PROVIDER_SESSION_RPM` and `AICC_PROVIDER_TOKEN_RPM` (empty keeps the
-profile's, `0` turns a limit off). `aicc doctor` prints the limits in force and
-where each came from.
+(#644), each limit as a count over the vendor's period:
+`AICC_PROVIDER_SESSION_LIMIT` with `AICC_PROVIDER_SESSION_PERIOD` (a Go
+duration; empty is 60 s), and `AICC_PROVIDER_TOKEN_LIMIT` with
+`AICC_PROVIDER_TOKEN_PERIOD`; or per minute with `AICC_PROVIDER_SESSION_RPM` and
+`AICC_PROVIDER_TOKEN_RPM`, never both forms of one limit. Empty keeps the
+profile's, `0` turns a limit off. A raised quota read on one deployment, 3
+starts per 1 s and 60,000 tokens per 12 s, is `3` / `1s` and `60000` / `12s`.
+`aicc doctor` prints the limits in force and where each came from.
 
 What every client does for it, through `provider.Quota` (`internal/provider/quota.go`),
 which shares no protocol event:
@@ -232,10 +237,11 @@ which shares no protocol event:
   session and published as `aicc_provider_ratelimit_limit` / `_remaining`. None
   of the vendors here was seen sending one.
 - **The process's rate meter is fed** (`internal/provider/ratemeter`): the
-  session factory in `cmd/aicc` counts each start before the dial, and the
-  client reports tokens and quota refusals (a refused start, or a quota error
-  mid-call), through the `provider.WithMeter` option. Campaign admission reads
-  it (design 10 §6.3); nothing else decides on it.
+  orchestrator counts each start just before the session is made (a campaign
+  call's after waiting, at most 2 s, for room in the session period, #644),
+  and the client reports tokens and quota refusals (a refused start, or a
+  quota error mid-call), through the `provider.WithMeter` option. Campaign
+  admission reads it (design 10 §6.3); nothing else decides on it.
 
 A new client wires the same: build a `provider.Quota` with its own request-id
 header, hand `Refused` every failure before its session is confirmed, `Spent`

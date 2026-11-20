@@ -19,6 +19,7 @@ import (
 	"github.com/rasonyang/ai-native-callcenter/internal/obs"
 	"github.com/rasonyang/ai-native-callcenter/internal/phonenum"
 	"github.com/rasonyang/ai-native-callcenter/internal/provider"
+	"github.com/rasonyang/ai-native-callcenter/internal/provider/ratemeter"
 	"github.com/rasonyang/ai-native-callcenter/internal/store"
 	"github.com/rasonyang/ai-native-callcenter/internal/transcript"
 	"github.com/rasonyang/ai-native-callcenter/internal/voice"
@@ -129,6 +130,16 @@ var ignoredTemperatureOnce sync.Once
 // SessionFactory builds a provider session; swapped out in tests.
 type SessionFactory func(profile provider.Profile, log *slog.Logger) (provider.VoiceSession, error)
 
+// SessionStarts is the process's account of provider session starts
+// (ratemeter.Meter, #604, #644): every call's start is counted on it as the
+// session is made, an inbound or internal call's at once (SessionStarted), a
+// campaign call's once the provider's session window has room for it or its
+// bound has passed (AwaitStart).
+type SessionStarts interface {
+	SessionStarted()
+	AwaitStart(ctx context.Context, maxWait time.Duration) (ratemeter.Start, error)
+}
+
 // OrchestratorConfig wires the orchestrator.
 type OrchestratorConfig struct {
 	UAS      voice.Config
@@ -136,6 +147,10 @@ type OrchestratorConfig struct {
 	Flows    FlowSource
 	Switch   Switch
 	Sessions SessionFactory
+	// SessionStarts counts each session start, and holds a campaign call's
+	// for the provider's session window (startSession). Nil counts nothing
+	// and holds nothing.
+	SessionStarts SessionStarts
 	// Ledger receives finished calls; nil disables writing.
 	Ledger Ledger
 	// CallData answers what business data a placed call was asked to carry.
@@ -469,6 +484,12 @@ func (o *Orchestrator) runCall(ctx context.Context, dialog *voice.Dialog) error 
 	}
 
 	profile := o.cfg.Profile
+	if err := o.startSession(ctx, actions.isCampaign(), log); err != nil {
+		// The call ended while its start waited: no start was counted and
+		// there is nobody to rescue.
+		log.Info("the call ended while its session start waited for the provider's session window")
+		return nil
+	}
 	model, err := o.cfg.Sessions(profile, log)
 	if err != nil {
 		return fmt.Errorf("no %s provider: %w", profile.Name, err)

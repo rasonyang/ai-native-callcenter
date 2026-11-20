@@ -200,13 +200,23 @@ const (
 	// ended, and the pass after a tick is what dials again then, as the
 	// dialer's own timer does outside the simulation.
 	evTick
+	// evTimer is the rate meter's start gate looking at its queue again
+	// (#644): its timers run on the simulation's clock, as events.
+	evTimer
 )
 
 type simEvent struct {
-	at   time.Time
-	seq  int
-	kind int
-	call uuid.UUID
+	at    time.Time
+	seq   int
+	kind  int
+	call  uuid.UUID
+	timer *simTimer
+}
+
+// simTimer is one of the rate meter's timers (ratemeter.Config.AfterFunc).
+type simTimer struct {
+	f         func()
+	isStopped bool
 }
 
 type eventHeap []simEvent
@@ -272,11 +282,15 @@ type sim struct {
 	failPlace     func(req outbound.AIDialRequest) error
 	lines         *simLines
 
-	// prov is the speech provider and its per-minute quota (#604), and meter
-	// the process's account of it that admission reads; nil: every session
-	// starts and nothing is metered.
-	prov  *simProvider
-	meter *ratemeter.Meter
+	// prov is the speech provider and its quota (#604), and meter the
+	// process's account of it that admission reads; nil: every session
+	// starts and nothing is metered. isStartGated makes an answered call's
+	// session start wait in the meter's start gate (#644), and startWaits
+	// records how each of those starts went.
+	prov         *simProvider
+	meter        *ratemeter.Meter
+	isStartGated bool
+	startWaits   []ratemeter.Start
 }
 
 // simLines is the DID line account as the dialer sees it.
@@ -336,11 +350,16 @@ type simSpec struct {
 	onChange        func(uuid.UUID)
 	// provider is the speech provider every answered call opens a session
 	// with; nil: sessions always start. isGated wires the rate meter into
-	// admission with sessionRPM and tokenRPM as the limits it paces by; the
-	// meter is fed either way.
-	provider             *simProvider
-	isGated              bool
-	sessionRPM, tokenRPM int
+	// admission with sessionLimit per sessionPeriod and tokenLimit per
+	// tokenPeriod as the limits it paces by (a zero period is a minute); the
+	// meter counts over the same periods and is fed either way. isStartGated
+	// makes each session start wait in the meter's start gate, up to
+	// ratemeter.StartWaitBound, as a campaign call's does (#644).
+	provider                   *simProvider
+	isGated                    bool
+	sessionLimit, tokenLimit   int
+	sessionPeriod, tokenPeriod time.Duration
+	isStartGated               bool
 }
 
 func newSim(t *testing.T, sp simSpec) *sim {
@@ -395,13 +414,19 @@ func newSim(t *testing.T, sp simSpec) *sim {
 		IsLive: s.isLive, Log: slog.New(slog.DiscardHandler), OnChange: sp.onChange,
 	}
 	s.prov = sp.provider
-	s.meter = ratemeter.New(s.clock.Now)
+	meterCfg := ratemeter.Config{SessionPeriod: sp.sessionPeriod, TokenPeriod: sp.tokenPeriod, AfterFunc: s.afterFunc}
+	if sp.isStartGated {
+		meterCfg.SessionLimit = sp.sessionLimit
+		s.isStartGated = true
+	}
+	s.meter = ratemeter.New(s.clock.Now, meterCfg)
 	if s.prov != nil {
 		s.push(start.Add(time.Second), evTick, uuid.Nil)
 	}
 	if sp.isGated {
 		deps.ProviderRate = s.meter
-		cfg.ProviderSessionRPM, cfg.ProviderTokenRPM = sp.sessionRPM, sp.tokenRPM
+		cfg.ProviderSessionLimit, cfg.ProviderSessionPeriod = sp.sessionLimit, sp.sessionPeriod
+		cfg.ProviderTokenLimit, cfg.ProviderTokenPeriod = sp.tokenLimit, sp.tokenPeriod
 	}
 	s.d = New(cfg, deps)
 	s.store.onFinish = s.d.AttemptFinished
@@ -420,6 +445,20 @@ func (s *sim) isLive(id uuid.UUID) bool {
 func (s *sim) push(at time.Time, kind int, call uuid.UUID) {
 	s.seq++
 	heap.Push(&s.events, simEvent{at: at, seq: s.seq, kind: kind, call: call})
+}
+
+// afterFunc is the rate meter's timer, an event on the simulation's clock.
+// The meter sets one only from Pace and from its own timer, which both run
+// on the simulation's goroutine with s.mu held (beginTalk, step).
+func (s *sim) afterFunc(d time.Duration, f func()) func() bool {
+	t := &simTimer{f: f}
+	s.seq++
+	heap.Push(&s.events, simEvent{at: s.clock.Now().Add(d), seq: s.seq, kind: evTimer, timer: t})
+	return func() bool {
+		was := !t.isStopped
+		t.isStopped = true
+		return was
+	}
 }
 
 // Usage is the bot-capacity counter as the dialer reads it.
@@ -520,6 +559,13 @@ func (s *sim) step(until time.Time) bool {
 		s.mu.Lock()
 		s.push(ev.at.Add(time.Second), evTick, uuid.Nil)
 		s.mu.Unlock()
+	case evTimer:
+		s.mu.Lock()
+		if !ev.timer.isStopped {
+			ev.timer.isStopped = true
+			ev.timer.f()
+		}
+		s.mu.Unlock()
 	case evTurn:
 		s.mu.Lock()
 		if call, ok := s.calls[ev.call]; ok && !call.isRefused {
@@ -575,22 +621,41 @@ func (s *sim) serveParked(at time.Time) {
 }
 
 // beginTalk is an answered call that has its bot slot: the bot opens its
-// provider session, counted on the meter before the dial as cmd/aicc counts
-// it, and the conversation runs. A session the provider refuses is hung up a
-// second later. Called with s.mu held.
+// provider session, counted on the meter before the dial as the orchestrator
+// counts it, and the conversation runs. With the start gate the start first
+// waits in the meter for room in the session window, holding its slot, as a
+// campaign call's does (#644). Called with s.mu held.
 func (s *sim) beginTalk(at time.Time, id uuid.UUID) {
-	call := s.calls[id]
-	if s.prov != nil {
+	if s.prov == nil {
+		s.push(at.Add(s.calls[id].talk), evTalkEnd, id)
+		return
+	}
+	if !s.isStartGated {
 		s.meter.SessionStarted()
-		if !s.prov.start(at) {
-			s.meter.QuotaRefused()
-			call.isRefused = true
-			s.push(at.Add(time.Second), evTalkEnd, id)
-			return
-		}
-		if s.prov.tokensPerTurn > 0 {
-			s.push(at.Add(s.prov.turnEvery), evTurn, id)
-		}
+		s.openSession(id)
+		return
+	}
+	// The start is made here when the window has room, else from a later
+	// evTimer; either way on this goroutine with s.mu held.
+	s.meter.Pace(ratemeter.StartWaitBound, func(st ratemeter.Start) {
+		s.startWaits = append(s.startWaits, st)
+		s.openSession(id)
+	})
+}
+
+// openSession dials the provider now. A session the provider refuses is hung
+// up a second later. Called with s.mu held.
+func (s *sim) openSession(id uuid.UUID) {
+	at := s.clock.Now()
+	call := s.calls[id]
+	if !s.prov.start(at) {
+		s.meter.QuotaRefused()
+		call.isRefused = true
+		s.push(at.Add(time.Second), evTalkEnd, id)
+		return
+	}
+	if s.prov.tokensPerTurn > 0 {
+		s.push(at.Add(s.prov.turnEvery), evTurn, id)
 	}
 	s.push(at.Add(call.talk), evTalkEnd, id)
 }

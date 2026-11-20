@@ -1068,7 +1068,7 @@ func checkProvider(ctx context.Context, d doctorDeps, opts doctorOptions) []doct
 			skip(DoctorCheckProviderSession, "no key to open a session with"),
 		}
 	}
-	// The per-minute quota campaigns are paced by is said whether or not a
+	// The quota campaigns are paced by is said whether or not a
 	// session is opened: it is configuration, and the one a sizing question
 	// starts from (#604).
 	out := []doctorResult{pass(DoctorCheckProviderKey,
@@ -1088,9 +1088,10 @@ func checkProvider(ctx context.Context, d doctorDeps, opts doctorOptions) []doct
 			msg += " (status " + failure.Status + ", " + string(failure.Reason) + requestIDNote(failure.RequestID) + ")"
 		}
 		if errors.Is(err, provider.ErrQuotaExceeded) {
-			fix = "the provider's per-minute quota is spent (session starts or tokens): it clears within a minute; " +
-				"if it recurs, lower the campaigns' maxConcurrent, set AICC_PROVIDER_SESSION_RPM / AICC_PROVIDER_TOKEN_RPM " +
-				"to the account's limits, or raise the quota with the vendor (docs/design/06-capacity.md section 4)"
+			fix = "the provider's quota is spent (session starts or tokens): it clears within the vendor's period; " +
+				"if it recurs, lower the campaigns' maxConcurrent, set AICC_PROVIDER_SESSION_LIMIT / _PERIOD and " +
+				"AICC_PROVIDER_TOKEN_LIMIT / _PERIOD to the account's limits, or raise the quota with the vendor " +
+				"(docs/design/06-capacity.md section 4)"
 		}
 		return append(out, fail(DoctorCheckProviderSession, msg, fix))
 	}

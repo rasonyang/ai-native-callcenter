@@ -5,6 +5,52 @@ under one tag, `rasonyang/ai-native-callcenter` and `rasonyang/freeswitch-aicc`;
 run them together. From v0.2.0 on, the GitHub release of the same tag also
 carries the one-line installer's files.
 
+## Unreleased
+
+### Upgrade notes
+
+- **A provider quota limit is a count over a period the vendor chooses**
+  (#644). Four settings added, all empty by default:
+  `AICC_PROVIDER_SESSION_LIMIT` with `AICC_PROVIDER_SESSION_PERIOD`, and
+  `AICC_PROVIDER_TOKEN_LIMIT` with `AICC_PROVIDER_TOKEN_PERIOD`, each a count
+  and a Go duration (an empty period is `60s`). For a quota of 3 session starts
+  per 1 s and 60,000 tokens per 12 s, set `AICC_PROVIDER_SESSION_LIMIT=3`,
+  `AICC_PROVIDER_SESSION_PERIOD=1s`, `AICC_PROVIDER_TOKEN_LIMIT=60000` and
+  `AICC_PROVIDER_TOKEN_PERIOD=12s`. `AICC_PROVIDER_SESSION_RPM` and
+  `AICC_PROVIDER_TOKEN_RPM` still work and mean the same limit over `60s`: a
+  deployment that sets them, or keeps the profile's defaults, needs no change.
+  Setting both forms of one limit, a period without its limit, or a period that
+  is not a positive duration stops the application at startup with a message
+  naming the setting. Empty keeps the profile's default and `0` turns a limit
+  off, as before.
+
+### Changed
+
+- **Campaign admission paces by each limit's own period** (#644). Session
+  starts are judged over the session period, or over 10 seconds when the period
+  is shorter, with the limit scaled to it; tokens over the token period. After
+  the provider refuses a session for its quota, admission holds for the longer
+  period of the limits set, not a fixed minute; it is still a minute when no
+  limit is set or the limits are per minute.
+- **A campaign call's session start waits for room in the provider's session
+  period** (#644). Admission paces the calls it places, but their sessions open
+  when callees answer, and callees answer together. When the session period
+  already holds its limit of starts, a campaign call's start now waits, in
+  order of arrival and at most 2 seconds, for the oldest start to leave it;
+  past that it starts as before and the provider decides. The callee hears
+  silence meanwhile, as during the provider's own setup. A call that ends while
+  it waits counts no start. Inbound and internal calls are counted and never
+  wait. Each campaign start's wait is recorded on
+  `aicc_provider_session_start_wait_ms{provider,outcome}`, and a start that
+  waited logs `provider session start waited for the session window`.
+- The startup line and `aicc doctor` state each limit with its period (`60 per
+  60s`), and `aicc_provider_quota_per_minute` publishes each limit scaled to a
+  minute. The dialer's provider-hold log lines carry `starts`,
+  `startsWaiting`, `tokens`, `sessionLimit`, `sessionPeriod`, `tokenLimit` and
+  `tokenPeriod` in place of `startsLastMinute`, `tokensLastMinute`,
+  `sessionRpm` and `tokenRpm`.
+- No migration. API contract: no change.
+
 ## v0.9.0 - 2026-11-20
 
 ### Upgrade notes
