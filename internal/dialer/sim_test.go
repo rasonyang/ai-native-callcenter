@@ -197,7 +197,8 @@ const (
 	evTurn
 	// evTick moves the clock on by a second when nothing else would: a hold
 	// by the provider's quota can end by time alone, after the last call has
-	// ended, and the dialer's own timer is what dials again then.
+	// ended, and the pass after a tick is what dials again then, as the
+	// dialer's own timer does outside the simulation.
 	evTick
 )
 
@@ -460,6 +461,14 @@ func (s *sim) PlaceAI(_ context.Context, req outbound.AIDialRequest) (outbound.P
 }
 
 // step applies the next event, or reports that there is none before until.
+//
+// The dialer is its own goroutine and must not look while an event is half
+// applied: whether a pass ran before or after part of an event would be the
+// scheduler's choice, and one seed would give one run on a laptop and another
+// on CI (#604: 3 refusals and 9). So nothing wakes it until the event is
+// whole: its timers are held for the run (run), and every change the event
+// makes to the calls, the bot slots and the meter is in place before the
+// dialer is told of any of them. Then the pass the event causes runs.
 func (s *sim) step(until time.Time) bool {
 	s.mu.Lock()
 	if len(s.events) == 0 || s.events[0].at.After(until) {
@@ -473,19 +482,14 @@ func (s *sim) step(until time.Time) bool {
 
 	switch ev.kind {
 	case evAnswer:
+		// The dialer hears of the answer once the call has its slot and its
+		// session has started, which here take no time, so no pass finds a
+		// leg that has stopped ringing and is in neither Usage nor the meter.
+		// In production it hears first (outbound's onAnswer, then the
+		// reservation, the INVITE and the session); that window is not
+		// modelled.
+		s.bridge(ev.at, ev.call)
 		s.d.Answered(ev.call)
-		s.mu.Lock()
-		call := s.calls[ev.call]
-		if s.inUse+s.inbound < s.capacity {
-			s.inUse++
-			call.hasSlot = true
-			s.beginTalk(ev.at, ev.call)
-		} else {
-			call.isParked = true
-			s.parked = append(s.parked, ev.call)
-			s.push(ev.at.Add(s.hold), evHoldExpire, ev.call)
-		}
-		s.mu.Unlock()
 	case evRingOut:
 		s.end(ev.call, campaign.OutcomeNoAnswer)
 	case evTalkEnd:
@@ -495,11 +499,9 @@ func (s *sim) step(until time.Time) bool {
 		if s.calls[ev.call].isRefused {
 			outcome = campaign.OutcomeBotFailed
 		}
-		s.mu.Unlock()
-		s.end(ev.call, outcome)
-		s.mu.Lock()
 		s.serveParked(ev.at)
 		s.mu.Unlock()
+		s.end(ev.call, outcome)
 	case evHoldExpire:
 		s.mu.Lock()
 		isParked := false
@@ -532,6 +534,23 @@ func (s *sim) step(until time.Time) bool {
 		s.t.Fatal(err)
 	}
 	return true
+}
+
+// bridge gives an answered call its bot slot, or parks it in the overflow
+// hold when there is none.
+func (s *sim) bridge(at time.Time, id uuid.UUID) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	call := s.calls[id]
+	if s.inUse+s.inbound < s.capacity {
+		s.inUse++
+		call.hasSlot = true
+		s.beginTalk(at, id)
+		return
+	}
+	call.isParked = true
+	s.parked = append(s.parked, id)
+	s.push(at.Add(s.hold), evHoldExpire, id)
 }
 
 // end finishes a call: its line goes back and its attempt gets its outcome.
@@ -597,9 +616,15 @@ func (s *sim) settle() {
 	}
 }
 
-// run drives the simulation for d of simulated time.
+// run drives the simulation for d of simulated time. The dialer's timers do
+// not fire while it does: a pass follows every event (step), at the event's
+// time, which is when a timer that came due since the last one would have
+// fired, and a timer firing on its own could wake the dialer while the next
+// event is half applied.
 func (s *sim) run(d time.Duration) {
 	s.t.Helper()
+	s.clock.Hold(true)
+	defer s.clock.Hold(false)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() { defer close(done); s.d.Run(ctx) }()

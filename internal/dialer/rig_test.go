@@ -30,6 +30,8 @@ type fakeClock struct {
 	mu     sync.Mutex
 	now    time.Time
 	timers []*fakeTimer
+	// isHeld: no timer fires, not even one made already due (Hold).
+	isHeld bool
 }
 
 type fakeTimer struct {
@@ -58,7 +60,7 @@ func (c *fakeClock) NewTimer(d time.Duration) Timer {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	t := &fakeTimer{at: c.now.Add(d), c: make(chan time.Time, 1), mu: &c.mu}
-	if d <= 0 {
+	if d <= 0 && !c.isHeld {
 		t.c <- c.now
 		t.done = true
 		return t
@@ -67,11 +69,14 @@ func (c *fakeClock) NewTimer(d time.Duration) Timer {
 	return t
 }
 
-// Set moves the clock and fires the timers that are due.
+// Set moves the clock and fires the timers that are due, unless they are held.
 func (c *fakeClock) Set(now time.Time) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.now = now
+	if c.isHeld {
+		return
+	}
 	keep := c.timers[:0]
 	for _, t := range c.timers {
 		switch {
@@ -84,6 +89,14 @@ func (c *fakeClock) Set(now time.Time) {
 		}
 	}
 	c.timers = keep
+}
+
+// Hold stops the timers firing (true), or lets them fire again from the next
+// Set (false).
+func (c *fakeClock) Hold(isHeld bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.isHeld = isHeld
 }
 
 func (c *fakeClock) Advance(d time.Duration) { c.Set(c.Now().Add(d)) }
