@@ -177,6 +177,18 @@ func withoutFarewell(found []claim) []claim {
 	return out
 }
 
+// onlyFarewell keeps the FAREWELL claims of a turn that answers a tool result:
+// the result backs the turn's other claims, never its goodbye (#630).
+func onlyFarewell(found []claim) []claim {
+	var out []claim
+	for _, c := range found {
+		if c.kind == store.UnbackedClaimFarewell {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
 // detectClaims returns the actions a bot line claims, each kind once.
 func detectClaims(text string) []claim {
 	var claims []claim
@@ -238,13 +250,23 @@ func sentences(text string) []string {
 // after transfer_to_agent returned is the truth), or when an ending is already
 // armed (a goodbye the platform asked for, or a line before a transfer the
 // flow decided).
+//
+// A goodbye is the exception to the second: a tool result says what the tool
+// did, and only an ending makes a goodbye true. So a goodbye said in reply to a
+// tool result, with no tool call of its own and nothing armed, is unhung like
+// any other (#630): "好的，那就不打扰您了" after a refused lead, or after
+// take_message saved the message, left the caller on an open line.
 type claimWatch struct {
 	// pending is the text of turns not yet done.
 	pending map[int]string
-	// lastDoneTurn and isLastDoneBacked judge text that arrives after its own
-	// turn finished; 0 is none, turns are numbered from 1.
+	// lastDoneTurn, isLastDoneBacked and isLastDoneHung judge text that
+	// arrives after its own turn finished; 0 is none, turns are numbered from
+	// 1. isLastDoneHung says the turn made a tool call or spoke over an armed
+	// ending, which backs a goodbye too; isLastDoneBacked also holds for the
+	// reply to a tool result, which backs only the actionable claims.
 	lastDoneTurn     int
 	isLastDoneBacked bool
+	isLastDoneHung   bool
 	// isToolReplyNext says the next turn to finish answers a tool result.
 	isToolReplyNext bool
 	// isFarewellUnhung says the latest finished turn said goodbye in words
@@ -457,10 +479,13 @@ func (w *claimWatch) onBotSaid(turn int, text string) []claim {
 	}
 	switch {
 	case w.lastDoneTurn != 0 && turn == w.lastDoneTurn:
-		if w.isLastDoneBacked {
+		if w.isLastDoneHung {
 			return nil
 		}
 		found := detectClaims(text)
+		if w.isLastDoneBacked {
+			found = onlyFarewell(found)
+		}
 		w.lastDoneText = strings.TrimSpace(w.lastDoneText + " " + text)
 		if endsInQuestion(w.lastDoneText) {
 			// Ends by asking: not a goodbye, even if an earlier piece was one.
@@ -487,10 +512,12 @@ func (w *claimWatch) onBotSaid(turn int, text string) []claim {
 
 // onTurnDone judges a finished turn's lines and returns its unbacked claims.
 func (w *claimWatch) onTurnDone(turn int, isToolCall, isArmed bool) []claim {
-	isBacked := isToolCall || w.isToolReplyNext || isArmed
+	isHung := isToolCall || isArmed
+	isBacked := isHung || w.isToolReplyNext
 	w.isToolReplyNext = isToolCall
 	w.lastDoneTurn = turn
 	w.isLastDoneBacked = isBacked
+	w.isLastDoneHung = isHung
 	w.isFarewellUnhung = false
 	w.standing, w.standingTurn, w.reAskTurn = nil, 0, 0
 	w.lastDoneAnswered = w.cue != nil
@@ -508,11 +535,16 @@ func (w *claimWatch) onTurnDone(turn int, isToolCall, isArmed bool) []claim {
 			delete(w.pending, pendingTurn)
 		}
 	}
-	if isBacked || text == "" {
+	if isHung || text == "" {
 		return nil
 	}
 	w.lastDoneText = text
 	found := detectClaims(text)
+	if isBacked {
+		// The reply to a tool result: the result backs what it reports, not
+		// a goodbye (#630).
+		found = onlyFarewell(found)
+	}
 	if endsInQuestion(text) {
 		found = withoutFarewell(found)
 	}

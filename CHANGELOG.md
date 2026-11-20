@@ -21,6 +21,19 @@ carries the one-line installer's files.
   be the last sentence too: words early in that long sentence, such as
   background speech transcribed as 「好吧」, no longer record a `HIGH` lead
   (#598, #633).
+- A goodbye the bot says in reply to a tool result now ends the call like any
+  other goodbye it says without hanging up. After a refused or a successful
+  tool call ("好的，那就不打扰您了，祝您生活愉快！" once a refusal was declined,
+  or a goodbye after a message was taken), the caller was left on an open line:
+  the 2 s rule after a goodbye heard in full, the rule for a second goodbye in a
+  row and the dead-air fallback all treated that goodbye as backed by the tool,
+  and the fallback asked the model whether the caller was still there instead.
+  Only an ending (a `hangup` or another ending in the same reply, or an ending
+  already under way) keeps a goodbye from closing the call. A tool result still
+  backs what the reply to it reports: a lookup, transfer or message claim right
+  after its tool's result is not asked about again. Such a goodbye is now
+  logged and counted as an unbacked `FAREWELL` claim, and appears in the CDR's
+  `unbackedClaims`, like any other unhung goodbye (#630).
 
 ## v0.8.9 - 2026-11-19
 
