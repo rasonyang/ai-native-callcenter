@@ -200,6 +200,35 @@ Behind FreeSBC v2 the pair is the SBC's private socket and `pstn_gateway_proxy`
 is the carrier's directory entry, port included. A `vars.xml` without
 `pstn_gateway_proxy` leaves the proxy empty; `install.sh` warns about it.
 
+## RTP timeout on the live box's SIP profiles
+
+This machine's `conf/sip_profiles/` files are its own, not the repository's
+`freeswitch/conf/sip_profiles/`, and nothing in this directory installs them.
+Check them after a reinstall of the switch:
+
+```
+grep -n -E 'media_(hold_)?timeout|rtp-(hold-)?timeout-sec' /usr/local/freeswitch/conf/sip_profiles/*.xml
+```
+
+Each profile (`internal`, `external` and their `-ipv6` twins) must read as the
+shipped ones do:
+
+```
+<param name="rtp-timeout-sec" value="300"/>
+<param name="rtp-hold-timeout-sec" value="1800"/>
+```
+
+This box once carried `media_timeout` and `media_hold_timeout` as profile
+params instead. Sofia does not read those names in a profile (they are channel
+variables), so the switch had no RTP timeout at all: a leg whose far end went
+away without a BYE stayed up until something else ended it, and a crash test
+left its calls standing. Fixed on 2026-11-20.
+
+After an edit, `reloadxml` and then `sofia profile <name> rescan` for each
+profile apply it to new calls without dropping registrations or calls in
+progress. The log shows `rtp-timeout-sec [300]` as each is read, with a
+deprecation warning that is expected.
+
 ## Superseded files still on the live box
 
 Two earlier versions of this route are still installed on this machine. They
