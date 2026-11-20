@@ -354,3 +354,51 @@ func TestAnAcceptedUpgradeKeepsItsRequestIDAndRateLimits(t *testing.T) {
 		t.Errorf("handshake = %+v", got)
 	}
 }
+
+// What a response cost is read from response.done in the shape both vendors
+// send (counts at the top, per-modality details beneath), whatever became of
+// the response, and a done that reports nothing counts nothing.
+func TestResponseUsageIsCountedOncePerResponse(t *testing.T) {
+	f := newFakeProvider(t, acceptSession)
+	meter := &fakeMeter{}
+	profile := QwenProfile()
+	t.Setenv(profile.APIKeyEnv, "test-key")
+	profile.Endpoint = f.endpoint()
+	session, err := New(profile, slog.New(slog.NewTextHandler(io.Discard, nil)), WithMeter(meter))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = session.Close(context.Background()) })
+	if err := session.Start(t.Context(), basicConfig()); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	awaitEvent(t, session, EventTypeSessionReady)
+
+	done := func(status string, usage map[string]any) map[string]any {
+		response := map[string]any{"id": "resp_" + status, "status": status}
+		if usage != nil {
+			response["usage"] = usage
+		}
+		return map[string]any{"type": "response.done", "response": response}
+	}
+	// qwen's shape, details and all.
+	f.send(done("completed", map[string]any{
+		"total_tokens": 1543, "input_tokens": 1288, "output_tokens": 255,
+		"input_token_details":  map[string]any{"text_tokens": 1200, "audio_tokens": 88},
+		"output_token_details": map[string]any{"text_tokens": 55, "audio_tokens": 200},
+	}))
+	awaitEvent(t, session, EventTypeResponseDone)
+	// A cut response spent its tokens too.
+	f.send(done("cancelled", map[string]any{"input_tokens": 40, "output_tokens": 2, "total_tokens": 42}))
+	awaitEvent(t, session, EventTypeInterrupted)
+	// Nothing reported, nothing counted.
+	f.send(done("completed", nil))
+	awaitEvent(t, session, EventTypeResponseDone)
+	// A total with no split counts whole.
+	f.send(done("completed", map[string]any{"total_tokens": 7}))
+	awaitEvent(t, session, EventTypeResponseDone)
+
+	if tokens, _ := meter.counts(); fmt.Sprint(tokens) != "[1543 42 7]" {
+		t.Errorf("the meter heard %v, want [1543 42 7]", tokens)
+	}
+}

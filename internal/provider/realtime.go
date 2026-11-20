@@ -1935,6 +1935,12 @@ func (r *Realtime) handle(event *wireEvent) {
 }
 
 func (r *Realtime) handleResponseDone(event *wireEvent) {
+	// What the response cost is counted whatever became of it: a cancelled or
+	// abandoned response spent its tokens too, and the vendor counts them.
+	if event.Response != nil && event.Response.Usage != nil {
+		usage := event.Response.Usage
+		r.quota.Spent(usage.InputTokens, usage.OutputTokens, usage.TotalTokens)
+	}
 	// Decided with the open flag cleared under the lock, so the watchdog
 	// abandoning this very response (onResponseStalled, which reads the flag
 	// under the same lock) and this end agree on whether the consumer was told.

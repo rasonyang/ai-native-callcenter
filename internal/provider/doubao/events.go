@@ -271,6 +271,9 @@ func (s *Session) onWireResponseDone(event *wireEvent) {
 		usage := event.Response.Usage
 		s.log.Info("turn usage", "totalTokens", usage.TotalTokens,
 			"inputTokens", usage.InputTokens, "outputTokens", usage.OutputTokens)
+		// Counted when it arrives, whichever turn is current by then: the
+		// quota counts tokens per minute, not per turn.
+		s.quota.Spent(usage.InputTokens, usage.OutputTokens, usage.TotalTokens)
 	}
 	if !s.isTurnOpen.Load() {
 		return

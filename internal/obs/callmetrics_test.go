@@ -439,3 +439,17 @@ func TestARateLimitHeaderSetsOnlyTheValuesItCarried(t *testing.T) {
 		t.Errorf("limit %d remaining %d, want 100000 and 99000", limits["gateway/TOKENS"], left["gateway/TOKENS"])
 	}
 }
+
+func TestProviderTokensAreCountedByDirection(t *testing.T) {
+	reader := useTestReader()
+	const name = "aicc_provider_tokens_total"
+	before := sumByLabels(t, reader, name, "provider", "direction")
+	RecordProviderTokens("qwen", 1288, 255, 0)
+	RecordProviderTokens("qwen", 0, 0, 7)
+	after := sumByLabels(t, reader, name, "provider", "direction")
+	for key, want := range map[string]int64{"qwen/INPUT": 1288, "qwen/OUTPUT": 255, "qwen/UNSPLIT": 7} {
+		if got := after[key] - before[key]; got != want {
+			t.Errorf("%s gained %d, want %d", key, got, want)
+		}
+	}
+}

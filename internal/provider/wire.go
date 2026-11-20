@@ -71,6 +71,17 @@ type wireResponse struct {
 	ID     string     `json:"id"`
 	Status string     `json:"status"`
 	Output []wireItem `json:"output"`
+	// Usage is on response.done: what the response cost, which is what the
+	// vendor's tokens-per-minute quota counts. OpenAI and qwen both report
+	// input_tokens, output_tokens and total_tokens at this level (with
+	// per-modality details below them, not read); any of them may be absent.
+	Usage *wireUsage `json:"usage"`
+}
+
+type wireUsage struct {
+	InputTokens  int `json:"input_tokens"`
+	OutputTokens int `json:"output_tokens"`
+	TotalTokens  int `json:"total_tokens"`
 }
 
 type wireError struct {

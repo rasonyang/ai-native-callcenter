@@ -40,6 +40,7 @@ var (
 	providerErrors     metric.Int64Counter
 	providerSessions   metric.Int64Counter
 	providerDialFails  metric.Int64Counter
+	providerTokens     metric.Int64Counter
 	providerRateLimit  metric.Int64Gauge
 	providerRateLeft   metric.Int64Gauge
 	providerUnanswered metric.Int64Counter
@@ -164,6 +165,13 @@ func init() {
 			"vendor text that says quota, rate limit or throttling), AUTH_REJECTED "+
 			"(401, 403, or text about the key) or OTHER. A session the call gave up "+
 			"on (the caller hung up during setup) is not counted."))
+	providerTokens, _ = meter.Int64Counter("aicc_provider_tokens_total",
+		metric.WithDescription("Tokens the provider reported a response cost (response.done "+
+			"usage), by provider and direction: INPUT, OUTPUT, or UNSPLIT for the part of a "+
+			"reported total the vendor did not split between them. Vendors cap tokens per "+
+			"minute, input and output together, beside session starts per minute, so "+
+			"rate() of this against the profile's token limit is how close a busy minute "+
+			"runs to the cap (aicc_provider_quota_per_minute{kind=\"TOKENS\"})."))
 	providerRateLimit, _ = meter.Int64Gauge("aicc_provider_ratelimit_limit",
 		metric.WithDescription("The limit the provider's last upgrade response stated in a "+
 			"rate-limit header, by provider and kind (REQUESTS, TOKENS, UNSPECIFIED for "+
@@ -709,6 +717,29 @@ func RecordProviderDialFailure(provider, status, reason string) {
 		attribute.String("provider", provider),
 		attribute.String("status", status),
 		attribute.String("reason", reason)))
+}
+
+// The directions of aicc_provider_tokens_total.
+const (
+	ProviderTokensInput   = "INPUT"
+	ProviderTokensOutput  = "OUTPUT"
+	ProviderTokensUnsplit = "UNSPLIT"
+)
+
+// RecordProviderTokens counts what one response cost. It runs once per
+// response, never per frame.
+func RecordProviderTokens(provider string, input, output, unsplit int64) {
+	if providerTokens == nil {
+		return
+	}
+	for direction, n := range map[string]int64{
+		ProviderTokensInput: input, ProviderTokensOutput: output, ProviderTokensUnsplit: unsplit,
+	} {
+		if n > 0 {
+			providerTokens.Add(context.Background(), n, metric.WithAttributes(
+				attribute.String("provider", provider), attribute.String("direction", direction)))
+		}
+	}
 }
 
 // SetProviderRateLimit publishes what a provider's upgrade response said about

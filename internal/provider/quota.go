@@ -404,3 +404,19 @@ func (q Quota) RefusedMidCall(log *slog.Logger, event EventError) bool {
 		"code", event.EventCode(), "message", event.EventMessage())
 	return true
 }
+
+// Spent counts what one response cost, as the provider reported it: the tokens
+// in and out, and the part of a total the vendor did not split between them.
+// A negative value is the vendor's error and counts as zero, and a response
+// that reported nothing counts nothing. Once per response, never per frame.
+func (q Quota) Spent(input, output, total int) {
+	input, output, total = max(input, 0), max(output, 0), max(total, 0)
+	unsplit := max(total-input-output, 0)
+	if input+output+unsplit == 0 {
+		return
+	}
+	obs.RecordProviderTokens(q.provider, int64(input), int64(output), int64(unsplit))
+	if q.meter != nil {
+		q.meter.TokensUsed(input + output + unsplit)
+	}
+}

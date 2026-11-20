@@ -4,10 +4,12 @@ package doubao
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/rasonyang/ai-native-callcenter/internal/provider"
 )
@@ -84,5 +86,26 @@ func TestAnOpenedSessionReportsItsHandshake(t *testing.T) {
 	start(t, session, testConfig())
 	if got := session.Handshake(); got.RequestID != "fake-logid-1" || len(got.RateLimits) != 0 {
 		t.Errorf("handshake = %+v, want the logid and no rate limits", got)
+	}
+}
+
+// This protocol reports what a turn cost on its own response.done, seconds
+// after the turn, and that is what is counted.
+func TestATurnsUsageIsCounted(t *testing.T) {
+	f := newFakeDoubao(t, acceptSession)
+	meter := &fakeMeter{}
+	session := meteredSession(t, f, meter)
+	start(t, session, testConfig())
+
+	f.send(wireResponseDone())
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if tokens, _ := meter.counts(); len(tokens) > 0 {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if tokens, _ := meter.counts(); fmt.Sprint(tokens) != "[2321]" {
+		t.Errorf("the meter heard %v, want [2321]", tokens)
 	}
 }
