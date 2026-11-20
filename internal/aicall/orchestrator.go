@@ -2033,7 +2033,7 @@ func (o *Orchestrator) canSayOpeningAgain(session *Session, runtime *flow.Runtim
 
 // sayOpeningAgain says the opening line once more after a greeting cut it,
 // words no transcript made known, or an acknowledgement before its final
-// sentence (docs/design/11-backchannels.md, #610): only
+// clause (docs/design/11-backchannels.md, #610, #598): only
 // while the call is still in its entry phase and no ending is armed or under
 // way, and only once per call.
 func (o *Orchestrator) sayOpeningAgain(cut *openCut, session *Session, runtime *flow.Runtime,

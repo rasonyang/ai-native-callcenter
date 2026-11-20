@@ -93,13 +93,19 @@ type leadRig struct {
 	hold *holdModel
 	// quiet is the model when the rig answers quietly.
 	quiet *quietModel
+	// opening is the call's opening line, as written (leadRigOptions.opening),
+	// openingFrames its length in 20 ms frames.
+	opening       string
+	openingFrames int
 }
 
 type leadRigOptions struct {
 	profile provider.Profile
 	lang    string
-	// opening is the call's opening line; empty for none.
-	opening string
+	// opening is the call's opening line; empty for none. openingFrames is
+	// its length in 20 ms frames, heldOpeningFrames (11 s) for none.
+	opening       string
+	openingFrames int
 	// flow replaces leadGuardFlow.
 	flow string
 	// isQuiet gives the model quiet tool answers (provider.QuietToolAnswerer).
@@ -117,7 +123,11 @@ func newLeadRig(t *testing.T, opts leadRigOptions) *leadRig {
 	if opts.flow == "" {
 		opts.flow = leadGuardFlow
 	}
-	r := &leadRig{finalWait: newVerdictWait(), cut: newVerdictWait(), replay: &holdClock{}, leads: &guardLeads{}}
+	if opts.openingFrames == 0 {
+		opts.openingFrames = heldOpeningFrames
+	}
+	r := &leadRig{finalWait: newVerdictWait(), cut: newVerdictWait(), replay: &holdClock{}, leads: &guardLeads{},
+		opening: opts.opening, openingFrames: opts.openingFrames}
 	wrap := func(m *fakeModel) provider.VoiceSession {
 		switch {
 		case opts.profile.ControlsInterruption:
@@ -366,22 +376,23 @@ func TestABlankFinalIsAsNoFinal(t *testing.T) {
 	r.assertAgreed(t, r.result(t, 2))
 }
 
-// The opening of the production shape: two sentences, the second the offer,
-// 11 s long (heldOpeningLine, heldOpeningFrames).
+// openingGenerated makes the call's opening (r.opening: heldOpeningLine, two
+// sentences, the second the offer, or twoPartOpeningLine), r.openingFrames
+// long (11 s unless the rig says otherwise), and queues all of it.
 func (r *leadRig) openingGenerated(t *testing.T) (frameBytes int) {
 	t.Helper()
 	r.leg.holdFrames(1 << 20)
 	frameBytes = 2 * media.RateProviderOut / 50
 	r.started()
-	for sent := 0; sent < heldOpeningFrames; sent += 50 {
+	for sent := 0; sent < r.openingFrames; sent += 50 {
 		r.send(provider.Event{Type: provider.EventTypeAudioDelta, Audio: make([]byte, 50*frameBytes)})
 	}
-	r.send(provider.Event{Type: provider.EventTypeOutputTranscript, Text: heldOpeningLine, IsFinal: true})
+	r.send(provider.Event{Type: provider.EventTypeOutputTranscript, Text: r.opening, IsFinal: true})
 	r.ended()
 	waitLong(t, "the opening to be queued", func() bool {
 		r.session.mu.Lock()
 		defer r.session.mu.Unlock()
-		return r.session.turnSeq == 1 && !r.session.isResponding && r.session.framesQueued >= heldOpeningFrames-2
+		return r.session.turnSeq == 1 && !r.session.isResponding && r.session.framesQueued >= r.openingFrames-2
 	})
 	return frameBytes
 }
@@ -415,10 +426,11 @@ func (r *leadRig) cutOpeningWithWords(t *testing.T, heard int, words string) {
 }
 
 // 5. Words ("好吧。", judged WORDS: no cut refusal and, before #612, no replay)
-// cut the opening before its final sentence, as on production calls at 1.1 to
+// cut the opening before its final clause, as on production calls at 1.1 to
 // 3.4 s of play, and the reply calls the agreement: the callee has not heard
 // the offer, so it is refused and the opening is said again, the reply muted.
-// Words in the final sentence are an answer to it: the agreement runs.
+// Words in the final clause (#598), the question, are an answer to it: the
+// agreement runs.
 func TestWordsCuttingTheOpeningEarlyRefuseTheAgreementAndSayItAgain(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
@@ -454,9 +466,9 @@ func TestWordsCuttingTheOpeningEarlyRefuseTheAgreementAndSayItAgain(t *testing.T
 			}
 		})
 	}
-	t.Run("in the final sentence", func(t *testing.T) {
+	t.Run("in the final clause", func(t *testing.T) {
 		r := newLeadRig(t, leadRigOptions{opening: heldOpeningLine})
-		r.cutOpeningWithWords(t, heldOpeningFrames-50, "好的，要的。") // 1 s of 11 s left
+		r.cutOpeningWithWords(t, heldOpeningFrames-50, "好的，要的。") // 1 s of 11 s left: in "请问您需要吗？"
 		r.agree("fc_1")
 		r.ended()
 		r.assertAgreed(t, r.result(t, 1))
@@ -543,7 +555,7 @@ func TestAnAgreementWhileTheReplayStillPlaysIsRefused(t *testing.T) {
 	}
 }
 
-// 6. The replay is cut before its final sentence (the engine cancels it before
+// 6. The replay is cut before its final clause (the engine cancels it before
 // it reports the speech) and the reply calls the agreement: refused, and the
 // opening is not said a second time. The callee's answer after hearing the
 // reply in full then runs.
@@ -794,19 +806,21 @@ func TestOnOpenAITheCallAnswersTheTurnItWasAskedFor(t *testing.T) {
 	r.assertLine(t, 1, "verdict=DECLINED", "final=AFTER_CALL", "callerTurn=1")
 }
 
-// On openai words held over the opening take the floor once known; an
-// agreement made in answer to them is refused under A as on any engine, and
-// the opening is said again.
-func TestOnOpenAIWordsHeldOverTheOpeningRefuseTheAgreement(t *testing.T) {
-	r := newLeadRig(t, leadRigOptions{profile: provider.OpenAIProfile(), opening: heldOpeningLine})
-	r.leg.holdFrames(400)
+// heldWordsOverOpening plays the opening on openai, which holds speech over it
+// and never cuts by itself, with left of its heldOpeningFrames still to be
+// heard when the callee speaks: the words ("好吧", not an acknowledgement) take
+// the floor once known, the caller's turn is asked for, its final comes and
+// the reply starts. The reply's tool call is left to the test.
+func (r *leadRig) heldWordsOverOpening(t *testing.T, left int) {
+	t.Helper()
+	r.leg.holdFrames(left)
 	r.started()
-	r.send(provider.Event{Type: provider.EventTypeAudioDelta, Audio: make([]byte, media.FrameSamples*550)})
+	r.send(provider.Event{Type: provider.EventTypeAudioDelta, Audio: make([]byte, media.FrameSamples*heldOpeningFrames)})
 	r.ended()
 	waitFor(t, "the opening to be queued", func() bool {
 		r.session.mu.Lock()
 		defer r.session.mu.Unlock()
-		return r.session.turnSeq == 1 && !r.session.isResponding && r.session.framesQueued >= 548
+		return r.session.turnSeq == 1 && !r.session.isResponding && r.session.framesQueued >= heldOpeningFrames-2
 	})
 	r.speechStarted("u1")
 	r.send(provider.Event{Type: provider.EventTypeInputTranscript, ItemID: "u1", Text: "好吧"})
@@ -816,6 +830,14 @@ func TestOnOpenAIWordsHeldOverTheOpeningRefuseTheAgreement(t *testing.T) {
 	waitFor(t, "the caller's turn to be asked for", func() bool { return len(r.hold.answers()) == 1 })
 	r.final("u1", "好吧。")
 	r.started()
+}
+
+// On openai words held over the opening take the floor once known; an
+// agreement made in answer to them is refused under A as on any engine, and
+// the opening is said again.
+func TestOnOpenAIWordsHeldOverTheOpeningRefuseTheAgreement(t *testing.T) {
+	r := newLeadRig(t, leadRigOptions{profile: provider.OpenAIProfile(), opening: heldOpeningLine})
+	r.heldWordsOverOpening(t, 400)
 	r.agree("fc_1")
 	out := r.result(t, 1)
 	waitFor(t, "the opening to be said again", func() bool { return len(r.model.spokenLines()) >= 1 })
@@ -880,6 +902,366 @@ func TestAToolCallAnswersTheUtteranceThatEndedBeforeItsResponse(t *testing.T) {
 	})
 	if text, _, _, _ := session.callerFinal(call.answered); text != "不要" {
 		t.Errorf("u1's final = %q", text)
+	}
+}
+
+//
+// #598: rule A hears the opening from its final clause.
+//
+
+// noCommaOpeningLine is twoPartOpeningLine with no separator inside its long
+// sentence: that whole sentence, 40 of the line's 52 letters, is its final
+// clause, as it is its final sentence.
+const noCommaOpeningLine = "您好，我是套餐续约专员小安。给您来电是想告诉您现在续约套餐可以享受八折优惠每月还多送一百分钟通话请问您需要吗？"
+
+// openingHeardRows are the openings and moments #598 is about, over the
+// 11 s of heldOpeningFrames. twoPartOpeningLine's final sentence is about the
+// last 8.5 s, its final clause ("请问您需要吗") about the last 1.3 s; each gets
+// finalSentenceSlack.
+var openingHeardRows = []struct {
+	name  string
+	line  string
+	heard int // frames of heldOpeningFrames heard when the callee speaks
+	// isUnheard is rule A's verdict, by the final clause. isSentenceHeard is
+	// what the final sentence says of the same moment (before #598).
+	isUnheard, isSentenceHeard bool
+}{
+	{"two-part, 3 s in: inside the offer", twoPartOpeningLine, 150, true, true},
+	{"two-part, 2 s left: just before the question", twoPartOpeningLine, heldOpeningFrames - 100, true, true},
+	{"two-part, 1 s left: in the question", twoPartOpeningLine, heldOpeningFrames - 50, false, true},
+	{"no comma, 3 s in: inside its last sentence", noCommaOpeningLine, 150, false, true},
+	{"no comma, 1.5 s in: inside the greeting", noCommaOpeningLine, 75, true, false},
+}
+
+// Both of rule A's inputs date the opening by its final clause (#598): a
+// speech start over it (isOverUnheardOpening: openai's held speech, and speech
+// no cut accompanies on any engine) and an engine's own cut of it once it has
+// finished generating (noteOpeningCut: the utterance under way is marked, or,
+// with none under way, the next speech start). An opening whose last sentence
+// has no separator is dated as it was by the sentence.
+func TestRuleADatesTheOpeningByItsFinalClause(t *testing.T) {
+	for _, tc := range openingHeardRows {
+		t.Run(tc.name, func(t *testing.T) {
+			played := time.Duration(tc.heard*frameDurationMs) * time.Millisecond
+			unplayed := time.Duration((heldOpeningFrames-tc.heard)*frameDurationMs) * time.Millisecond
+			if _, ok := cutInFinalSentence(tc.line, played, unplayed); ok != tc.isSentenceHeard {
+				t.Fatalf("by the final sentence the moment is heard = %v, want %v: not the case asked for",
+					ok, tc.isSentenceHeard)
+			}
+			newSession := func() *Session {
+				leg := newFakeLeg(media.LawMu)
+				leg.holdFrames(heldOpeningFrames - tc.heard)
+				s := &Session{leg: leg, turnSeq: 1, framesQueued: heldOpeningFrames}
+				s.cfg.Session.OpeningText = tc.line
+				return s
+			}
+			cut := &openCut{isOpening: true, isOpeningLine: true, event: Event{Played: played, Unplayed: unplayed}}
+
+			s := newSession()
+			if got := s.isOverUnheardOpening(); got != tc.isUnheard {
+				t.Errorf("a speech start: isOverUnheardOpening = %v, want %v", got, tc.isUnheard)
+			}
+
+			s = newSession()
+			s.ct.add(&callerTurn{seq: 1, done: make(chan struct{})})
+			s.bc.mu.Lock()
+			s.noteOpeningCut(cut)
+			s.bc.mu.Unlock()
+			if got := s.ct.list[0].isOpeningUnheard; got != tc.isUnheard {
+				t.Errorf("a cut with speech under way: isOpeningUnheard = %v, want %v", got, tc.isUnheard)
+			}
+
+			s = newSession()
+			s.bc.mu.Lock()
+			s.noteOpeningCut(cut)
+			s.bc.mu.Unlock()
+			if got := !s.ct.openingCutAt.IsZero(); got != tc.isUnheard {
+				t.Errorf("a cut before the speech start: the next start marked = %v, want %v", got, tc.isUnheard)
+			}
+		})
+	}
+}
+
+// cutTimes is how much of the opening the callee had heard at the cut
+// (cutOpeningWithWords), and how much was left.
+func (r *leadRig) cutTimes(t *testing.T) (played, unplayed time.Duration) {
+	t.Helper()
+	r.session.bc.mu.Lock()
+	defer r.session.bc.mu.Unlock()
+	if r.session.bc.cut == nil {
+		t.Fatal("the opening was not cut")
+	}
+	return r.session.bc.cut.event.Played, r.session.bc.cut.event.Unplayed
+}
+
+// assertOpeningUnheard checks the first guarded call was refused under A with
+// the opening said again, once and as written, on #610's once-per-call budget.
+func (r *leadRig) assertOpeningUnheard(t *testing.T) {
+	t.Helper()
+	out := r.result(t, 1)
+	waitFor(t, "the opening to be said again", func() bool { return len(r.model.spokenLines()) >= 1 })
+	r.ended()
+	r.assertRefused(t, out, "开场白会再对他说一遍")
+	if got := r.model.spokenLines(); !slices.Equal(got, []string{r.opening}) {
+		t.Errorf("spoken = %v, want the opening once, as written", got)
+	}
+	if !r.session.isOpeningSaidAgain() {
+		t.Error("the opening was said again outside the once-per-call budget")
+	}
+	r.assertLine(t, 1, "guard=A", "verdict=OPENING_UNHEARD", "isRefused=true", "isOpeningSaidAgain=true")
+}
+
+// assertNothingSaidAgain checks, once everything sent has been handled, that
+// no line was said.
+func (r *leadRig) assertNothingSaidAgain(t *testing.T) {
+	t.Helper()
+	r.probe(t)
+	if got := r.model.spokenLines(); len(got) != 0 {
+		t.Errorf("said %v, want no line", got)
+	}
+}
+
+// The production call of #598: on the two-part opening (twoPartOpeningLine:
+// a short greeting, then one long sentence that carries the offer and ends in
+// the question) background speech transcribed "好吧。" began about 3 s in.
+// Dated by the final sentence it was past A, B found no refusal in it, and the
+// agreement recorded HIGH. Dated by the final clause, words that cut the
+// opening anywhere before its question refuse the agreement, and the opening
+// is said again; words in the question are an answer, and B judges them. On an
+// engine that cuts by itself both of A's inputs see the cut (qwen).
+func TestWordsBeforeATwoPartOpeningsFinalClauseRefuseTheAgreement(t *testing.T) {
+	for _, tc := range openingHeardRows[:2] {
+		t.Run(tc.name, func(t *testing.T) {
+			r := newLeadRig(t, leadRigOptions{opening: tc.line})
+			r.cutOpeningWithWords(t, tc.heard, "好吧。")
+			played, unplayed := r.cutTimes(t)
+			if _, ok := cutInFinalSentence(tc.line, played, unplayed); !ok {
+				t.Fatalf("a cut %v in with %v left is not in the final sentence: not the case of #598", played, unplayed)
+			}
+			r.agree("fc_1")
+			r.assertOpeningUnheard(t)
+			if line := r.cutDecisionLine(t); !strings.Contains(line, "verdict=WORDS") || !strings.Contains(line, "isRefused=false") {
+				t.Errorf("the cut's own decision = %q, want words, not refused", line)
+			}
+		})
+	}
+	t.Run(openingHeardRows[2].name, func(t *testing.T) {
+		r := newLeadRig(t, leadRigOptions{opening: twoPartOpeningLine})
+		r.cutOpeningWithWords(t, openingHeardRows[2].heard, "好吧。")
+		r.agree("fc_1")
+		r.ended()
+		r.assertAgreed(t, r.result(t, 1))
+		r.assertLine(t, 1, "guard=B", "verdict=WORDS", "isRefused=false")
+		r.assertNothingSaidAgain(t)
+	})
+}
+
+// record_lead with an interest is judged as the agreement is (#598): HIGH or
+// MEDIUM on words before the two-part opening's question is refused, nothing
+// is written and the opening is said again; on words in the question it is
+// written.
+func TestRecordLeadOverATwoPartOpeningIsJudgedByItsFinalClause(t *testing.T) {
+	for _, intent := range []string{"HIGH", "MEDIUM"} {
+		args := `{"intent":"` + intent + `","notes":"wants the renewal"}`
+		t.Run(intent+", 3 s in", func(t *testing.T) {
+			r := newLeadRig(t, leadRigOptions{opening: twoPartOpeningLine})
+			r.cutOpeningWithWords(t, openingHeardRows[0].heard, "好吧。")
+			r.call("fc_1", flow.ToolRecordLead, args)
+			r.assertOpeningUnheard(t)
+			r.assertLine(t, 1, "tool="+flow.ToolRecordLead)
+		})
+		t.Run(intent+", in the question", func(t *testing.T) {
+			r := newLeadRig(t, leadRigOptions{opening: twoPartOpeningLine})
+			r.cutOpeningWithWords(t, openingHeardRows[2].heard, "好吧。")
+			r.call("fc_1", flow.ToolRecordLead, args)
+			r.ended()
+			if out := r.result(t, 1); !strings.Contains(out, `"ok":"1"`) {
+				t.Errorf("record_lead = %s, want it run", out)
+			}
+			if got := r.leads.intents(); !slices.Equal(got, []string{intent}) {
+				t.Errorf("leads written = %v, want %s", got, intent)
+			}
+			r.assertLine(t, 1, "tool="+flow.ToolRecordLead, "guard=B", "verdict=WORDS", "isRefused=false")
+			r.assertNothingSaidAgain(t)
+		})
+	}
+}
+
+// On openai, which holds speech over the opening and never cuts by itself, the
+// speech start is A's one input (isOverUnheardOpening): "好吧" 3 s into the
+// two-part opening refuses the agreement and the opening is said again; in its
+// question the agreement runs and HIGH is written (#598).
+func TestOnOpenAIATwoPartOpeningIsHeardFromItsFinalClause(t *testing.T) {
+	t.Run(openingHeardRows[0].name, func(t *testing.T) {
+		r := newLeadRig(t, leadRigOptions{profile: provider.OpenAIProfile(), opening: twoPartOpeningLine})
+		r.heldWordsOverOpening(t, heldOpeningFrames-openingHeardRows[0].heard)
+		r.agree("fc_1")
+		r.assertOpeningUnheard(t)
+	})
+	t.Run(openingHeardRows[2].name, func(t *testing.T) {
+		r := newLeadRig(t, leadRigOptions{profile: provider.OpenAIProfile(), opening: twoPartOpeningLine})
+		r.heldWordsOverOpening(t, heldOpeningFrames-openingHeardRows[2].heard)
+		r.agree("fc_1")
+		r.ended()
+		r.assertAgreed(t, r.result(t, 1))
+		r.assertLine(t, 1, "guard=B", "verdict=WORDS", "isRefused=false")
+		r.assertNothingSaidAgain(t)
+	})
+}
+
+// An opening whose long last sentence has no separator is one clause there,
+// as it was one sentence (#598): words 3 s in, inside that sentence, are past
+// A as before, and B lets "好吧。" run.
+func TestAnOpeningWithNoCommaInItsLastSentenceIsHeardAsBefore(t *testing.T) {
+	r := newLeadRig(t, leadRigOptions{opening: noCommaOpeningLine})
+	r.cutOpeningWithWords(t, openingHeardRows[3].heard, "好吧。")
+	r.agree("fc_1")
+	r.ended()
+	r.assertAgreed(t, r.result(t, 1))
+	r.assertLine(t, 1, "guard=B", "verdict=WORDS", "isRefused=false")
+	r.assertNothingSaidAgain(t)
+}
+
+// acknowledgeLeadFlow is leadGuardFlow with the tool #633's flow calls on an
+// acknowledgement: acknowledge, a slot tool that moves the offer into a phase
+// declaring a MEDIUM lead.
+const acknowledgeLeadFlow = `{
+	"id": "lead-guard-acknowledge",
+	"specVersion": "v2",
+	"initialNode": "offer",
+	"global": {"persona": "You renew plans.", "closingTarget": "bye"},
+	"tools": {
+		"classify": {"kind": "slot", "slot": "answer", "description": "Record the decision.",
+			"enum": ["agree", "decline"]},
+		"acknowledge": {"kind": "slot", "slot": "heard", "description": "Record that the callee acknowledged the offer."},
+		"note": {"kind": "slot", "slot": "note", "description": "Record a note."}
+	},
+	"nodes": {
+		"offer": {
+			"instruction": "Offer the renewal.",
+			"tools": ["classify", "acknowledge", "note", "hangup"],
+			"isFlowHangupAllowed": true,
+			"transitions": [
+				{"on": "TOOL_RESULT", "tool": "classify", "condition": {"slot": "answer", "op": "EQ", "value": "agree"}, "target": "agreed"},
+				{"on": "TOOL_RESULT", "tool": "classify", "condition": {"slot": "answer", "op": "EQ", "value": "decline"}, "target": "declined"},
+				{"on": "TOOL_RESULT", "tool": "acknowledge", "target": "interested"},
+				{"on": "TOOL_RESULT", "tool": "hangup", "target": "bye"}
+			]
+		},
+		"agreed": {"instruction": "Tell them how to order.", "tools": ["note"],
+			"lead": {"intent": "HIGH", "notes": "Agreed to renew."}},
+		"interested": {"instruction": "Tell them more about the renewal.", "tools": ["note"],
+			"lead": {"intent": "MEDIUM", "notes": "Acknowledged the offer."}},
+		"declined": {"instruction": "Thank them.", "tools": ["note"],
+			"lead": {"intent": "LOW", "notes": "Declined."}},
+		"bye": {"instruction": "Close.", "announce": {"en": "Goodbye.", "zh": "再见。"}, "tools": [], "isTerminal": true}
+	}
+}`
+
+// The opening of #633 has twoPartOpeningLine's shape and lasts about 9 s
+// (greetedOpeningFrames): its greeting sentence, 12 of its 52 letters, ends
+// about 2.1 s in, and the callee's 「好。」 cut it at 2320 ms
+// (greetedHeardFrames), just after that sentence.
+const (
+	greetedOpeningFrames = 450 // 9 s
+	greetedHeardFrames   = 116 // 2320 ms
+)
+
+// #633, a production call on v0.8.9 that #598's final clause fixes. The callee
+// said 「好。」 just after the greeting of a two-part opening: inside its final
+// sentence, the long one that carries the offer and ends in the question, and
+// well before its final clause, the question. The engine (qwen) cut the
+// opening, and the reply to the cut called the agreement, refused by the cut
+// refusals as an acknowledgement. Dated by the final sentence the cut did not
+// owe the opening, so nothing was said again; a later response, with no new
+// words from the callee, called the flow's acknowledgement tool, rule A did
+// not see the words as said over the unheard opening, rule B found them words,
+// and the MEDIUM lead was written although the callee had heard none of the
+// offer. Dated by the final clause the opening is owed and said again on the
+// reply, and the later call is refused under A, with no second replay and no
+// lead.
+func TestAnAcknowledgementJustAfterTheOpeningsGreetingRecordsNoLead(t *testing.T) {
+	r := newLeadRig(t, leadRigOptions{opening: twoPartOpeningLine, openingFrames: greetedOpeningFrames,
+		flow: acknowledgeLeadFlow})
+	r.cutOpeningWithWords(t, greetedHeardFrames, "好。")
+
+	// The moment of #633: in the final sentence, before the final clause.
+	played, unplayed := r.cutTimes(t)
+	if played != 2320*time.Millisecond || played+unplayed != 9*time.Second {
+		t.Fatalf("the cut came %v into a line of %v, want 2.32 s of 9 s", played, played+unplayed)
+	}
+	if _, ok := cutInFinalSentence(twoPartOpeningLine, played, unplayed); !ok {
+		t.Fatalf("a cut %v in with %v left is not in the final sentence: not the case of #633", played, unplayed)
+	}
+	if _, ok := cutInFinalClause(twoPartOpeningLine, played, unplayed); ok {
+		t.Fatalf("a cut %v in with %v left is in the final clause: not the case of #633", played, unplayed)
+	}
+
+	// 1. The reply to the cut calls the agreement: refused as an
+	// acknowledgement, and the opening, owed, is said again with the reply
+	// muted. The cut refusals judge it, not the lead guard.
+	r.agree("fc_1")
+	out := r.result(t, 1)
+	line := r.cutDecisionLine(t)
+	for _, want := range []string{"tool=classify", "verdict=ACKNOWLEDGEMENT", "isOpening=true", "playedMs=2320",
+		"isRefused=true", "isOpeningSaidAgain=true"} {
+		if !strings.Contains(line, want) {
+			t.Errorf("the cut's decision line %q lacks %s", line, want)
+		}
+	}
+	assertAcknowledgementRefusal(t, out, true)
+	waitFor(t, "the opening to be said again", func() bool { return len(r.model.spokenLines()) >= 1 })
+	r.ended()
+	r.assertRefused(t, out, "只是应了一声")
+	if got := r.model.spokenLines(); !slices.Equal(got, []string{twoPartOpeningLine}) {
+		t.Errorf("spoken = %v, want the opening once, as written", got)
+	}
+	if !r.session.isOpeningSaidAgain() {
+		t.Error("the opening was said again outside the once-per-call budget")
+	}
+	r.session.mu.Lock()
+	muted := r.session.mutedTurn
+	r.session.mu.Unlock()
+	if muted != 2 {
+		t.Errorf("muted turn = %d, want the reply to the cut (2)", muted)
+	}
+	if got := r.guardLines(); len(got) != 0 {
+		t.Errorf("the lead guard judged the reply's call too: %q", got)
+	}
+
+	// The replay, a line of its own, still playing.
+	frameBytes := 2 * media.RateProviderOut / 50
+	r.leg.holdFrames(1 << 20)
+	r.send(provider.Event{Type: provider.EventTypeResponseStarted, IsSpokenLine: true})
+	r.send(provider.Event{Type: provider.EventTypeAudioDelta, Audio: make([]byte, 100*frameBytes)})
+	r.send(provider.Event{Type: provider.EventTypeOutputTranscript, Text: twoPartOpeningLine, IsFinal: true})
+	r.ended()
+
+	// 2. A later response, the callee silent since 「好。」, calls the
+	// acknowledgement tool: the words it answers are still the ones that cut
+	// the opening before its final clause, so A refuses it, and the budget is
+	// spent.
+	r.started()
+	waitFor(t, "the later response", func() bool {
+		r.session.mu.Lock()
+		defer r.session.mu.Unlock()
+		return r.session.turnSeq == 4
+	})
+	r.call("fc_2", "acknowledge", `{"value":"heard"}`)
+	r.ended()
+	r.assertRefused(t, r.result(t, 2), "先确认对方听清了内容")
+	r.assertLine(t, 1, "tool=acknowledge", "turn=4", "callerTurn=1", "guard=A", "verdict=OPENING_UNHEARD",
+		"isRefused=true", "final=BEFORE_CALL", "isOpeningSaidAgain=false")
+	if got := len(r.finalWait.waits()); got != 0 {
+		t.Errorf("guard A waited %d times for a final", got)
+	}
+	r.leg.holdFrames(0)
+	r.probe(t)
+	if got := r.model.spokenLines(); len(got) != 1 {
+		t.Errorf("spoken = %v, want the opening said again once", got)
+	}
+	if got := r.leads.intents(); len(got) != 0 {
+		t.Errorf("leads written = %v, want none", got)
 	}
 }
 

@@ -124,7 +124,7 @@ type openCut struct {
 	verdict       cutVerdict
 	done          chan struct{}
 	// isOpeningUnheard says an acknowledgement cut the opening before its
-	// final sentence while it could still be said again: no answer to an
+	// final clause while it could still be said again: no answer to an
 	// offer the callee has not heard, so the opening is owed once more (#610).
 	isOpeningUnheard bool
 	// isReplayAsked says the opening was asked for again on this cut's verdict
@@ -554,7 +554,7 @@ func (s *Session) cutFor(turn int) *openCut {
 // replaces the cut). A greeting over the opening is not an acknowledgement and
 // is not reported there, nor is a blank final over an opening that can still
 // be said again (#610). Either returns the cut, and so does an acknowledgement
-// that cut the opening before its final sentence (#610): the transcript's
+// that cut the opening before its final clause (#610, #598): the transcript's
 // event carries it and the orchestrator, which knows the phase and the ending,
 // can say the opening again (Session.SayOpeningAgain).
 func (s *Session) noteCutVerdict(event provider.Event) (replayCut *openCut) {
@@ -569,8 +569,8 @@ func (s *Session) noteCutVerdict(event provider.Event) (replayCut *openCut) {
 	switch {
 	case !isGreeting && replayCut == nil:
 		// Words answer what the opening was owed to; so does an
-		// acknowledgement heard over its final sentence, or over a replay. A
-		// greeting, or an acknowledgement before the final sentence (#610),
+		// acknowledgement heard over its final clause, or over a replay. A
+		// greeting, or an acknowledgement before the final clause (#610),
 		// leaves it owed until it is replayed.
 		s.bc.isOpeningOwed = false
 	case isGreeting && replayCut == nil && s.bc.isOpeningOwed:
@@ -596,7 +596,7 @@ func (s *Session) noteCutVerdict(event provider.Event) (replayCut *openCut) {
 // (noteCutVerdict). It returns the cut when the verdict says the opening is to
 // be said again: a greeting over it, or, while it can still be said again,
 // words left unknown by a blank final or an acknowledgement before its final
-// sentence (#610).
+// clause (#610, #598).
 func (s *Session) judgeCut(event provider.Event) (replayCut *openCut) {
 	// Asked before bc.mu, and with no lock held (isOpeningReplayable).
 	isReplayable := s.isOpeningReplayable()
@@ -627,12 +627,12 @@ func (s *Session) judgeCut(event provider.Event) (replayCut *openCut) {
 	isWordsUnknown := text == "" && cut.isOpening && isReplayable
 	// An acknowledgement over the opening is no answer to an offer the callee
 	// has not heard either (#610), unless it fell in the opening's final
-	// sentence: then the callee heard all of it but the end, and it is the
+	// clause (#598): then the callee heard all of it but the end, and it is the
 	// acknowledgement it always was.
-	var finalSentence time.Duration
+	var finalClause time.Duration
 	isHeardToEnd := false
 	if isAck && cut.isOpening && isReplayable {
-		finalSentence, isHeardToEnd = s.openingHeardToItsEnd(cut)
+		finalClause, isHeardToEnd = s.openingHeardToItsEnd(cut)
 		cut.isOpeningUnheard = !isHeardToEnd
 	}
 	isOpeningUnheard := cut.isOpeningUnheard
@@ -670,13 +670,13 @@ func (s *Session) judgeCut(event provider.Event) (replayCut *openCut) {
 		"text", text, "turn", cut.event.Turn)
 	switch {
 	case isOpeningUnheard:
-		s.log.Info("the acknowledgement cut the opening before its final sentence; the opening is owed once more",
+		s.log.Info("the acknowledgement cut the opening before its final clause; the opening is owed once more",
 			"turn", cut.event.Turn, "playedMs", cut.event.Played.Milliseconds(),
 			"unplayedMs", cut.event.Unplayed.Milliseconds())
 	case isHeardToEnd:
-		s.log.Info("the acknowledgement fell in the opening's final sentence; the opening counts as heard",
+		s.log.Info("the acknowledgement fell in the opening's final clause; the opening counts as heard",
 			"turn", cut.event.Turn, "playedMs", cut.event.Played.Milliseconds(),
-			"unplayedMs", cut.event.Unplayed.Milliseconds(), "finalSentenceMs", finalSentence.Milliseconds())
+			"unplayedMs", cut.event.Unplayed.Milliseconds(), "finalClauseMs", finalClause.Milliseconds())
 	}
 	if s.cfg.OnCutAcknowledged != nil {
 		s.cfg.OnCutAcknowledged(cut.event)
@@ -688,20 +688,21 @@ func (s *Session) judgeCut(event provider.Event) (replayCut *openCut) {
 }
 
 // openingHeardToItsEnd reports whether a cut of the opening fell in its final
-// sentence, with that sentence's estimated length: the estimate #465 makes for
-// an armed closing line (cutInFinalSentence), on the opening's rendered text.
-// Only a cut of the opening line's own turn, made after it finished generating
-// (its whole length is then known), is dated; any other cut is before the end.
-func (s *Session) openingHeardToItsEnd(cut *openCut) (finalSentence time.Duration, ok bool) {
+// clause, with that clause's estimated length: the estimate #465 makes for an
+// armed closing line, by the clause and not the sentence (cutInFinalClause,
+// #598), on the opening's rendered text. Only a cut of the opening line's own
+// turn, made after it finished generating (its whole length is then known), is
+// dated; any other cut is before the end.
+func (s *Session) openingHeardToItsEnd(cut *openCut) (finalClause time.Duration, ok bool) {
 	if !cut.isOpeningLine || cut.event.IsGenerating {
 		return 0, false
 	}
-	return cutInFinalSentence(s.cfg.Session.OpeningText, cut.event.Played, cut.event.Unplayed)
+	return cutInFinalClause(s.cfg.Session.OpeningText, cut.event.Played, cut.event.Unplayed)
 }
 
 // openingReplayOf reports, for a cut, whether its verdict owes the opening once
 // more (a greeting, words not known, or an acknowledgement before the final
-// sentence) and whether it has been asked for again on it.
+// clause) and whether it has been asked for again on it.
 func (s *Session) openingReplayOf(cut *openCut) (isOwed, isAsked bool) {
 	s.bc.mu.Lock()
 	defer s.bc.mu.Unlock()
