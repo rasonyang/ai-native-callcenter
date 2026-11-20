@@ -232,17 +232,22 @@ type Config struct {
 	// built-in value.
 	ProviderEndpoint string
 	ProviderModel    string
-	// ProviderSessionRPM and ProviderTokenRPM replace the provider profile's
-	// per-minute quota (session starts, and tokens in and out together), which
-	// campaign admission paces itself by (#604). Unset (Is...Set false) keeps
+	// ProviderSessionLimit over ProviderSessionPeriod, and ProviderTokenLimit
+	// over ProviderTokenPeriod, replace the provider profile's quota (session
+	// starts, and tokens in and out together), which campaign admission and a
+	// campaign call's session start pace themselves by (#604, #644). Each is
+	// set by AICC_PROVIDER_*_LIMIT with AICC_PROVIDER_*_PERIOD (a Go duration;
+	// empty is 60s), or by AICC_PROVIDER_*_RPM, the same limit over 60s; never
+	// both. ...LimitFrom names the setting that gave the limit: empty keeps
 	// the profile's default, which is set only where a vendor document gives
-	// one for the default model; 0 turns that limit off.
-	ProviderSessionRPM      int
-	IsProviderSessionRPMSet bool
-	providerSessionRPMErr   error // a malformed value, refused by validate
-	ProviderTokenRPM        int
-	IsProviderTokenRPMSet   bool
-	providerTokenRPMErr     error // a malformed value, refused by validate
+	// one for the default model. A limit of 0 turns it off.
+	ProviderSessionLimit     int
+	ProviderSessionPeriod    time.Duration
+	ProviderSessionLimitFrom string
+	ProviderTokenLimit       int
+	ProviderTokenPeriod      time.Duration
+	ProviderTokenLimitFrom   string
+	providerQuotaErrs        []error // malformed or conflicting settings, refused by validate
 
 	// IsTranscriptionEnabled turns live transcription of the human phase off
 	// entirely. Off by default: it is a new external dependency, a new
@@ -488,8 +493,8 @@ func Load() (Config, error) {
 	dialForm, dialFormErr := phonenum.ParseDialForm(env("AICC_OUTBOUND_DIAL_FORM", ""))
 	outboundHeaders, outboundHeadersErr := ParseOutboundSIPHeaders(env(outboundHeadersVar, ""))
 	outboundHours, outboundHoursErr := ParseOutboundHours(env("AICC_OUTBOUND_HOURS", DefaultOutboundHours))
-	sessionRPM, isSessionRPMSet, sessionRPMErr := envCountIfSet("AICC_PROVIDER_SESSION_RPM")
-	tokenRPM, isTokenRPMSet, tokenRPMErr := envCountIfSet("AICC_PROVIDER_TOKEN_RPM")
+	sessionLimit, sessionPeriod, sessionFrom, sessionErrs := envProviderLimit("SESSION")
+	tokenLimit, tokenPeriod, tokenFrom, tokenErrs := envProviderLimit("TOKEN")
 	c := Config{
 		Env:                             env("AICC_ENV", "dev"),
 		HTTPAddr:                        env("AICC_HTTP_ADDR", ":8080"),
@@ -559,12 +564,13 @@ func Load() (Config, error) {
 		Provider:                      env("AICC_PROVIDER", "openai"),
 		ProviderEndpoint:              env("AICC_PROVIDER_ENDPOINT", ""),
 		ProviderModel:                 env("AICC_PROVIDER_MODEL", ""),
-		ProviderSessionRPM:            sessionRPM,
-		IsProviderSessionRPMSet:       isSessionRPMSet,
-		providerSessionRPMErr:         sessionRPMErr,
-		ProviderTokenRPM:              tokenRPM,
-		IsProviderTokenRPMSet:         isTokenRPMSet,
-		providerTokenRPMErr:           tokenRPMErr,
+		ProviderSessionLimit:          sessionLimit,
+		ProviderSessionPeriod:         sessionPeriod,
+		ProviderSessionLimitFrom:      sessionFrom,
+		ProviderTokenLimit:            tokenLimit,
+		ProviderTokenPeriod:           tokenPeriod,
+		ProviderTokenLimitFrom:        tokenFrom,
+		providerQuotaErrs:             append(sessionErrs, tokenErrs...),
 		IsBotEchoSuppressionEnabled:   envBool("AICC_BOT_ECHO_SUPPRESS", false),
 		OutboundEndpoint:              env("AICC_OUTBOUND_ENDPOINT", ""),
 		OutboundRingTimeout:           ringTimeout,
@@ -810,11 +816,7 @@ func (c Config) validate() error {
 	} else if err := ValidateOutboundSIPHeaders(c.OutboundSIPHeaders); err != nil {
 		errs = append(errs, err)
 	}
-	for _, err := range []error{c.providerSessionRPMErr, c.providerTokenRPMErr} {
-		if err != nil {
-			errs = append(errs, err)
-		}
-	}
+	errs = append(errs, c.providerQuotaErrs...)
 	if c.botNoInputErr != nil {
 		errs = append(errs, c.botNoInputErr)
 	} else if c.BotNoInputTimeout < MinBotNoInputTimeout || c.BotNoInputTimeout > MaxBotNoInputTimeout {
@@ -1027,6 +1029,55 @@ func envCountIfSet(key string) (n int, ok bool, err error) {
 		return 0, false, fmt.Errorf("%s=%q is not a whole number of at least 0; leave it empty for the provider profile's default, 0 for off", key, v)
 	}
 	return n, true, nil
+}
+
+// envProviderLimit reads one of the provider's quota limits (kind SESSION or
+// TOKEN) in either of its forms (#644): AICC_PROVIDER_<kind>_LIMIT with
+// AICC_PROVIDER_<kind>_PERIOD, a count over a Go duration (empty is 60s), or
+// AICC_PROVIDER_<kind>_RPM, the v0.9.0 form, the same count over 60s. from is
+// the setting that gave the limit, empty when neither form is set. Setting
+// both forms, a period without its limit, a period that is not a positive
+// duration, or a malformed count each comes back as an error naming the
+// setting, which validate refuses.
+func envProviderLimit(kind string) (limit int, period time.Duration, from string, errs []error) {
+	rpmKey := "AICC_PROVIDER_" + kind + "_RPM"
+	limitKey := "AICC_PROVIDER_" + kind + "_LIMIT"
+	periodKey := "AICC_PROVIDER_" + kind + "_PERIOD"
+	rpm, isRPMSet, err := envCountIfSet(rpmKey)
+	if err != nil {
+		errs = append(errs, err)
+	}
+	n, isLimitSet, err := envCountIfSet(limitKey)
+	if err != nil {
+		errs = append(errs, err)
+	}
+	p, isPeriodSet, err := envDurationIfSet(periodKey)
+	switch {
+	case err != nil:
+		errs = append(errs, fmt.Errorf("%s=%q is not a duration; use a Go duration such as 1s or 12s", periodKey, os.Getenv(periodKey)))
+	case isPeriodSet && p <= 0:
+		errs = append(errs, fmt.Errorf("%s must be a positive duration such as 1s or 12s, got %s", periodKey, p))
+	}
+	switch {
+	case envIsSet(rpmKey) && envIsSet(limitKey):
+		errs = append(errs, fmt.Errorf("%s and %s are both set; set one: %s counts over %s, %s over 60s",
+			rpmKey, limitKey, limitKey, periodKey, rpmKey))
+	case envIsSet(periodKey) && !envIsSet(limitKey):
+		errs = append(errs, fmt.Errorf("%s is set without %s; set the count with its period (%s is always over 60s)",
+			periodKey, limitKey, rpmKey))
+	}
+	switch {
+	case len(errs) > 0:
+		return 0, 0, "", errs
+	case isLimitSet:
+		if !isPeriodSet {
+			p = time.Minute
+		}
+		return n, p, limitKey, nil
+	case isRPMSet:
+		return rpm, time.Minute, rpmKey, nil
+	}
+	return 0, 0, "", nil
 }
 
 // loadDotEnv reads KEY=VALUE lines from path, without overriding existing

@@ -5,6 +5,7 @@ package provider
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/rasonyang/ai-native-callcenter/internal/media"
 )
@@ -341,25 +342,32 @@ func TestGASessionUpdateTranscriptionLanguageTrait(t *testing.T) {
 // setting wins either way, 0 turning a limit off (#604).
 func TestTheQuotaLimitsAreTheDefaultModelsAndOverridable(t *testing.T) {
 	t.Parallel()
+	const minute = time.Minute
 	tests := []struct {
-		name                 string
-		provider             string
-		override             Override
-		wantSession, wantTok int
+		name                       string
+		provider                   string
+		override                   Override
+		wantSession, wantTok       int
+		wantSessionPer, wantTokPer time.Duration
 	}{
-		{"qwen flash, Beijing, as documented", NameQwen, Override{}, 60, 100000},
-		{"qwen named by its own default model", NameQwen, Override{Model: "qwen-audio-3.1-realtime-flash"}, 60, 100000},
-		{"qwen on another model knows no limit", NameQwen, Override{Model: "qwen-audio-3.1-realtime-plus"}, 0, 0},
+		{"qwen flash, Beijing, as documented", NameQwen, Override{}, 60, 100000, minute, minute},
+		{"qwen named by its own default model", NameQwen, Override{Model: "qwen-audio-3.1-realtime-flash"}, 60, 100000, minute, minute},
+		{"qwen on another model knows no limit", NameQwen, Override{Model: "qwen-audio-3.1-realtime-plus"}, 0, 0, minute, minute},
 		{"another model with the deployment's own", NameQwen,
-			Override{Model: "qwen-audio-3.1-realtime-plus", SessionRPM: 120, IsSessionRPMSet: true}, 120, 0},
-		{"a limit turned off", NameQwen, Override{TokenRPM: 0, IsTokenRPMSet: true}, 60, 0},
-		{"doubao, per application id", NameDoubao, Override{}, 60, 100000},
-		{"doubao's model setting is ignored by its client", NameDoubao, Override{Model: "anything"}, 60, 100000},
-		{"openai depends on the account's tier", NameOpenAI, Override{}, 0, 0},
+			Override{Model: "qwen-audio-3.1-realtime-plus", SessionLimit: 120, IsSessionLimitSet: true}, 120, 0, minute, minute},
+		{"a limit turned off", NameQwen, Override{TokenLimit: 0, IsTokenLimitSet: true}, 60, 0, minute, minute},
+		{"doubao, per application id", NameDoubao, Override{}, 60, 100000, minute, minute},
+		{"doubao's model setting is ignored by its client", NameDoubao, Override{Model: "anything"}, 60, 100000, minute, minute},
+		{"openai depends on the account's tier", NameOpenAI, Override{}, 0, 0, minute, minute},
 		{"openai with the account's limits", NameOpenAI,
-			Override{SessionRPM: 200, IsSessionRPMSet: true, TokenRPM: 40000, IsTokenRPMSet: true}, 200, 40000},
-		{"grok", NameGrok, Override{}, 0, 0},
-		{"gateway", NameGateway, Override{}, 0, 0},
+			Override{SessionLimit: 200, IsSessionLimitSet: true, TokenLimit: 40000, IsTokenLimitSet: true}, 200, 40000, minute, minute},
+		// #644: a raised quota stated over the vendor's own periods.
+		{"qwen with a raised quota over short periods", NameQwen,
+			Override{SessionLimit: 3, SessionPeriod: time.Second, IsSessionLimitSet: true,
+				TokenLimit: 60000, TokenPeriod: 12 * time.Second, IsTokenLimitSet: true},
+			3, 60000, time.Second, 12 * time.Second},
+		{"grok", NameGrok, Override{}, 0, 0, minute, minute},
+		{"gateway", NameGateway, Override{}, 0, 0, minute, minute},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -367,9 +375,11 @@ func TestTheQuotaLimitsAreTheDefaultModelsAndOverridable(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if p.SessionRPM != tt.wantSession || p.TokenRPM != tt.wantTok {
-				t.Errorf("limits = %d sessions, %d tokens per minute, want %d and %d",
-					p.SessionRPM, p.TokenRPM, tt.wantSession, tt.wantTok)
+			if p.SessionLimit != tt.wantSession || p.TokenLimit != tt.wantTok ||
+				p.SessionPeriod != tt.wantSessionPer || p.TokenPeriod != tt.wantTokPer {
+				t.Errorf("limits = %d sessions per %s, %d tokens per %s, want %d per %s and %d per %s",
+					p.SessionLimit, p.SessionPeriod, p.TokenLimit, p.TokenPeriod,
+					tt.wantSession, tt.wantSessionPer, tt.wantTok, tt.wantTokPer)
 			}
 		})
 	}

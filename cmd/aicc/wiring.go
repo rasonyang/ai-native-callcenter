@@ -499,33 +499,56 @@ func voiceProfile(cfg config.Config) (provider.Profile, error) {
 		Model:           cfg.ProviderModel,
 		TranscribeModel: transcribeModel,
 		TranscribeOff:   transcribeOff,
-		SessionRPM:      cfg.ProviderSessionRPM,
-		IsSessionRPMSet: cfg.IsProviderSessionRPMSet,
-		TokenRPM:        cfg.ProviderTokenRPM,
-		IsTokenRPMSet:   cfg.IsProviderTokenRPMSet,
+
+		SessionLimit:      cfg.ProviderSessionLimit,
+		SessionPeriod:     cfg.ProviderSessionPeriod,
+		IsSessionLimitSet: cfg.ProviderSessionLimitFrom != "",
+		TokenLimit:        cfg.ProviderTokenLimit,
+		TokenPeriod:       cfg.ProviderTokenPeriod,
+		IsTokenLimitSet:   cfg.ProviderTokenLimitFrom != "",
 	})
 }
 
-// providerQuotaSummary says, in one line, the per-minute quota this deployment
-// paces campaigns by and where each number came from: the profile's default,
-// the deployment's setting, or neither (#604). aicc doctor and the startup log
-// print it.
+// providerQuotaSummary says, in one line, the quota this deployment paces
+// campaigns by, each limit a count over its period, and where each number came
+// from: the profile's default, the deployment's setting, or neither (#604,
+// #644). aicc doctor and the startup log print it.
 func providerQuotaSummary(cfg config.Config, profile provider.Profile) string {
-	describe := func(n int, isSet bool, unit, setting string) string {
+	describe := func(n int, period time.Duration, from, unit, kind string) string {
 		switch {
-		case isSet && n == 0:
-			return unit + ": off (" + setting + "=0)"
-		case isSet:
-			return fmt.Sprintf("%s: %d (%s)", unit, n, setting)
+		case from != "" && n == 0:
+			return unit + ": off (" + from + "=0)"
+		case from != "":
+			return fmt.Sprintf("%s: %d per %s (%s)", unit, n, quotaPeriod(period), from)
 		case n > 0:
-			return fmt.Sprintf("%s: %d (profile default for %s)", unit, n, profile.Model)
+			return fmt.Sprintf("%s: %d per %s (profile default for %s)", unit, n, quotaPeriod(period), profile.Model)
 		default:
-			return unit + ": unknown (set " + setting + " to the account's)"
+			return unit + ": unknown (set AICC_PROVIDER_" + kind + "_LIMIT and AICC_PROVIDER_" + kind +
+				"_PERIOD to the account's)"
 		}
 	}
-	return "quota per minute, " +
-		describe(profile.SessionRPM, cfg.IsProviderSessionRPMSet, "session starts", "AICC_PROVIDER_SESSION_RPM") + ", " +
-		describe(profile.TokenRPM, cfg.IsProviderTokenRPMSet, "tokens", "AICC_PROVIDER_TOKEN_RPM")
+	return "quota, " +
+		describe(profile.SessionLimit, profile.SessionPeriod, cfg.ProviderSessionLimitFrom, "session starts", "SESSION") + ", " +
+		describe(profile.TokenLimit, profile.TokenPeriod, cfg.ProviderTokenLimitFrom, "tokens", "TOKEN")
+}
+
+// quotaPeriod writes a quota's period the way the settings and the vendors
+// state it: 60s rather than 1m0s.
+func quotaPeriod(d time.Duration) string {
+	if d > 0 && d%time.Second == 0 {
+		return fmt.Sprintf("%ds", d/time.Second)
+	}
+	return d.String()
+}
+
+// perMinute is a quota limit as a rate per minute, which is what
+// aicc_provider_quota_per_minute publishes whatever period the vendor states
+// it over.
+func perMinute(limit int, period time.Duration) int {
+	if limit <= 0 || period <= 0 {
+		return 0
+	}
+	return int(int64(limit) * int64(time.Minute) / int64(period))
 }
 
 // flowPublishRules is what this deployment demands of a flow before it will let
@@ -621,12 +644,14 @@ func botUAS(cfg config.Config, slots *voice.BotSlots) voice.Config {
 // switch has a case per protocol, not per vendor, and it has one because one
 // other protocol is spoken here.
 //
-// Every session is counted here, before it dials, inbound and outbound alike:
-// on aicc_provider_sessions_started_total and, when the process has one, on the
-// rate meter campaign admission reads (#604). The session itself reports to the
-// same meter what its turns cost and whether the provider refused it for its
-// quota. A nil meter (aicc doctor, which opens one session and paces nothing)
-// leaves only the counter.
+// Every session is counted here, before it dials, inbound and outbound alike,
+// on aicc_provider_sessions_started_total. The rate meter campaign admission
+// reads counts it earlier, in the orchestrator, where a campaign call's start
+// waits for room in the provider's session window (#644,
+// OrchestratorConfig.SessionStarts). The session itself reports to the meter
+// what its turns cost and whether the provider refused it for its quota. A nil
+// meter (aicc doctor, which opens one session and paces nothing) leaves only
+// the counter.
 func voiceSessions(meter *ratemeter.Meter) aicall.SessionFactory {
 	var opts []provider.Option
 	if meter != nil {
@@ -634,7 +659,6 @@ func voiceSessions(meter *ratemeter.Meter) aicall.SessionFactory {
 	}
 	return func(profile provider.Profile, log *slog.Logger) (provider.VoiceSession, error) {
 		obs.RecordProviderSessionStarted(profile.Name)
-		meter.SessionStarted()
 		switch profile.Name {
 		case provider.NameDoubao:
 			return doubao.New(profile, log, opts...)
@@ -711,9 +735,12 @@ func botConfig(
 ) aicall.OrchestratorConfig {
 	return aicall.OrchestratorConfig{
 		UAS: uas,
-		// Every session is counted on the process's rate meter, which campaign
-		// admission reads (#604).
+		// Every session reports its tokens and refusals to the process's rate
+		// meter, which campaign admission reads (#604), and every start is
+		// counted on it, a campaign call's after waiting for room in the
+		// provider's session window (#644).
 		Sessions:           voiceSessions(quotaMeter),
+		SessionStarts:      quotaMeter,
 		Catalog:            catalogSvc,
 		Flows:              flows,
 		Switch:             sw,

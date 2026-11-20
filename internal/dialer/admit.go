@@ -313,7 +313,7 @@ func (d *Dialer) admitOne(ctx context.Context, c campaign.Campaign, b *bucket, n
 //	campaign in flight < max_concurrent
 //	DID outbound lines in use < the DID's limit
 //	botInUse + sum over campaigns (p_c x ringing_c) + 1 <= cap - inboundReserve
-//	the provider's quota per minute (providerHold)
+//	the provider's quota, each limit over its period (providerHold)
 //
 // botInUse counts the slots in use, those reserved for answered legs that have
 // not bridged yet, and the answered legs waiting in the overflow hold for one.

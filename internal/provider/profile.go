@@ -5,6 +5,7 @@ package provider
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/rasonyang/ai-native-callcenter/internal/media"
 )
@@ -219,19 +220,28 @@ type Profile struct {
 	// orchestrator, not by a client, so it is set on doubao's profile.
 	DropsToolResultAfterLine bool
 
-	// SessionRPM and TokenRPM are the provider's quota per minute, where a
-	// vendor document states it for the profile's default model: session
-	// starts (WebSocket connection establishments; turns inside a session do
-	// not count, a reconnect does) and tokens, input and output together. Zero
-	// is unknown, and campaign admission then holds for nothing but a refusal
-	// (docs/design/10-campaigns.md section 6.3). They are the account's, not
-	// the call's: a deployment whose plan differs says so with
-	// AICC_PROVIDER_SESSION_RPM and AICC_PROVIDER_TOKEN_RPM, and ProfileFor
-	// clears them when the deployment runs another model, whose limits this
-	// profile does not know (#604, docs/provider-extension.md "Quota").
-	SessionRPM int
-	TokenRPM   int
+	// SessionLimit and TokenLimit are the provider's quota, each a count over
+	// its period (SessionPeriod, TokenPeriod; ProfileFor makes a zero period
+	// QuotaPeriod), where a vendor document states it for the profile's
+	// default model: session starts (WebSocket connection establishments;
+	// turns inside a session do not count, a reconnect does) and tokens, input
+	// and output together. A limit of zero is unknown, and campaign admission
+	// then holds for nothing but a refusal (docs/design/10-campaigns.md section
+	// 6.3). They are the account's, not the call's: a deployment whose plan
+	// differs says so with the AICC_PROVIDER_SESSION_* and
+	// AICC_PROVIDER_TOKEN_* settings, and ProfileFor clears them when the
+	// deployment runs another model, whose limits this profile does not know
+	// (#604, #644, docs/provider-extension.md "Quota").
+	SessionLimit  int
+	SessionPeriod time.Duration
+	TokenLimit    int
+	TokenPeriod   time.Duration
 }
+
+// QuotaPeriod is the period a quota limit is counted over when none is
+// stated: the vendors' documents here state theirs per minute, and so do the
+// RPM settings.
+const QuotaPeriod = time.Minute
 
 // OpenAIProfile is the provider used outside mainland China.
 //
@@ -264,9 +274,10 @@ func OpenAIProfile() Profile {
 		// "auto", "required" or a forced function), read 2026-10-22. Not
 		// measured live here.
 		AcceptsResponseToolChoice: true,
-		// No SessionRPM or TokenRPM: this vendor's limits depend on the
+		// No SessionLimit or TokenLimit: this vendor's limits depend on the
 		// account's usage tier, so there is no number that is right for every
-		// deployment. AICC_PROVIDER_SESSION_RPM / _TOKEN_RPM set the account's.
+		// deployment. The AICC_PROVIDER_SESSION_* / _TOKEN_* settings set the
+		// account's.
 	}
 }
 
@@ -332,8 +343,8 @@ func QwenProfile() Profile {
 		// no limit on connections held at once (Model Studio rate limits,
 		// https://help.aliyun.com/zh/model-studio/rate-limit, "Qwen-Audio-
 		// Realtime", read 2026-11-18). Another model or region has its own.
-		SessionRPM: 60,
-		TokenRPM:   100000,
+		SessionLimit: 60, SessionPeriod: time.Minute,
+		TokenLimit: 100000, TokenPeriod: time.Minute,
 	}
 }
 
@@ -449,8 +460,8 @@ func DoubaoProfile() Profile {
 		// Documented per application id: 60 session.create and 100k tokens
 		// per minute (doubao-findings section 9, DOC-A). The protocol version
 		// is pinned in the client, so AICC_PROVIDER_MODEL does not clear them.
-		SessionRPM: 60,
-		TokenRPM:   100000,
+		SessionLimit: 60, SessionPeriod: time.Minute,
+		TokenLimit: 100000, TokenPeriod: time.Minute,
 	}
 }
 
@@ -542,12 +553,14 @@ type Override struct {
 	// leaving the variable empty. Off has to be something somebody can say.
 	TranscribeModel string
 	TranscribeOff   bool
-	// SessionRPM and TokenRPM replace the profile's per-minute quota when
-	// their Is...Set is true, 0 turning that limit off; unset keeps the
-	// profile's default. Two fields each for the reason TranscribeOff is one:
-	// an empty environment value means unset, and off has to be sayable.
-	SessionRPM, TokenRPM           int
-	IsSessionRPMSet, IsTokenRPMSet bool
+	// SessionLimit over SessionPeriod and TokenLimit over TokenPeriod replace
+	// the profile's quota when their Is...Set is true, 0 turning that limit
+	// off and a zero period meaning QuotaPeriod; unset keeps the profile's
+	// default. A separate flag for the reason TranscribeOff is one: an empty
+	// environment value means unset, and off has to be sayable.
+	SessionLimit, TokenLimit           int
+	SessionPeriod, TokenPeriod         time.Duration
+	IsSessionLimitSet, IsTokenLimitSet bool
 }
 
 // ProfileFor returns the profile of the provider this deployment runs, with
@@ -582,15 +595,21 @@ func ProfileFor(name string, override Override) (Profile, error) {
 		// model's is unknown here, so none is assumed. Doubao's model is a
 		// protocol version its client pins, so the setting does not reach it.
 		if override.Model != profile.Model && profile.Name != NameDoubao {
-			profile.SessionRPM, profile.TokenRPM = 0, 0
+			profile.SessionLimit, profile.TokenLimit = 0, 0
 		}
 		profile.Model = override.Model
 	}
-	if override.IsSessionRPMSet {
-		profile.SessionRPM = override.SessionRPM
+	if override.IsSessionLimitSet {
+		profile.SessionLimit, profile.SessionPeriod = override.SessionLimit, override.SessionPeriod
 	}
-	if override.IsTokenRPMSet {
-		profile.TokenRPM = override.TokenRPM
+	if override.IsTokenLimitSet {
+		profile.TokenLimit, profile.TokenPeriod = override.TokenLimit, override.TokenPeriod
+	}
+	if profile.SessionPeriod <= 0 {
+		profile.SessionPeriod = QuotaPeriod
+	}
+	if profile.TokenPeriod <= 0 {
+		profile.TokenPeriod = QuotaPeriod
 	}
 	switch {
 	case override.TranscribeOff:
