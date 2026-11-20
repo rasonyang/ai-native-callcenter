@@ -979,7 +979,7 @@
       "total": "联系人",
       "active": "待拨",
       "done": "已完成",
-      "exhausted": "已用尽",
+      "exhausted": "不再重拨",
       "invalidNumber": "号码无效",
       "dnc": "免打扰"
     },
@@ -1006,7 +1006,7 @@
     "contactStatuses": {
       "ACTIVE": "待拨",
       "DONE": "已完成",
-      "EXHAUSTED": "已用尽",
+      "EXHAUSTED": "不再重拨",
       "INVALID_NUMBER": "号码无效",
       "DNC": "免打扰"
     },
