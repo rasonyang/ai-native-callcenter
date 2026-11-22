@@ -9,6 +9,10 @@ carries the one-line installer's files.
 
 ### Fixed
 
+- Docs: `README.md` and `README.zh-CN.md` gain an **API** section between
+  **Try it** and **What it does**: `docs/openapi.json` as the contract, the
+  API reference, the events guide and the `cdrDelivery` webhook, and a
+  five-command `curl` quickstart against `make stack-up` (#432).
 - Docs: `deploy/README.md` names `grok` among the installer's `--provider`
   values, and says the `aicc_bot` gateway reads `Status DOWN` while the AI leg
   is off (an install made with `--provider none`, or `AICC_BOT_ENABLED=false`):

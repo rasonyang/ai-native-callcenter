@@ -35,6 +35,45 @@ curl -fsSL https://github.com/rasonyang/ai-native-callcenter/releases/latest/dow
 
 Details: [deploy/one-line-installer.md](deploy/one-line-installer.md).
 
+## API
+
+The API is the product and [`docs/openapi.json`](docs/openapi.json) is its
+contract: the web interface is one consumer of it, with no more privilege
+than your integration, and a scoped API key reaches everything a session
+cookie reaches.
+
+The [API reference](https://rasonyang.dev/aicc/api/) renders the contract; a
+deployment serves its own at `GET /api/v1/openapi.json`. The event stream is
+covered by the [events guide](docs/events.md), and a finished call reaches a
+subscribed endpoint as the `cdrDelivery` webhook declared in the contract.
+
+Against `make stack-up` (API on `http://localhost:8080`, seeded
+`admin`/`aicc@123`):
+
+```sh
+# 1. Sign in, then issue a scoped key — the secret answers only this once
+curl -c jar -H 'Content-Type: application/json' -d '{"username":"admin","password":"aicc@123"}' localhost:8080/api/v1/auth/login
+curl -b jar -H 'Content-Type: application/json' -H 'X-AICC-Csrf: 1' -d '{"name":"demo","scopes":["calls:create","calls:create:ai","calls:read:all","history:read:all","config:write"]}' localhost:8080/api/v1/api-keys
+# → {"id":"019a1f00-…","keyPrefix":"…","secret":"…"} — set KEY=<secret>
+
+# 2. Place a call on the main line's flow (a phone registered as
+#    2125550101 is the callee — deploy/README.md)
+curl -H "Authorization: Bearer $KEY" -H 'Content-Type: application/json' -d '{"kind":"AI_OUTBOUND","did":"8005550199","to":"2125550101"}' localhost:8080/api/v1/calls
+# → {"callId":"019a3c2e-…"} — set CALL=<callId>
+
+# 3. Follow the ordered event stream
+curl -N -H "Authorization: Bearer $KEY" localhost:8080/api/v1/events
+# → id:/event:/data: frames — PARTY_DIALING … PARTY_RELEASED … CALL_CDR
+
+# 4. Read the record the call left
+curl -H "Authorization: Bearer $KEY" localhost:8080/api/v1/cdrs/$CALL
+# → {"cdr":{…},"transcript":[…],"recordings":[…]}
+
+# 5. Subscribe an endpoint; every finished call is POSTed its CDR
+curl -H "Authorization: Bearer $KEY" -H 'Content-Type: application/json' -d '{"name":"cdr-feed","url":"https://example.com/cdr","isEnabled":true}' localhost:8080/api/v1/webhook-subscriptions
+# → {"subscriptionId":"019a1f00-…","hasAuthToken":false}
+```
+
 ## What it does
 
 **Answers with a model, not a menu.** The AI leg is a SIP endpoint inside the
