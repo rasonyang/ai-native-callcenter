@@ -491,6 +491,64 @@ eq 'gateway: key' "$(env_get "$env" REALTIME_API_KEY)" sk-test
 env_set "$env" X 'a/b@c=d'
 eq 'env_set keeps the value verbatim' "$(env_get "$env" X)" 'a/b@c=d'
 
+# env_unset drops only the named line, never a KEY_EXTRA neighbour.
+env="$TMP/unset.env"
+printf 'A=1\nAICC_BOT_ENABLED=false\nB=2\nAICC_BOT_ENABLED_EXTRA=x\n' >"$env"
+env_unset "$env" AICC_BOT_ENABLED
+notok 'env_unset drops the line' grep -q '^AICC_BOT_ENABLED=' "$env"
+ok 'env_unset keeps a KEY_EXTRA neighbour' grep -q '^AICC_BOT_ENABLED_EXTRA=x' "$env"
+eq 'env_unset keeps the other lines' "$(grep -c '=' "$env")" 3
+
+# A provider switch (REWRITE_PROVIDER=1): the provider line is replaced, the
+# new provider's key is filled, the old provider's key stays for a switch
+# back.
+env="$TMP/merge-switch.env"
+printf 'AICC_PROVIDER=qwen\nALIYUN_API_KEY=old-key\n' >"$env"
+PROVIDER=grok
+PROVIDER_KEY_VAR=XAI_API_KEY
+PROVIDER_KEY=sk-new
+REWRITE_PROVIDER=1
+env_merge "$env"
+eq 'merge switch: AICC_PROVIDER rewritten' "$(env_get "$env" AICC_PROVIDER)" grok
+eq 'merge switch: the new provider key is written' "$(env_get "$env" XAI_API_KEY)" sk-new
+eq 'merge switch: the old provider key stays' "$(env_get "$env" ALIYUN_API_KEY)" old-key
+
+# A key .env already holds for the new provider is kept (a switch back needs
+# no key at all).
+env="$TMP/merge-switch-back.env"
+printf 'AICC_PROVIDER=qwen\nALIYUN_API_KEY=old-key\nXAI_API_KEY=kept-key\n' >"$env"
+env_merge "$env"
+eq 'merge switch: a key .env already has is kept' "$(env_get "$env" XAI_API_KEY)" kept-key
+
+# A switch to none writes the bot's off switch and keeps the provider and its
+# key for a switch back on.
+env="$TMP/merge-switch-none.env"
+printf 'AICC_PROVIDER=qwen\nALIYUN_API_KEY=old-key\n' >"$env"
+PROVIDER=none
+env_merge "$env"
+eq 'merge switch to none: the bot is off' "$(env_get "$env" AICC_BOT_ENABLED)" false
+eq 'merge switch to none: the provider line stays' "$(env_get "$env" AICC_PROVIDER)" qwen
+eq 'merge switch to none: the old key stays' "$(env_get "$env" ALIYUN_API_KEY)" old-key
+
+# And back on: a provider named again clears the off switch.
+env="$TMP/merge-switch-on.env"
+printf 'AICC_BOT_ENABLED=false\nAICC_PROVIDER=qwen\nALIYUN_API_KEY=old-key\n' >"$env"
+PROVIDER=qwen
+PROVIDER_KEY_VAR=ALIYUN_API_KEY
+PROVIDER_KEY=''
+env_merge "$env"
+eq 'merge switch back on: the provider stands' "$(env_get "$env" AICC_PROVIDER)" qwen
+notok 'merge switch back on: the off line is gone' grep -q '^AICC_BOT_ENABLED=' "$env"
+eq 'merge switch back on: the key stays' "$(env_get "$env" ALIYUN_API_KEY)" old-key
+
+# Without a switch a hand-set AICC_BOT_ENABLED is the operator's, kept like
+# any other line.
+REWRITE_PROVIDER=0
+env="$TMP/merge-keep-bot.env"
+printf 'AICC_PROVIDER=qwen\nAICC_BOT_ENABLED=true\nALIYUN_API_KEY=old-key\n' >"$env"
+env_merge "$env"
+eq 'plain rerun keeps a hand-set AICC_BOT_ENABLED' "$(env_get "$env" AICC_BOT_ENABLED)" true
+
 # --------------------------------------------------------------- arguments ----
 
 eq 'parse_args: --provider=' "$(parse_args --provider=none --yes && echo "$PROVIDER_FLAG $ASSUME_YES")" 'none 1'
@@ -512,6 +570,59 @@ case $out in
 *) accepted=no ;;
 esac
 eq 'kept .env naming the removed provider: names the accepted values' "$accepted" yes
+
+# resolve_provider on an existing install, in a subshell so a die cannot stop
+# the suite. ASSUME_YES keeps it off /dev/tty, which a test run may have; the
+# third argument is a prefix for the provider-key environment
+# ('XAI_API_KEY=sk-new' fills it, 'unset XAI_API_KEY;' removes it).
+resolve_in() { # env-file provider-flag prefix
+    out=$(sh -c "AICC_INSTALL_LIB=1; . '$here/install.sh'; ENV_FILE='$1'; PROVIDER_FLAG='$2'; ASSUME_YES=1; $3 resolve_provider; printf 'provider=%s rewrite=%s\n' \"\$PROVIDER\" \"\$REWRITE_PROVIDER\"" 2>&1) && status=0 || status=$?
+}
+
+env="$TMP/switch-qwen.env"
+printf 'AICC_PROVIDER=qwen\nALIYUN_API_KEY=old-key\n' >"$env"
+# --provider naming another provider switches to it: env_merge does the
+# rewrite below.
+resolve_in "$env" grok 'XAI_API_KEY=sk-new'
+eq 'provider switch: a differing --provider exits 0' "$status" 0
+ok 'provider switch: the flag wins' has_text "$out" 'provider=grok rewrite=1'
+ok 'provider switch: the note says what changed' has_text "$out" 'changes from qwen to grok'
+
+# The provider .env already names keeps it: nothing is rewritten.
+resolve_in "$env" qwen ''
+eq 'provider switch: the same provider exits 0' "$status" 0
+ok 'provider switch: the same provider rewrites nothing' has_text "$out" 'provider=qwen rewrite=0'
+resolve_in "$env" '' ''
+eq 'provider switch: no flag exits 0' "$status" 0
+ok 'provider switch: no flag keeps .env' has_text "$out" 'provider=qwen rewrite=0'
+
+# A switch whose key neither .env nor the environment holds stops under --yes
+# the way a first install does, before anything is written.
+resolve_in "$env" grok 'unset XAI_API_KEY;'
+eq 'provider switch: a missing key exits 1' "$status" 1
+ok 'provider switch: a missing key names the variable' has_text "$out" 'XAI_API_KEY'
+ok 'provider switch: a missing key names the provider' has_text "$out" 'no key for grok'
+
+# none is a provider like any other and needs no key.
+resolve_in "$env" none ''
+eq 'provider switch: none exits 0' "$status" 0
+ok 'provider switch: none rewrites' has_text "$out" 'provider=none rewrite=1'
+
+# AICC_BOT_ENABLED=false reads as provider none; a flag switches it back on.
+env="$TMP/switch-back.env"
+printf 'AICC_BOT_ENABLED=false\n' >"$env"
+resolve_in "$env" doubao 'DOUBAO_API_KEY=sk-new'
+eq 'provider switch: off to a provider exits 0' "$status" 0
+ok 'provider switch: off to a provider rewrites' has_text "$out" 'provider=doubao rewrite=1'
+
+# A stale .env that names a provider this release dropped can be switched
+# away from with --provider rather than edited by hand.
+env="$TMP/switch-stale.env"
+printf 'AICC_PROVIDER=gemini\nGEMINI_API_KEY=old-key\n' >"$env"
+resolve_in "$env" qwen 'ALIYUN_API_KEY=sk-new'
+eq 'provider switch: stale provider + flag exits 0' "$status" 0
+ok 'provider switch: --provider replaces a stale name' has_text "$out" 'provider=qwen rewrite=1'
+
 notok 'parse_args: bad provider' sh -c "AICC_INSTALL_LIB=1; . '$here/install.sh'; parse_args --provider bogus" 2>/dev/null
 notok 'parse_args: bad address' sh -c "AICC_INSTALL_LIB=1; . '$here/install.sh'; parse_args --external-ip 1.2.3" 2>/dev/null
 notok 'parse_args: --purge alone' sh -c "AICC_INSTALL_LIB=1; . '$here/install.sh'; parse_args --purge" 2>/dev/null

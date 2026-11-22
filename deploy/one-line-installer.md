@@ -21,8 +21,9 @@ password.
 
 ## Choosing the voice provider
 
-The provider is chosen once, on the first install (`--provider P` or the
-prompt); a later run keeps what `.env` names. Its key is the vendor's own
+The provider is chosen on the first install (`--provider P` or the prompt).
+A later run keeps what `.env` names unless `--provider P` names another one:
+the flag then switches the install to `P` (below). Its key is the vendor's own
 environment variable, not an `AICC_*` setting:
 
 | Provider | Key |
@@ -47,15 +48,21 @@ curl -fsSL https://github.com/rasonyang/ai-native-callcenter/releases/latest/dow
 ```
 
 `--provider none` installs with the AI leg off and no key. A rerun never
-replaces a non-empty key; to change the provider or fix a key, edit `.env` in
-the install directory (`/opt/aicc/.env` on Linux, `~/.aicc/.env` on macOS) and
-rerun the installer, or `docker compose up -d` there. On Linux both need root:
-the install directory and its `.env` belong to root, so edit with `sudo`, run
-compose as `sudo docker compose`, and rerun the installer with `sudo -E` when
-the new key is exported. Turning the bot back on after `--provider none` also
-means removing the `AICC_BOT_ENABLED=false` line (or setting it to `true`).
-`aicc doctor`'s `provider_key` and `provider_session` checks say whether the
-key reached the app.
+replaces a non-empty key. To change the provider, rerun with `--provider P`:
+the installer rewrites `AICC_PROVIDER` in `.env`, takes the new provider's key
+from the environment or asks for it (under `--yes` a missing key is an error,
+as on a first install), clears `AICC_BOT_ENABLED=false` when the bot comes
+back on, and keeps the old provider's key for a switch back. The same works
+by hand — set `AICC_PROVIDER` and the provider's key in the install
+directory's `.env` (`/opt/aicc/.env` on Linux, `~/.aicc/.env` on macOS), and
+after `--provider none` remove the `AICC_BOT_ENABLED=false` line (or set it
+to `true`); then rerun the installer, or `docker compose up -d` there. On
+Linux both need root: the install directory and its `.env` belong to root, so
+edit with `sudo`, run compose as `sudo docker compose`, and rerun the
+installer with `sudo -E` when the new key is exported. `aicc doctor`'s
+`provider_key` and `provider_session` checks say whether the key reached the
+app, and the installer's own doctor run opens a session whenever a provider
+is set — every rerun proves the key it finds, switched or hand-edited alike.
 
 ## What you get
 

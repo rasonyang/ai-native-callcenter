@@ -91,7 +91,7 @@ would have had to ask for.
 
 | Option | Meaning |
 |---|---|
-| `--provider P` | `openai`, `grok`, `qwen`, `gateway`, `doubao` or `none`. Only a first install chooses; later runs keep what `.env` names |
+| `--provider P` | `openai`, `grok`, `qwen`, `gateway`, `doubao` or `none`. On an install that names another provider it switches to `P` — "Running it again" below and [Choosing the voice provider](one-line-installer.md#choosing-the-voice-provider) |
 | `--external-ip IP` | One of this host's own addresses: its LAN address, or a loopback address an edge SBC on this host forwards to; anything else is refused (`PREFLIGHT_EXTERNAL_IP_NOT_ON_HOST`). On a rerun, rewrites the address in `.env`. On Linux it is also `FS_LOCAL_IP` |
 | `--version TAG` | The release to install. Default: the release the script came from |
 | `--no-demo` | Do not seed the demo dataset (`AICC_SEED` empty). Use it for production |
@@ -116,8 +116,20 @@ macOS it runs without `sudo`.
 
 - **Rerun** (same command): repairs or restarts the install. It adds only the
   keys `.env` lacks, never regenerates a secret, and leaves unchanged
-  containers alone. A rerun never changes the address: if the host's address
-  moved, it warns and `aicc doctor` fails with `EXTERNAL_IP_NOT_ON_HOST`.
+  containers alone. Its `aicc doctor` opens one session with the provider
+  `.env` names whenever one is set, so a key — unchanged, switched or edited
+  by hand — is proved on every run (`provider_session`). A rerun never
+  changes the address: if the host's address moved, it warns and `aicc doctor`
+  fails with `EXTERNAL_IP_NOT_ON_HOST`.
+- **`--provider <p>`**: switches the install to provider `p`. `AICC_PROVIDER`
+  in `.env` is rewritten, `AICC_BOT_ENABLED=false` is removed when the bot
+  comes back on, the new provider's key comes from its environment variable
+  or a prompt as on a first install (a key `.env` already holds is kept), and
+  the old provider's key stays in `.env` for a switch back. `--provider none`
+  turns the bot off the same way. The equivalent by hand — editing
+  `AICC_PROVIDER` and the key in `.env`, then rerunning or
+  `docker compose up -d` — is in
+  [Choosing the voice provider](one-line-installer.md#choosing-the-voice-provider).
 - **`--external-ip <ip>`**: writes the new address into `.env` and recreates
   what depends on it.
 - **`--upgrade`**, run with the new release's script or with
@@ -657,10 +669,12 @@ reflect the ping. With the AI leg off — an install made with
 ping, so the gateway shows `Status DOWN` and the switch logs
 `Ping failed aicc_bot with code 503`. That reading is expected, not a fault:
 `aicc doctor` skips `bot_gateway` as "the AI leg is off". To turn the AI leg
-on, remove the `AICC_BOT_ENABLED=false` line from `.env` (or set it to
-`true`), make sure `.env` names `AICC_PROVIDER` and its key
+on, rerun the installer with `--provider <p>`, which rewrites `.env` and asks
+for that provider's key, or do it by hand: remove the
+`AICC_BOT_ENABLED=false` line from `.env` (or set it to `true`), make sure
+`.env` names `AICC_PROVIDER` and its key
 ([choosing the voice provider](one-line-installer.md#choosing-the-voice-provider)),
-then run `docker compose up -d` or rerun the installer; `docker compose restart`
+then run `docker compose up -d`; `docker compose restart`
 does not re-read `.env`. The gateway turns `UP` at its next answered ping,
 within 30 seconds of the application coming up; `aicc doctor --wait` waits for
 it.

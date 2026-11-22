@@ -14,7 +14,8 @@
 # nothing anywhere except the downloads it names.
 #
 # Run it again to repair or restart: it adds only what .env lacks, never
-# regenerates a secret, and leaves unchanged containers alone. --help lists the
+# regenerates a secret, and leaves unchanged containers alone; --provider P on
+# an install that names another provider switches it to P. --help lists the
 # rest. POSIX sh, so that `| sh` works wherever sh is dash, bash or busybox.
 
 AICC_RELEASE='@RELEASE_TAG@'
@@ -66,7 +67,9 @@ Install, upgrade or remove the AI-native call center on this host.
 Usage: install.sh [options]
 
   --provider P        the voice provider: openai, grok, qwen, gateway, doubao
-                      or none (none: the bot never answers; the human path works)
+                      or none (none: the bot never answers; the human path works).
+                      On an install that names another provider this switches to
+                      P: .env is rewritten and the old provider's key stays
   --external-ip IP    this host's own address the switch binds and advertises:
                       its LAN address (default: the address of the default
                       route's interface) or a loopback address an edge SBC on
@@ -281,6 +284,17 @@ env_add_missing() {
     env_has "$1" "$2" || env_set "$1" "$2" "$3"
 }
 
+# env_unset FILE KEY: drops every KEY= line; a neighbour like KEY_EXTRA is not
+# one. The file stays 0600.
+env_unset() {
+    [ -f "$1" ] || return 0
+    _eu_tmp="$1.tmp.$$"
+    (
+        umask 077
+        awk -v k="$2" 'index($0, k "=") != 1' "$1" >"$_eu_tmp"
+    ) && mv "$_eu_tmp" "$1" && chmod 600 "$1"
+}
+
 # rtp_effective_range: sets RTP_RANGE_START and RTP_RANGE_END to the range the
 # stack will run with. A range in .env wins, except one equal to the previous
 # installer default (RTP_START_OLD/RTP_END_OLD, v0.2.0 to v0.7.1 wrote it),
@@ -300,9 +314,11 @@ rtp_effective_range() {
 # added; an existing one is kept, secrets above all. The addresses are
 # rewritten only when REWRITE_ADDRESS=1 (an explicit --external-ip), the
 # compose file list only when REWRITE_COMPOSE=1 (that, or an --upgrade, whose
-# bundle may name other files). Reads OS,
+# bundle may name other files), the provider only when REWRITE_PROVIDER=1 (a
+# rerun whose --provider names another provider). Reads OS,
 # COMPOSE_FILE_WANT, EXTERNAL_IP, LOCAL_IP, SEED, PROVIDER, PROVIDER_KEY_VAR,
-# PROVIDER_KEY, PROVIDER_ENDPOINT, RTP_START_WANT, RTP_END_WANT.
+# PROVIDER_KEY, PROVIDER_ENDPOINT, RTP_START_WANT, RTP_END_WANT,
+# REWRITE_PROVIDER.
 env_merge() {
     (
         umask 077
@@ -340,9 +356,20 @@ env_merge() {
     env_add_missing "$1" RTP_END "$RTP_END_WANT"
     if [ "$OS" = linux ]; then env_add_missing "$1" PG_HOST_PORT 15432; fi
     if [ "$PROVIDER" = none ]; then
-        env_add_missing "$1" AICC_BOT_ENABLED false
+        if [ "${REWRITE_PROVIDER:-0}" = 1 ]; then
+            env_set "$1" AICC_BOT_ENABLED false
+        else
+            env_add_missing "$1" AICC_BOT_ENABLED false
+        fi
     else
-        env_add_missing "$1" AICC_PROVIDER "$PROVIDER"
+        if [ "${REWRITE_PROVIDER:-0}" = 1 ]; then
+            env_set "$1" AICC_PROVIDER "$PROVIDER"
+            # A provider named again brings the bot back on; the provider and
+            # its key stay for a switch back.
+            env_unset "$1" AICC_BOT_ENABLED
+        else
+            env_add_missing "$1" AICC_PROVIDER "$PROVIDER"
+        fi
         # An empty key is as good as none, so it is filled like a missing one.
         [ -n "$(env_get "$1" "$PROVIDER_KEY_VAR")" ] || env_set "$1" "$PROVIDER_KEY_VAR" "$PROVIDER_KEY"
         if [ "$PROVIDER" = gateway ] && [ -z "$(env_get "$1" AICC_PROVIDER_ENDPOINT)" ]; then
@@ -932,8 +959,12 @@ provider_key_var() {
     esac
 }
 
-# resolve_provider: the provider this install runs, and its key. An install
-# keeps the provider its .env names; only a first install chooses.
+# resolve_provider: the provider this install runs, and its key. A first
+# install chooses (--provider or the prompt); a rerun keeps what .env names —
+# unless --provider names another provider: the flag then wins and
+# REWRITE_PROVIDER tells env_merge to write the new one in place of the old
+# (and to clear AICC_BOT_ENABLED when the bot comes back on). The old
+# provider's key stays in .env for a switch back.
 resolve_provider() {
     _rp_have=''
     if [ "$(env_get "$ENV_FILE" AICC_BOT_ENABLED)" = false ]; then
@@ -941,15 +972,21 @@ resolve_provider() {
     elif env_has "$ENV_FILE" AICC_PROVIDER; then
         _rp_have=$(env_get "$ENV_FILE" AICC_PROVIDER)
     fi
-    if [ -n "$_rp_have" ]; then
+    REWRITE_PROVIDER=0
+    if [ -n "$_rp_have" ] && [ -n "$PROVIDER_FLAG" ] && [ "$PROVIDER_FLAG" != "$_rp_have" ]; then
+        PROVIDER=$PROVIDER_FLAG
+        case $PROVIDER in
+        openai | grok | qwen | gateway | doubao | none) ;;
+        *) die "unknown provider '$PROVIDER': pass --provider openai|grok|qwen|gateway|doubao|none" ;;
+        esac
+        REWRITE_PROVIDER=1
+        say "note: the provider changes from $_rp_have to $PROVIDER; $ENV_FILE is rewritten and the old provider's key stays in it"
+    elif [ -n "$_rp_have" ]; then
         PROVIDER=$_rp_have
         case $PROVIDER in
         openai | grok | qwen | gateway | doubao | none) ;;
-        *) die "$ENV_FILE names AICC_PROVIDER=$PROVIDER, which is not a provider this release runs (accepted: openai, grok, qwen, gateway, doubao). Edit $ENV_FILE to name one of them and set its API key, then run the installer again" ;;
+        *) die "$ENV_FILE names AICC_PROVIDER=$PROVIDER, which is not a provider this release runs (accepted: openai, grok, qwen, gateway, doubao). Edit $ENV_FILE to name one of them and set its API key, then run the installer again; or rerun with --provider <name> to switch to it" ;;
         esac
-        if [ -n "$PROVIDER_FLAG" ] && [ "$PROVIDER_FLAG" != "$PROVIDER" ]; then
-            warn "$ENV_FILE already names provider $PROVIDER; keeping it (edit .env to change it)"
-        fi
     else
         PROVIDER=$PROVIDER_FLAG
         if [ -z "$PROVIDER" ] && can_prompt; then
@@ -1113,7 +1150,6 @@ compose_up() {
 
 run_doctor() {
     set -- doctor --wait 5m --host-addrs "$(host_addrs)"
-    if [ "$SKIP_PROVIDER" = 1 ]; then set -- "$@" --skip-provider; fi
     say "Running aicc doctor (waits up to 5 minutes for the app and the switch)"
     if ! dc exec -T aicc aicc "$@"; then
         say "" >&2
@@ -1134,7 +1170,7 @@ do_uninstall() {
         say "Removed the stack, its volumes and $DIR."
     else
         dc down --remove-orphans || die "docker compose down failed"
-        say "Stopped and removed the containers. The data volumes, $ENV_FILE and $DIR/backups are kept."
+        say "Stopped and removed the containers. The data volumes, $ENV_FILE and any backups in $DIR/backups are kept."
         say "Start it again by rerunning the installer; remove everything with --uninstall --purge."
     fi
 }
@@ -1209,10 +1245,11 @@ main() {
     resolve_provider
     SEED=demo
     [ "$NO_DEMO" = 1 ] && SEED=''
-    # The provider session is opened on a first install, an upgrade and an
-    # address change; a plain rerun only checks that the key is there.
-    SKIP_PROVIDER=1
-    if [ "$FIRST_INSTALL" = 1 ] || [ "$REWRITE_COMPOSE" = 1 ]; then SKIP_PROVIDER=0; fi
+    # Every run proves the key a provider's .env names: aicc doctor opens one
+    # provider session whenever a provider is set, so a key — first written,
+    # switched by --provider or edited by hand — is shown to work before the
+    # installer reports success. With AICC_BOT_ENABLED=false doctor skips the
+    # provider checks itself.
     if [ "$MODE" = upgrade ]; then backup_database; fi
     fetch_bundle
     install_bundle
