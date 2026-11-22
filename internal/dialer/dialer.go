@@ -276,6 +276,13 @@ type Dialer struct {
 	flights   map[uuid.UUID]*flight // by call id
 	inflight  map[uuid.UUID]int     // per campaign
 	ringing   int
+	// unstarted is the answered legs whose provider session start is not
+	// counted yet (design 10 section 6.3, #640): between the answer and the
+	// count a leg is in none of the terms the admission rules read — not
+	// ringing, not reserved, not waiting, not the meter's starts. The term
+	// is taken as the answer is handled and released when the start is
+	// counted or the leg ends (sessionCountedMsg, drop).
+	unstarted int
 	talking   int
 	// ringingBy is the ringing legs of each campaign: the weights of the
 	// expected-answer sum. stats is each campaign's answer-rate and overflow
@@ -326,6 +333,11 @@ type flight struct {
 	ring       time.Duration
 	nextCheck  time.Time
 	isAnswered bool
+	// sessionCounted is set when the leg's provider session start was
+	// counted on the rate meter (#640): until then the leg stands in the
+	// dialer's unstarted term, since it is in none of the counts
+	// voice.Usage offers admission.
+	sessionCounted bool
 }
 
 // New builds the dialer; Run starts it.
@@ -365,7 +377,10 @@ func New(cfg Config, d Deps) *Dialer {
 type (
 	finishedMsg campaign.Finished
 	answeredMsg uuid.UUID
-	wakeMsg     struct {
+	// sessionCountedMsg is the session factory's word that the call's
+	// provider session start was counted on the rate meter (#640).
+	sessionCountedMsg uuid.UUID
+	wakeMsg           struct {
 		dnc        bool
 		testNumber bool
 		rearmFor   uuid.UUID
@@ -393,6 +408,12 @@ func (d *Dialer) AttemptFinished(f campaign.Finished) { d.post(finishedMsg(f)) }
 // Answered tells the dialer a campaign call's customer picked up (the
 // outbound service's answer observer). It never blocks.
 func (d *Dialer) Answered(callID uuid.UUID) { d.post(answeredMsg(callID)) }
+
+// SessionCounted tells the dialer a call's provider session start was counted
+// on the rate meter (aicall's session factory, #640): the leg leaves the
+// unstarted term and joins the counts the admission rules already read. It
+// never blocks; a call id that is no flight's is ignored.
+func (d *Dialer) SessionCounted(callID uuid.UUID) { d.post(sessionCountedMsg(callID)) }
 
 // DNCAdded is the store's OnDNCAdded: waiting contacts on the number must be
 // skipped. It never blocks.
@@ -632,9 +653,15 @@ func (d *Dialer) handle(ctx context.Context, m any) {
 			d.ringing--
 			d.ringBy(f.campaignID, -1)
 			d.talking++
+			d.unstarted++
 			obsInFlight(false, -1)
 			obsInFlight(true, 1)
 			d.isDirty = true // a leg that stopped ringing frees a place in the ringing cap
+		}
+	case sessionCountedMsg:
+		if f := d.flights[uuid.UUID(m)]; f != nil && f.isAnswered && !f.sessionCounted {
+			f.sessionCounted = true
+			d.unstarted--
 		}
 	case wakeMsg:
 		d.isDirty = true

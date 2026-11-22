@@ -812,6 +812,37 @@ where n = pendingAnswered + startsWaiting + Σ_campaigns (p̂_c × ringing_c) + 
   quota: `n` counts each ringing leg at `p̂_c` against the 10 s window although a leg nobody answers
   rings for its whole timeout.
 
+**As built (#640): the window between the answer and the counted start is a term of its own.**
+Between the answer — when the outbound service's `onAnswer` wakes the dialer — and the moment the
+call's session start is counted on the rate meter, an answered leg stood in none of the counts
+either rule read: not ringing, not `Reserved`, not `Waiting`, not `InUse`, not `starts_W`. The
+dialer now keeps that leg as **unstarted** (`Dialer.unstarted`, one per flight): taken as the
+answer is handled, released when the orchestrator's `startSession` reports the counted start
+(`aicall.OrchestratorConfig.OnProviderSessionCounted` → `Dialer.SessionCounted`) or when the leg
+ends, whichever comes first (`drop`, so every ending releases it — a callee who hangs up inside
+the window, a parked leg whose hold expires, a refused or failed session). A flight adopted after
+a restart is never in it, because the count and the meter are both new.
+
+Both rules use it:
+
+- The bot rule's `botInUse` is `InUse + max(Reserved + Waiting, unstarted)`. Every reserved or
+  waiting leg is an answered, uncounted dialer flight, so `unstarted` already covers them — the
+  max only matters if the counter ever reports answered legs that are no flight's — and the term
+  adds the windows the slot counts cannot see: before the reservation, and between the
+  reservation being consumed and the start being counted, where a leg counts briefly in both
+  `InUse` and `unstarted`. That one double-count is deliberate: it holds at most one extra slot
+  per leg inside the window, the safe direction.
+- The provider rule's `pendingAnswered` is `max(Reserved + Waiting, unstarted)` — the same legs
+  the old term covered plus the two windows it could not see, including the leg whose slot is
+  already taken (`InUse`) but whose session start is not yet counted.
+
+The simulation's answer event now models the window (`startWindow`, fixed and jittered): the dialer
+hears `Answered` first and the slot, the counted start and `SessionCounted` follow by the span; a
+share of callees hang up inside it and release the term by ending. At 0 / 50 / 200 / 1000 ms the
+connect-rate gate keeps refusals within the windowless bound over many seeds, the rate is still
+used, and the term returns to the legs actually uncounted at the run's end — the leak check in
+`runScenario`.
+
 ### 6.4 Take a slot on answer; wait briefly if there is none
 
 The slot is taken **after answer and before the bridge**, not discovered full when the INVITE
