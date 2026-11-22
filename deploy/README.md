@@ -91,7 +91,7 @@ would have had to ask for.
 
 | Option | Meaning |
 |---|---|
-| `--provider P` | `openai`, `qwen`, `gateway`, `doubao` or `none`. Only a first install chooses; later runs keep what `.env` names |
+| `--provider P` | `openai`, `grok`, `qwen`, `gateway`, `doubao` or `none`. Only a first install chooses; later runs keep what `.env` names |
 | `--external-ip IP` | One of this host's own addresses: its LAN address, or a loopback address an edge SBC on this host forwards to; anything else is refused (`PREFLIGHT_EXTERNAL_IP_NOT_ON_HOST`). On a rerun, rewrites the address in `.env`. On Linux it is also `FS_LOCAL_IP` |
 | `--version TAG` | The release to install. Default: the release the script came from |
 | `--no-demo` | Do not seed the demo dataset (`AICC_SEED` empty). Use it for production |
@@ -650,8 +650,20 @@ The switch reaches the AI leg through the gateway `aicc_bot`. `sofia status`,
 `GET /system/health` and the administrator's Overview show it as `NOREG`. That
 is by design: it is not a registering trunk, and FreeSWITCH sends calls to it
 without registration. Its health is the OPTIONS ping the application answers:
-`sofia status gateway aicc_bot` shows `Status UP`. `/system/health` reports
-`isUp: true` for a `NOREG` trunk; it does not reflect the ping.
+with the AI leg on, `sofia status gateway aicc_bot` shows `Status UP`.
+`/system/health` reports `isUp: true` for a `NOREG` trunk; it does not
+reflect the ping. With the AI leg off — an install made with
+`--provider none`, or `AICC_BOT_ENABLED=false` — nothing answers the
+ping, so the gateway shows `Status DOWN` and the switch logs
+`Ping failed aicc_bot with code 503`. That reading is expected, not a fault:
+`aicc doctor` skips `bot_gateway` as "the AI leg is off". To turn the AI leg
+on, remove the `AICC_BOT_ENABLED=false` line from `.env` (or set it to
+`true`), make sure `.env` names `AICC_PROVIDER` and its key
+([choosing the voice provider](one-line-installer.md#choosing-the-voice-provider)),
+then run `docker compose up -d` or rerun the installer; `docker compose restart`
+does not re-read `.env`. The gateway turns `UP` at its next answered ping,
+within 30 seconds of the application coming up; `aicc doctor --wait` waits for
+it.
 
 ## Common commands
 

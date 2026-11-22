@@ -5,6 +5,17 @@ under one tag, `rasonyang/ai-native-callcenter` and `rasonyang/freeswitch-aicc`;
 run them together. From v0.2.0 on, the GitHub release of the same tag also
 carries the one-line installer's files.
 
+## Unreleased
+
+### Fixed
+
+- Docs: `deploy/README.md` names `grok` among the installer's `--provider`
+  values, and says the `aicc_bot` gateway reads `Status DOWN` while the AI leg
+  is off (an install made with `--provider none`, or `AICC_BOT_ENABLED=false`):
+  that is expected, and `aicc doctor` skips the check. It turns `UP` once the
+  `AICC_BOT_ENABLED=false` line is removed and `docker compose up -d` has
+  recreated the application (#552, #654; thanks @sanketpatel32).
+
 ## v0.9.1 - 2026-11-20
 
 ### Upgrade notes
