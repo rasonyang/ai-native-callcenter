@@ -43,7 +43,8 @@ installer-check: ## Check the one-line installer: shellcheck, its unit tests, th
 	@command -v shellcheck >/dev/null 2>&1 || { \
 	  echo "installer-check: shellcheck is not installed (apt-get install shellcheck, or brew install shellcheck)" >&2; \
 	  exit 1; }
-	shellcheck -s sh deploy/install.sh deploy/install_test.sh scripts/release-bundle.sh scripts/installer-smoke.sh deploy/postgres/lua-role.sh
+	shellcheck -s sh deploy/install.sh deploy/install_test.sh scripts/release-bundle.sh scripts/installer-smoke.sh deploy/postgres/lua-role.sh scripts/release-notes_test.sh
+	shellcheck scripts/release-notes.sh
 	sh deploy/install_test.sh
 	$(MAKE) stack-config
 	@set -euo pipefail; \

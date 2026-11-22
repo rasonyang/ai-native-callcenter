@@ -12,6 +12,8 @@ on:
     paths:
       - 'deploy/**'
       - 'scripts/release-bundle.sh'
+      - 'scripts/release-notes.sh'
+      - 'scripts/release-notes_test.sh'
       - 'scripts/installer-smoke.sh'
       - 'freeswitch/docker-entrypoint.sh'
       - 'Makefile'
@@ -21,6 +23,8 @@ on:
     paths:
       - 'deploy/**'
       - 'scripts/release-bundle.sh'
+      - 'scripts/release-notes.sh'
+      - 'scripts/release-notes_test.sh'
       - 'scripts/installer-smoke.sh'
       - 'freeswitch/docker-entrypoint.sh'
       - 'Makefile'

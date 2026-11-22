@@ -56,7 +56,12 @@
 #
 # Notes: the release body comes from `scripts/release-notes.sh <tag>` — the
 # CHANGELOG.md section for the tag when there is one, otherwise the commit
-# subjects since the previous tag.
+# subjects since the previous tag — then an `## API changes` section that
+# `oasdiff changelog` (the version go.mod pins as a tool) diffs against the
+# previous release's docs/openapi.json: the previous full release for a full
+# tag, the previous tag of any kind for a pre-release, breaking changes first.
+# A workflow_dispatch run builds a dry-run tag and prints the same notes into
+# the bundle-dry-run job's summary.
 name: release
 
 on:
@@ -311,6 +316,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          # The notes script diffs the contract against the previous tag's, so
+          # the checkout needs the tags and the history between them.
+          fetch-depth: 0
+          fetch-tags: true
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
 
       - name: Build the installer bundle
         run: scripts/release-bundle.sh "v0.0.0-dryrun+${GITHUB_SHA::12}" "${RUNNER_TEMP}/assets"
@@ -325,6 +339,14 @@ jobs:
           path: ${{ runner.temp }}/assets/*
           if-no-files-found: error
           retention-days: 7
+
+      # The notes a release on this commit would carry, under the dry-run tag
+      # the bundle uses: nothing is pushed, and the API changes section shows
+      # the diff against the previous release's contract.
+      - name: Release notes (dry run)
+        run: |
+          git tag -f "v0.0.0-dryrun+${GITHUB_SHA::12}"
+          scripts/release-notes.sh "v0.0.0-dryrun+${GITHUB_SHA::12}" | tee -a "$GITHUB_STEP_SUMMARY"
 
   # The release as a user gets it, before it is announced: the stamped
   # install.sh from a bundle built here, run with --provider none against the
@@ -365,6 +387,12 @@ jobs:
         with:
           fetch-depth: 0
           fetch-tags: true
+
+      # `go tool oasdiff` in the notes script resolves the oasdiff go.mod pins
+      # as a tool; setup-go puts the toolchain go.mod asks for on the runner.
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
 
       - name: Release notes
         run: scripts/release-notes.sh "${GITHUB_REF_NAME}" > "${RUNNER_TEMP}/release-notes.md"

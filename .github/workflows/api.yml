@@ -40,3 +40,9 @@ jobs:
           make api-breaking BASE="origin/$BASE_REF"
         env:
           BASE_REF: ${{ github.base_ref }}
+
+      # The release-notes API changelog runs the pinned oasdiff on fixture
+      # specs and tags; it builds its own git repo, so it needs no checkout
+      # setup beyond the Go toolchain above.
+      - name: Release-notes API changelog test
+        run: sh scripts/release-notes_test.sh
