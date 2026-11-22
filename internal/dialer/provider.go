@@ -67,10 +67,13 @@ func (q providerQuota) backoff() time.Duration {
 // period: tokens are spent all along by the sessions in progress, so their
 // period is the vendor's own. starts_W and tokens_T are the meter's. E is the sum over campaigns of p_c x ringing_c, the answers the
 // ringing legs are expected to bring, each of which opens a session at the
-// answer. pending is the answered legs that hold or wait for a bot slot and
-// have not opened their session yet (voice.Usage.Reserved + Waiting), counted
-// for the reason they are in the bot rule, and waiting the answered legs
-// whose start waits in the gate. active is the bot sessions in use, so
+// answer. pending is the answered legs whose provider session start is not
+// counted yet (Dialer.unstarted, #640): it holds the legs the slot counts
+// cannot see — the window between the answer and the reservation, and between
+// the session's slot being taken (Usage.InUse) and the start being counted —
+// as well as the legs holding or waiting for a bot slot it already covered
+// (Usage.Reserved + Waiting), and waiting the answered legs whose start waits
+// in the gate. active is the bot sessions in use, so
 // tokens_T / active is what a session has cost over the token period; with no
 // tokens yet the token rule admits, and the session rule is what guards a cold
 // burst. backoff is providerQuota.backoff.
@@ -110,7 +113,7 @@ func providerHold(r ratemeter.Reading, q providerQuota, pending, expected float6
 func (d *Dialer) providerLimit(u voice.Usage, expected float64) string {
 	r := d.pr.Read()
 	reason, until := providerHold(r, d.cfg.providerQuota(),
-		float64(u.Reserved+u.Waiting), expected, u.InUse)
+		float64(max(u.Reserved+u.Waiting, d.unstarted)), expected, u.InUse)
 	if reason != "" && !until.IsZero() && (d.rateWake.IsZero() || until.Before(d.rateWake)) {
 		d.rateWake = until
 	}

@@ -299,7 +299,14 @@ type providerScenario struct {
 	capacity              int
 	quota                 providerQuota
 	isGated, isStartGated bool
-	warmUp, d             time.Duration
+	// startWindow is how long an answered leg stands between the answer and
+	// its counted session start (#640); hangupInWindow is the share of
+	// answered calls whose callee hangs up inside it; jitterWindow draws each
+	// call's span in [startWindow/2, 3·startWindow/2) instead of fixing it.
+	startWindow    time.Duration
+	hangupInWindow float64
+	jitterWindow   bool
+	warmUp, d      time.Duration
 }
 
 func runAgainstProvider(t *testing.T, isGated bool, prov simProvider, capacity, sessionRPM, tokenRPM int, warmUp, d time.Duration) providerRun {
@@ -315,9 +322,22 @@ func runScenario(t *testing.T, sc providerScenario) providerRun {
 		rates: []func(time.Duration) float64{constRate(0.5)}, provider: &p,
 		isGated: sc.isGated, isStartGated: sc.isStartGated,
 		sessionLimit: sc.quota.sessionLimit, sessionPeriod: sc.quota.sessionPeriod,
-		tokenLimit: sc.quota.tokenLimit, tokenPeriod: sc.quota.tokenPeriod})
+		tokenLimit: sc.quota.tokenLimit, tokenPeriod: sc.quota.tokenPeriod,
+		startWindow: sc.startWindow, hangupInWindow: sc.hangupInWindow, jitterWindow: sc.jitterWindow})
 	p.measureFrom = s.start.Add(sc.warmUp)
 	s.run(sc.d)
+	// The unstarted term leaks none of what it took (#640): after the run it
+	// is exactly the answered legs still in flight whose start was never
+	// counted — a leg counted twice or released never shows here.
+	want := 0
+	for _, f := range s.d.flights {
+		if f.isAnswered && !f.sessionCounted {
+			want++
+		}
+	}
+	if s.d.unstarted != want {
+		t.Errorf("the unstarted term is %d, want %d answered-but-uncounted legs in flight", s.d.unstarted, want)
+	}
 	run := providerRun{
 		starts: p.accepted + p.refuse, refusals: p.refuse,
 		startsAfter: p.startedAfter, refusalsAfter: p.refusedAfter,
@@ -350,6 +370,42 @@ func runScenario(t *testing.T, sc providerScenario) providerRun {
 // the share they leave is chance unless the run holds many starts: scaled down
 // to 20 connects a minute for 15 minutes, 9 seeds in 100 went over 2%; at the
 // documented rate for half an hour, none of 300 did (#604).
+// The window of #640 between an answer and its counted session start — the
+// reservation, the INVITE, +OK, the provider session: production's dialer
+// hears of the answer first, and for that span the leg was in none of the
+// counts either rule read. With the unstarted term covering it, the
+// connect-rate gate keeps refusals within the windowless bound at every
+// window a deployment measures, callees hanging up inside it included; the
+// rate is still used.
+func TestTheConnectRateGateHoldsAcrossTheSessionStartWindow(t *testing.T) {
+	const rate, capacity, minutes = 60, 160, 8
+	for _, window := range []time.Duration{0, 50 * time.Millisecond, 200 * time.Millisecond, time.Second} {
+		hang := 0.0
+		if window > 0 {
+			hang = 0.15
+		}
+		for _, jit := range []bool{false, true} {
+			if window == 0 && jit {
+				continue
+			}
+			for _, seed := range []int64{21, 42, 77} {
+				run := runScenario(t, providerScenario{seed: seed, prov: simProvider{connectLimit: rate},
+					capacity: capacity, quota: perMinute(rate, 0), isGated: true,
+					startWindow: window, hangupInWindow: hang, jitterWindow: jit, d: minutes * time.Minute})
+				t.Logf("window %4s jitter=%v seed %d: %d starts, %d refused", window, jit, seed, run.starts, run.refusals)
+				if run.refusals*50 > run.starts {
+					t.Errorf("window %s jitter=%v seed %d: %d of %d starts were refused, want at most 2%%",
+						window, jit, seed, run.refusals, run.starts)
+				}
+				if run.starts < minutes*rate/2 {
+					t.Errorf("window %s jitter=%v seed %d: only %d starts in %d minutes: the connect rate of %d a minute is left unused",
+						window, jit, seed, run.starts, minutes, rate)
+				}
+			}
+		}
+	}
+}
+
 func TestTheConnectRateGateKeepsRefusalsNearZero(t *testing.T) {
 	const rate, capacity, minutes = 60, 160, 30
 	prov := simProvider{connectLimit: rate}
