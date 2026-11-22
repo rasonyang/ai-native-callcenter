@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -413,6 +414,9 @@ type Session struct {
 	turnText          []byte
 	turnTextHasDeltas bool
 	turnToolCalls     int
+	// dropUtterance is set when the turn in progress spoke tool plumbing
+	// (#623): the rest of its audio is refused.
+	dropUtterance bool
 	// turnAnswers is the caller utterance the turn in progress answers, set by
 	// beginTurn (caller_turns.go); nil when there is none.
 	turnAnswers *callerTurn
@@ -1208,7 +1212,9 @@ func (s *Session) pumpModelEvents() {
 func (s *Session) handleModelEvent(event provider.Event) {
 	switch event.Type {
 	case provider.EventTypeAudioDelta:
-		s.playAudio(event.Audio)
+		if !s.isDroppingUtterance() {
+			s.playAudio(event.Audio)
+		}
 
 	case provider.EventTypeSpeechStarted:
 		// The caller is talking, so there is no dead air to report whether or
@@ -1299,15 +1305,28 @@ func (s *Session) handleModelEvent(event provider.Event) {
 		s.onReplyStartedForReplay()
 
 	case provider.EventTypeResponseDone:
-		hasAudio := s.finishTurn(event.IsAbandoned)
+		hasAudio, marker := s.finishTurn(event.IsAbandoned)
 		turn, isAside := s.turnState()
 		s.emit(Event{Type: EventTypeTurnDone, Turn: turn, HasAudio: hasAudio, IsAside: isAside,
 			soFar: responseSoFar{text: s.turnWords()}})
+		// TURN_DONE goes on the events channel before the marker is handed to
+		// the playback watcher, so its PLAYBACK_DONE can never be published
+		// first: every consumer in drive judges a turn's playback with the
+		// facts its TURN_DONE recorded (#627).
+		s.armPlaybackWatch(marker)
 
 	case provider.EventTypeInputTranscript:
 		s.onInputTranscript(event)
 
 	case provider.EventTypeOutputTranscript:
+		// A turn that speaks the tool plumbing — a delta that is exactly a
+		// tool's name or the literal "工具调用" — is the model leaking its
+		// internals, usually on a turn cancelled between the audio and the
+		// function call (#623). It is never something to play: the row is not
+		// kept, and the turn's unplayed audio is cut.
+		if s.dropInternalUtterance(event.Text) {
+			return
+		}
 		// Kept for the turn first, so a tool call that follows is judged with
 		// every word that came before it on the wire (Event.soFar).
 		s.noteBotWords(event.Text, event.IsFinal)
@@ -1632,6 +1651,7 @@ func (s *Session) beginTurn(isSpokenLine, isLineAskedAgain bool) {
 	s.turnText = s.turnText[:0]
 	s.turnTextHasDeltas = false
 	s.turnToolCalls = 0
+	s.dropUtterance = false
 	s.turnAnswers = s.answeredCallerTurnLocked()
 	if s.isReplayOwed && isSpokenLine {
 		s.isReplayOwed = false
@@ -1730,6 +1750,58 @@ func (s *Session) noteBotWords(text string, isFinal bool) {
 	s.turnText = append(s.turnText, text...)
 }
 
+// internalToolWords is the literal the model speaks when it reads its tool
+// plumbing aloud instead of calling it ("工具调用", "tool call"); seen on qwen
+// turns cancelled between the audio and the function call (#623).
+const internalToolWords = "工具调用"
+
+// isInternalUtterance reports a transcript delta that is only tool plumbing:
+// exactly the literal, or exactly a tool's name as the session offered it.
+func (s *Session) isInternalUtterance(text string) bool {
+	plain := strings.TrimSpace(text)
+	if plain == "" {
+		return false
+	}
+	if plain == internalToolWords {
+		return true
+	}
+	for _, tool := range s.cfg.Session.Tools {
+		if plain == tool.Name {
+			return true
+		}
+	}
+	return false
+}
+
+// dropInternalUtterance drops a transcript delta isInternalUtterance catches:
+// nothing is recorded or emitted for it, the turn's unplayed audio is cut, and
+// the rest of the turn's audio is refused (isDroppingUtterance). What already
+// reached the wire stays counted as heard.
+func (s *Session) dropInternalUtterance(text string) (dropped bool) {
+	if !s.isInternalUtterance(text) {
+		return false
+	}
+	s.mu.Lock()
+	s.dropUtterance = true
+	cleared := s.leg.ClearTx()
+	s.framer.reset()
+	s.framesQueued = max(s.framesQueued-cleared, 0)
+	s.isBotSpeaking = false
+	turn := s.turnSeq
+	s.mu.Unlock()
+	s.log.Warn("dropping a bot utterance that speaks tool plumbing; the turn's remaining audio is cut",
+		"text", strings.TrimSpace(text), "turn", turn)
+	return true
+}
+
+// isDroppingUtterance reports whether the turn in progress is being muted for
+// speaking tool plumbing.
+func (s *Session) isDroppingUtterance() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.dropUtterance
+}
+
 // turnWords is the words of the turn in progress so far.
 func (s *Session) turnWords() string {
 	s.mu.Lock()
@@ -1807,7 +1879,9 @@ func (s *Session) currentTurn() int {
 
 // endTurn closes out generation and hands the turn to the playback watcher.
 func (s *Session) endTurn() (hasAudio bool) {
-	return s.finishTurn(false)
+	hasAudio, marker := s.finishTurn(false)
+	s.armPlaybackWatch(marker)
+	return hasAudio
 }
 
 // finishTurn is endTurn. isAbandoned is the provider's word that its watchdog
@@ -1816,7 +1890,7 @@ func (s *Session) endTurn() (hasAudio bool) {
 // when it started, so the timer is put back before the playback watcher can
 // arm the dead-air watch (turnTimer.onResponseAbandoned). One that queued audio
 // was heard in part and is left as it is.
-func (s *Session) finishTurn(isAbandoned bool) (hasAudio bool) {
+func (s *Session) finishTurn(isAbandoned bool) (hasAudio bool, marker playbackMarker) {
 	s.mu.Lock()
 	// The tail of the last sentence is worth padding out rather than losing.
 	s.framer.flush(s.queueFrame)
@@ -1833,16 +1907,21 @@ func (s *Session) finishTurn(isAbandoned bool) (hasAudio bool) {
 	if isAbandoned && !hasAudio {
 		s.timer.onResponseAbandoned()
 	}
-	marker := playbackMarker{generation: s.drainGeneration, turn: s.turnSeq, hasAudio: hasAudio,
+	marker = playbackMarker{generation: s.drainGeneration, turn: s.turnSeq, hasAudio: hasAudio,
 		isAside: s.asideTurn != 0 && s.turnSeq == s.asideTurn}
 	s.mu.Unlock()
+	return hasAudio, marker
+}
 
+// armPlaybackWatch hands a finished turn's marker to the playback watcher.
+// The caller emits the turn's TURN_DONE first, so the watcher's PLAYBACK_DONE
+// is always published after it (#627).
+func (s *Session) armPlaybackWatch(marker playbackMarker) {
 	select {
 	case s.playbackDone <- marker:
 	default:
 		s.log.Warn("playback watcher is behind; a turn boundary was not tracked")
 	}
-	return hasAudio
 }
 
 // playbackMarker identifies one turn's handoff to the playback watcher.
