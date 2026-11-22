@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# Cutting a release: two container images under one tag, and three files on
-# the GitHub release of that tag, and that is the release.
+# Cutting a release: two container images under one tag, three files on the
+# GitHub release of that tag, and a versioned API reference on rasonyang.dev.
 #
 #   git tag -a v0.1.0 -m "…" && git push origin v0.1.0
 #
@@ -46,6 +46,23 @@
 # `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` (an access token with Read & Write,
 # not the account password) as secrets. Without them a tag build fails at the
 # login step rather than pushing nothing quietly.
+#
+# After `publish` ships the release, the api-docs job pushes the rendered API
+# reference into `rasonyang/rasonyang.github.io`, a Hugo site that serves
+# static/ verbatim: `scripts/api-docs.sh` renders a Scalar page beside a
+# byte-identical `docs/openapi.json`, and `scripts/api-docs-publish.sh` lands
+# them at `static/aicc/api/<tag>/` — https://rasonyang.dev/aicc/api/<tag>/ —
+# and, for a full release, replaces `static/aicc/api/` —
+# https://rasonyang.dev/aicc/api/, the same latest rule as releases/latest.
+# Re-running the same tag produces no diff and no commit.
+#
+# That push authenticates with an SSH deploy key that has write access on
+# `rasonyang/rasonyang.github.io`; its private half is the `BLOG_DEPLOY_KEY`
+# secret here. Adding the public half to that repository's deploy keys is a
+# one-time manual step — the site repository itself changes nothing. Without
+# the secret a tag build fails at the publish step rather than pushing
+# nothing quietly. A dispatch run renders the same page and uploads it as a
+# workflow artifact instead.
 #
 # `make fs-push VERSION=<tag>` still builds and pushes the switch image by hand,
 # for a manual build; a release does not use it.
@@ -390,3 +407,37 @@ jobs:
           fail_on_unmatched_files: true
           # A hyphen in the tag is a pre-release: v0.1.0-rc.1, v0.2.0-beta.2.
           prerelease: ${{ contains(github.ref_name, '-') }}
+
+  # The versioned API reference on rasonyang.dev: the page and the
+  # byte-identical contract scripts/api-docs.sh renders, pushed into
+  # rasonyang/rasonyang.github.io by scripts/api-docs-publish.sh. It runs
+  # after publish, so only a release that actually shipped gets a reference.
+  api-docs:
+    name: api-docs
+    needs: [publish]
+    # publish is skipped on a dispatch run; the page is still built then,
+    # kept as a workflow artifact and pushed nowhere.
+    if: always() && (github.ref_type != 'tag' || needs.publish.result == 'success')
+    runs-on: ubuntu-latest
+    steps:
+      # The tag's own docs/openapi.json — the bytes the binary embeds.
+      - uses: actions/checkout@v7
+
+      - name: Render the API reference
+        run: scripts/api-docs.sh "${RUNNER_TEMP}/api-docs"
+
+      - uses: actions/upload-artifact@v6
+        if: github.ref_type != 'tag'
+        with:
+          name: api-docs
+          path: ${{ runner.temp }}/api-docs
+          if-no-files-found: error
+          retention-days: 7
+
+      # Fails when BLOG_DEPLOY_KEY is not set, the same rule as the Docker
+      # Hub secrets.
+      - name: Publish to rasonyang.dev
+        if: github.ref_type == 'tag'
+        env:
+          BLOG_DEPLOY_KEY: ${{ secrets.BLOG_DEPLOY_KEY }}
+        run: scripts/api-docs-publish.sh "${GITHUB_REF_NAME}" "${RUNNER_TEMP}/api-docs"

@@ -44,6 +44,7 @@ web/src/routeTree.gen.ts
 
 # Build output
 /bin/
+/dist/
 /aicc
 
 # Local working brief (contains machine-specific paths)

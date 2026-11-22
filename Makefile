@@ -162,6 +162,14 @@ api-breaking: ## Fail on undeclared breaking API changes vs BASE (default main)
 	fi; \
 	rm -f $$base_spec; exit $$status
 
+# What the release's api-docs job pushes to rasonyang.dev, rendered from the
+# working tree: serve the directory over HTTP to check it before tagging
+# ((cd dist/api-docs && python3 -m http.server); file:// cannot fetch the
+# sibling contract).
+.PHONY: api-docs
+api-docs: ## Render the API reference the release publishes, into dist/api-docs
+	scripts/api-docs.sh dist/api-docs
+
 .PHONY: build
 build: web-build ## Build the single executable with the SPA embedded
 	go build -o $(BIN) ./cmd/aicc
@@ -230,4 +238,4 @@ web-build: ## Build the SPA into web/dist for embedding
 
 .PHONY: clean
 clean: ## Remove build output
-	rm -rf $(BIN) $(WEB)/dist/assets $(WEB)/dist/index.html
+	rm -rf $(BIN) $(WEB)/dist/assets $(WEB)/dist/index.html dist
