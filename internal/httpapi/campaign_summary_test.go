@@ -187,7 +187,7 @@ func TestACampaignsOutcomeSummaryOverHTTP(t *testing.T) {
 
 	// The contact listing's new filter is validated like the others.
 	r = f.do(call{method: http.MethodGet, path: base + "/contacts?lastOutcome=MAYBE", cookie: admin})
-	wantReply(t, "unknown last outcome", r, http.StatusUnprocessableEntity, "VALIDATION_FAILED")
+	wantReply(t, "unknown last outcome", r, http.StatusBadRequest, "VALIDATION_FAILED")
 	if _, r := f.outcomeSummary(admin, uuid.NewString()); r.status != http.StatusNotFound || r.code != "NOT_FOUND" {
 		t.Errorf("unknown campaign: %d %s", r.status, r.body)
 	}

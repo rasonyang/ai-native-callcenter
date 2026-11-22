@@ -395,7 +395,7 @@ func (a *AttemptStore) FinishFromLedger(ctx context.Context, callID uuid.UUID) (
 // canonical E.164 by now and is matched exactly against the number dialled.
 func (c *CampaignStore) ListAttempts(ctx context.Context, campaignID uuid.UUID,
 	f campaign.AttemptFilter) ([]campaign.Attempt, int64, error) {
-	if f.Limit <= 0 || f.Limit > 1000 {
+	if f.Limit <= 0 {
 		f.Limit = 50
 	}
 	rows, err := c.q.ListCampaignAttempts(ctx, queries.ListCampaignAttemptsParams{

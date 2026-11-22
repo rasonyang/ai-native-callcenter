@@ -37,4 +37,10 @@ node scripts/gen-scopes.mjs
 # it the contract's authorization rules would be JSON nobody executes.
 node scripts/gen-opsecurity.mjs
 
-gofmt -w internal/api/scopes.gen.go internal/api/opsecurity.gen.go
+# Every bounded integer query parameter, as a table the same router enforces
+# (#622): the contract's `minimum`/`maximum`, so a limit outside its declared
+# range is refused like any parameter outside its schema rather than silently
+# becoming the default page.
+node scripts/gen-pagebounds.mjs
+
+gofmt -w internal/api/scopes.gen.go internal/api/opsecurity.gen.go internal/api/pagebounds.gen.go

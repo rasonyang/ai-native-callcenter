@@ -71,7 +71,7 @@ func TestTheObserverHearsAboutImportsAndPatches(t *testing.T) {
 
 func TestListingAttemptsRefusesAnUnknownOutcomeAndAnUnknownCampaign(t *testing.T) {
 	f := newFixture(t, Env{})
-	if _, _, err := f.svc.ListAttempts(context.Background(), uuid.Must(uuid.NewV7()), AttemptFilter{Outcome: "NOPE"}); !errors.Is(err, ErrValidation) {
+	if _, _, err := f.svc.ListAttempts(context.Background(), uuid.Must(uuid.NewV7()), AttemptFilter{Outcome: "NOPE"}); !errors.Is(err, ErrUnreadableParameter) {
 		t.Errorf("unknown outcome: %v", err)
 	}
 	if _, _, err := f.svc.ListAttempts(context.Background(), uuid.Must(uuid.NewV7()), AttemptFilter{}); !errors.Is(err, ErrNotFound) {

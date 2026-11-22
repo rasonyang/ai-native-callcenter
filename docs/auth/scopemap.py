@@ -19,6 +19,11 @@ self-check below.
                                       # and every widening and narrowing
 """
 
+import json
+from pathlib import Path
+
+CONTRACT = Path(__file__).resolve().parents[1] / "openapi.json"
+
 # The vocabulary: name -> description, as it appears in the contract x-scopes.
 VOCAB = {
     "calls:read:own":   "Read the live calls this subject is a party to. For a key, that is the calls of the agent named in X-AICC-Agent-ID.",
@@ -111,6 +116,7 @@ OPS = {
     "listMyCDRs":               (["history:read:own"], A, True),
     "getMyDay":                 (["history:read:own"], A, True),
     "getCallTranscript":        (["history:read:own"], N, True),
+    "getPostCallTranscription": (["history:read:own"], N, True),
     "listCallRecordings":       (["history:read:own"], N, True),
     "getRecordingAudio":        (["history:read:own"], N, True),
     "listCDRs":                 (["history:read:all"], S, True),
@@ -123,6 +129,7 @@ OPS = {
     # Quality review.
     "listCallReviews":          (["quality:review"], S, True),
     "createRecordingReview":    (["quality:review"], S, False),  # P8: a human judgement is attributed to a human
+    "requestPostCallTranscription": (["quality:review"], S, True),
 
     # Contacts.
     "listContacts":             (["contacts:read"], N, True),
@@ -185,6 +192,7 @@ OPS = {
     "getCampaign":              (["campaigns:read"], S, True),
     "getCampaignSettings":      (["campaigns:read"], S, True),
     "listCampaignContacts":     (["campaigns:read"], S, True),
+    "listCampaignAttempts":     (["campaigns:read"], S, True),
     "getCampaignOutcomeSummary":(["campaigns:read"], S, True),
     "createCampaign":           (["campaigns:write"], S, True),
     "updateCampaign":           (["campaigns:write"], S, True),
@@ -277,6 +285,49 @@ def narrowings():
     return out
 
 
+def contract_ops():
+    """Every operation the contract declares, as OPS records it: its scopes
+    (the union over the credential schemes, csrfHeader carries none), whether
+    an apiKeyBearer alternative exists, and whether it is anonymous."""
+    spec = json.loads(CONTRACT.read_text())
+    out = {}
+    for item in spec["paths"].values():
+        for method, op in item.items():
+            if method not in ("get", "put", "post", "delete", "patch"):
+                continue
+            sec = op.get("security") or []
+            out[op["operationId"]] = {
+                "scopes": sorted({s for scheme in sec for name, ss in scheme.items()
+                                  if name != "csrfHeader" for s in ss}),
+                "bearer": any("apiKeyBearer" in scheme for scheme in sec),
+                "anonymous": not sec,
+            }
+    return out
+
+
+def contract_drift():
+    """Every way OPS and the contract disagree. An operation added to the
+    contract without a line here is an operation no role was ever derived
+    for; the other direction is a map recording a route that does not exist."""
+    contract, drift = contract_ops(), []
+    for op in sorted(set(contract) - set(OPS)):
+        drift.append(f"{op} is in the contract but not in OPS")
+    for op in sorted(set(OPS) - set(contract)):
+        drift.append(f"{op} is in OPS but not in the contract")
+    for op in sorted(set(contract) & set(OPS)):
+        scopes, floor, bearer = OPS[op]
+        c = contract[op]
+        if sorted(scopes) != c["scopes"]:
+            drift.append(f"{op}: OPS scopes {scopes} != the contract's {c['scopes']}")
+        if bearer != c["bearer"]:
+            drift.append(f"{op}: OPS records bearer={bearer} but the contract "
+                         f"{'has' if c['bearer'] else 'has no'} apiKeyBearer")
+        if (floor == ANON) != c["anonymous"]:
+            drift.append(f"{op}: OPS records floor={floor} but the contract "
+                         f"{'is' if c['anonymous'] else 'is not'} anonymous")
+    return drift
+
+
 if __name__ == "__main__":
     unknown = set(s for sc, _, _ in all_checks().values() for s in sc) - set(VOCAB)
     assert not unknown, f"scopes outside the vocabulary: {unknown}"
@@ -292,4 +343,7 @@ if __name__ == "__main__":
 
     print(f"\nNarrowings: {narrowings() or 'none'}")
     assert not narrowings(), "a role lost something it could reach before"
+
+    drift = contract_drift()
+    assert not drift, "the scope map and the contract differ:\n  " + "\n  ".join(drift)
     print("\nSelf-check passed.")

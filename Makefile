@@ -141,8 +141,12 @@ api-lint: ## Lint the API contract (docs/openapi.json)
 api-generate: ## Regenerate Go + TS API code from the contract
 	scripts/api-generate.sh
 
+.PHONY: scopemap-check
+scopemap-check: ## CI gate: every contract operation is in the scope map (docs/auth/scopemap.py)
+	python3 docs/auth/scopemap.py
+
 .PHONY: api-check
-api-check: api-lint ## CI gate: contract lints and committed generated code matches it
+api-check: api-lint scopemap-check ## CI gate: contract lints and committed generated code matches it
 	scripts/api-generate.sh
 	git diff --exit-code -- internal/api web/src/generated
 	@test -z "$$(git status --porcelain -- internal/api web/src/generated)" \

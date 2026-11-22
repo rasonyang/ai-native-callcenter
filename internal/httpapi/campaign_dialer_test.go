@@ -178,7 +178,7 @@ func TestACampaignsAttemptsAreListedNewestFirstAndFiltered(t *testing.T) {
 		t.Errorf("paging = %+v", l)
 	}
 	_, r = get("?outcome=NOPE")
-	wantReply(t, "unknown outcome", r, http.StatusUnprocessableEntity, "VALIDATION_FAILED")
+	wantReply(t, "unknown outcome", r, http.StatusBadRequest, "VALIDATION_FAILED")
 	r = f.do(call{method: http.MethodGet, path: "/campaigns/" + uuid.NewString() + "/attempts", cookie: admin})
 	wantReply(t, "unknown campaign", r, http.StatusNotFound, "NOT_FOUND")
 }

@@ -30,7 +30,7 @@ func (s *Server) apiWrapper() *api.ServerInterfaceWrapper {
 		// route because it reads the route: this is the first moment chi has
 		// resolved which operation was matched, which is what lets the
 		// generated table answer instead of a hand-placed guard.
-		HandlerMiddlewares: []api.MiddlewareFunc{s.enforceContract},
+		HandlerMiddlewares: []api.MiddlewareFunc{s.enforceQueryBounds, s.enforceContract},
 	}
 }
 

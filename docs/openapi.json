@@ -3755,7 +3755,7 @@
               "type": "integer",
               "default": 50,
               "minimum": 0,
-              "maximum": 1000000
+              "maximum": 200
             }
           },
           {
@@ -3861,7 +3861,7 @@
               "type": "integer",
               "default": 50,
               "minimum": 0,
-              "maximum": 1000000
+              "maximum": 200
             }
           },
           {
@@ -4396,7 +4396,7 @@
               "type": "integer",
               "default": 50,
               "minimum": 0,
-              "maximum": 1000000
+              "maximum": 200
             }
           },
           {
@@ -4669,7 +4669,7 @@
               "type": "integer",
               "default": 50,
               "minimum": 0,
-              "maximum": 1000000
+              "maximum": 200
             }
           },
           {
@@ -4960,7 +4960,7 @@
               "type": "integer",
               "default": 50,
               "minimum": 0,
-              "maximum": 1000000
+              "maximum": 200
             }
           },
           {
@@ -5161,7 +5161,7 @@
               "type": "integer",
               "default": 50,
               "minimum": 0,
-              "maximum": 1000000
+              "maximum": 200
             }
           },
           {
@@ -5364,7 +5364,7 @@
               "type": "integer",
               "default": 50,
               "minimum": 0,
-              "maximum": 1000000
+              "maximum": 200
             }
           },
           {
@@ -6032,7 +6032,7 @@
               "type": "integer",
               "default": 50,
               "minimum": 0,
-              "maximum": 1000000
+              "maximum": 1000
             }
           },
           {
@@ -6228,7 +6228,7 @@
               "type": "integer",
               "default": 50,
               "minimum": 0,
-              "maximum": 1000000
+              "maximum": 1000
             }
           },
           {
@@ -6568,7 +6568,7 @@
               "type": "integer",
               "default": 50,
               "minimum": 0,
-              "maximum": 1000000
+              "maximum": 200
             }
           },
           {

@@ -5,7 +5,9 @@ package httpapi
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
@@ -201,6 +203,36 @@ func (s *Server) authenticateKey(w http.ResponseWriter, r *http.Request, secret 
 		}
 	}
 	return ac, false
+}
+
+// enforceQueryBounds answers a bounded query parameter outside its declared
+// range as the binding answers an unreadable one: 400 VALIDATION_FAILED
+// naming the field. The generated binding never checks minimum and maximum,
+// so without this a limit above the contract's bound reached a store, which
+// silently served the default page — fewer rows for a larger limit (#622).
+// The bounds are the contract's, generated into api.QueryBoundsByRoute: one
+// bound per parameter, stated once, enforced here.
+func (s *Server) enforceQueryBounds(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		method, path := contractRoute(r)
+		for name, bound := range api.QueryBoundsByRoute[method+" "+path] {
+			raw := r.URL.Query().Get(name)
+			if raw == "" {
+				continue
+			}
+			v, err := strconv.Atoi(raw)
+			if err != nil {
+				continue // a non-integer is the binding's own 400
+			}
+			if (bound.HasMin && v < bound.Min) || (bound.HasMax && v > bound.Max) {
+				writeError(w, http.StatusBadRequest, CodeValidationFailed,
+					fmt.Sprintf("%s is outside the declared range", name),
+					map[string]any{"field": name})
+				return
+			}
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // enforceContract is the authorization gate, and it reads the contract.

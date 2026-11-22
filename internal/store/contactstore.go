@@ -188,7 +188,7 @@ func (c *ContactStore) Delete(ctx context.Context, id uuid.UUID) error {
 
 // List pages the book, newest edits first, with each contact's last call.
 func (c *ContactStore) List(ctx context.Context, filter ContactFilter) ([]Contact, int64, error) {
-	if filter.Limit <= 0 || filter.Limit > 200 {
+	if filter.Limit <= 0 {
 		filter.Limit = 50
 	}
 	rows, err := c.q.ListContacts(ctx, queries.ListContactsParams{

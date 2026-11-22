@@ -80,7 +80,7 @@ func TestListingContactsRefusesAnUnknownLastOutcome(t *testing.T) {
 	f := newFixture(t, Env{})
 	_, _, err := f.svc.ListContacts(context.Background(), uuid.Must(uuid.NewV7()), ContactFilter{LastOutcome: "NOPE"})
 	var ce *Error
-	if !errors.Is(err, ErrValidation) || !errors.As(err, &ce) || ce.Field != "lastOutcome" || ce.Rule != "UNKNOWN_OUTCOME" {
+	if !errors.Is(err, ErrUnreadableParameter) || !errors.As(err, &ce) || ce.Field != "lastOutcome" || ce.Rule != "UNKNOWN_OUTCOME" {
 		t.Errorf("unknown last outcome: %v", err)
 	}
 }

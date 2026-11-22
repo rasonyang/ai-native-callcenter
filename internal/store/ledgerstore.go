@@ -362,7 +362,7 @@ type CDRFilter struct {
 
 // ListCDRs pages through the ledger, newest first, with the total for paging.
 func (l *LedgerStore) ListCDRs(ctx context.Context, filter CDRFilter) ([]CDR, int64, error) {
-	if filter.Limit <= 0 || filter.Limit > 200 {
+	if filter.Limit <= 0 {
 		filter.Limit = 50
 	}
 
@@ -867,7 +867,7 @@ func (l *LedgerStore) InsertCallback(ctx context.Context, callID, queueID *uuid.
 // a nil callID every call's callbacks. The total counts the rows matching the
 // same filters, whatever the page.
 func (l *LedgerStore) ListCallbacks(ctx context.Context, status string, callID *uuid.UUID, limit, offset int) ([]Callback, int64, error) {
-	if limit <= 0 || limit > 200 {
+	if limit <= 0 {
 		limit = 50
 	}
 	total, err := l.q.CountCallbacks(ctx, queries.CountCallbacksParams{Status: status, CallID: callID})
