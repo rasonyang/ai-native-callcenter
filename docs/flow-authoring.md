@@ -284,7 +284,7 @@ A built-in's refusal is a conversation, not an error. When a queue is closed the
 - **Same effect as the tool.** It is stored on the attempt exactly as a `record_lead` call would store it; the side effects still run once, from the final value, when the call ends (`DO_NOT_CALL` to the do-not-call list, `HIGH` one callback).
 - **`notes`** is rendered from the slots when the phase is entered, in the call's language, then trimmed and cut to 1000 characters. It may be left out, and a rendering that comes out empty records empty notes.
 - **Not a campaign call.** The same flow may serve single outbound calls, so the declaration is not an error there; it is ignored (logged at debug level).
-- **Interest is checked against the caller ([#612](https://github.com/rasonyang/ai-native-callcenter/issues/612)).** A tool call that would record `HIGH` or `MEDIUM` (a move into a phase that declares one, or `record_lead` with one) is judged before it runs, on every engine and on any call. For a slot tool the move its value makes is what counts, so one classification tool can have `agree` lead into a `HIGH` phase and `decline` into a `NONE` one: only the `agree` is judged. It is refused as a conversation (`ok` is `0`, nothing runs, no lead is written, the phase's instruction as the way on) when the caller's words it answers began before they had heard the opening to its final clause, the text after its last comma or stop (the opening is then said again, once per call, as for a greeting over it), when the transcript of those words is only a refusal ("不要不要", "不需要，谢谢", "no thanks"; a question or any other word is not one), or, once per caller turn, when no transcript of them came within a second or it was blank; the model is then asked to have the caller confirm, and its next call for the same caller turn runs. Write the opening so its final clause is the question the agreement answers: words over any earlier part of it are no answer, even in the same sentence as the question, and an opening with no comma or stop before its end is one clause, so words anywhere before its end are refused. A comma between two digits (`1,000`) does not end a clause. Each judged call logs `a tool that would record the customer's interest was judged` and counts in `aicc_bot_lead_guard_total{reason,provider}`. The flow simulator does not run this check.
+- **Interest is checked against the caller ([#612](https://github.com/rasonyang/ai-native-callcenter/issues/612)).** A tool call that would record `HIGH` or `MEDIUM` (a move into a phase that declares one, or `record_lead` with one) is judged before it runs, on every engine and on any call. For a slot tool the move its value makes is what counts, so one classification tool can have `agree` lead into a `HIGH` phase and `decline` into a `NONE` one: only the `agree` is judged. It is refused as a conversation (`ok` is `0`, nothing runs, no lead is written, the phase's instruction as the way on) when the caller's words it answers began before they had heard the opening to its final clause, the text after its last comma or stop (the opening is then said again, once per call, as for a greeting over it), when the transcript of those words is only a refusal ("不要不要", "不需要，谢谢", "no thanks"; a question or any other word is not one), or, once per caller turn, when no transcript of them came within a second or it was blank; the model is then asked to have the caller confirm, and its next call for the same caller turn runs. Write the opening so its final clause is the question the agreement answers: words over any earlier part of it are no answer, even in the same sentence as the question, and an opening with no comma or stop before its end is one clause, so words anywhere before its end are refused. A comma between two digits (`1,000`) does not end a clause. On a call the platform placed to a customer that a machine answered (a voicemail prompt, a call assistant, a carrier announcement: 4.6), it is refused every time, and the model is told that what answered is not the customer and that no interest was recorded. Each judged call logs `a tool that would record the customer's interest was judged` and counts in `aicc_bot_lead_guard_total{reason,provider}`. The flow simulator does not run this check.
 - **Checked at load.** `lead` must be an object with `intent` and optionally `notes`, and nothing else; `intent` must be one of the five values exactly as written (`high` is refused); every `{slots.x}` in `notes` must be a slot the flow writes. A refusal names the phase, alongside the flow's other problems.
 
 When to declare and when to leave it to the model: declare the lead on a phase whose meaning is the outcome (the customer agreed, asked to be called later, asked never to be called again), above all on a terminal phase the classification moves into, where the model has nothing left to say. Leave it to `record_lead` where the stance is the model's judgement of a conversation that goes on, or changes as it goes ("I'll think about it", then "send me the offer"); `campaign_lead_followup` records that way, in its one working phase. The two combine: a phase records the outcome its meaning implies, and while the call is in a phase that declares a lead its `record_lead` is refused, so the declared outcome is not the model's to change there.
@@ -589,6 +589,58 @@ Things to keep in mind:
 - Write the instruction so the answer comes first and the tool call is in the same response. A model that calls the tool first has said nothing, and the follow-up turn is then its answer, at the price of the extra round trip.
 - Do not use `isCallerNext` where the next question comes from the follow-up turn. `lead_qualification` relies on that turn ("got it", then the next question under the phase's instruction), and with the field its caller would be left in silence. The flow has to say that the caller speaks next; the platform cannot tell.
 - The simulator's tier 2 (`aicc flowsim -tier 2`) honours the rule: a spoken response that records a slot and ends in an `isCallerNext` phase gets no further model round. Tier 1 replays scripted steps and does not model turns, so it can only check the phases and slots.
+
+### 4.6 A machine answers a call the platform placed
+
+A call the platform places to a customer is sometimes answered by a machine: a voicemail prompt, a phone's or a carrier's call assistant, a carrier announcement. A call assistant answers in natural sentences and reacts to what the bot says ("好的", "明白了，我会转告他的"), so a model told only to find out whether the customer agreed hears agreement, and the flow records a lead from a recording.
+
+**What the platform does on its own ([#409](https://github.com/rasonyang/ai-native-callcenter/issues/409)).** On such a call every final transcript of the callee's words is checked against a built-in list of wording only a machine says: a voicemail's "请在提示音后录制留言" or "please leave a message after the tone", a call assistant's "我是机主的智能助理" or "我稍后会将您的来电情况转到机主", a carrier's "您拨打的用户已关机" or "暂时无法接通". A match marks the call for the rest of it, and from then on every tool call that would record `HIGH` or `MEDIUM` interest is refused as a conversation (2.7.1): no such lead is written and no callback is filed. It needs nothing in the flow, and a flow needs no change to benefit. It does not end the call, it cannot judge a callee whose words were not transcribed, and it does not know wording outside its list, which is kept conservative so that a person is not marked: "我会转告他" or "我是机主" alone marks nothing. Inbound and internal calls are never judged: a caller who asks to leave a message is a person. Each marked call logs `the call is marked as answered by a machine` and counts in `aicc_bot_machine_answered_calls_total{category,provider}`, `category` being `VOICEMAIL`, `CALL_ASSISTANT` or `CARRIER_ANNOUNCEMENT`.
+
+**What a flow can add.** To end such a call early instead of talking to the machine until a guard closes it, or to tag the attempt, give the model a slot tool that reports a machine, offer it everywhere, and move on it into a terminal phase:
+
+```json
+"global": {
+  "alwaysAllowedTools": ["hangup", "report_machine"],
+  "transitions": [
+    {"on": "TOOL_RESULT", "tool": "report_machine",
+     "condition": {"slot": "machine_kind", "op": "EQ", "value": "voicemail"}, "target": "leave_message"},
+    {"on": "TOOL_RESULT", "tool": "report_machine",
+     "condition": {"slot": "result.ok", "op": "EQ", "value": "1"}, "target": "machine_end"},
+    {"on": "TOOL_RESULT", "tool": "hangup", "target": "finish"}
+  ]
+},
+"tools": {
+  "report_machine": {
+    "kind": "slot", "slot": "machine_kind",
+    "enum": ["voicemail", "carrier", "ivr", "screener"],
+    "description": {
+      "en": "Call this only when what answered is a recording or a machine, not a live person. Give the kind. Never call it for a live person, however curt.",
+      "zh": "仅当接听的是录音或机器而不是真人时调用,填写类型。真人接听(即使很冷淡)绝不调用。"
+    }
+  }
+},
+"nodes": {
+  "leave_message": {
+    "announce": {"en": "Hello, this is StarCom Mobile. We will try you again later. Goodbye.", "zh": "您好,这里是星讯手机,我们稍后再与您联系,再见。"},
+    "instruction": "Recording reached; the line hangs up after the message.",
+    "tools": [], "isTerminal": true,
+    "lead": {"intent": "NONE", "notes": "machine: {slots.machine_kind}"}
+  },
+  "machine_end": {
+    "announce": "", "instruction": "Machine reached; hang up silently.",
+    "tools": [], "isTerminal": true,
+    "lead": {"intent": "NONE", "notes": "machine: {slots.machine_kind}"}
+  }
+}
+```
+
+Things to keep in mind:
+
+- **An assistant's "好的" is not agreement.** Say so in the tool's description and in the instruction of the phase that classifies the customer: whatever answers in the owner's place ("我是机主的助理", "我会转告他", "好的，明白了") is not the customer, and only the customer can agree. Without that sentence the model takes the assistant's acknowledgement for a yes.
+- **A wrong report ends a call with a person.** The move into a terminal phase cannot be undone, so the description says never to call the tool for a live person, however curt. If live calls show false reports, move into a non-terminal phase that listens once more before the terminal one, rather than loosening the platform's check.
+- **The silent `machine_end` is the safe default.** `leave_message` says a line to a recording, which some regimes treat as a problem of its own. A deployment on doubao refuses to publish a terminal phase without an `announce` (5.2).
+- **A machine is a `NONE` lead.** The `machine:` note is a reporting tag: a machine is counted with customers who said no, and reports separate them by the note's prefix. No intent makes the dialer call the number again (design 10 section 13.2).
+- **The platform's check does not depend on the tool.** A flow without it is kept from recording a machine's lead the same way, and a flow with it is still guarded on a call where the model never calls it.
 
 ## 5. Rules the platform already enforces for flows
 

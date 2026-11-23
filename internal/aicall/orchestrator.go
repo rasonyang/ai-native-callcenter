@@ -508,6 +508,9 @@ func (o *Orchestrator) runCall(ctx context.Context, dialog *voice.Dialog) error 
 	// on an inbound or internal call the caller expects to be greeted, and a
 	// flow that serves both keeps its field (#594).
 	sessionCfg.IsCallerFirst = listensFirst(spec, facts)
+	// Judge the callee's words for a machine's on the same calls only (#409):
+	// an inbound caller who asks to leave a message is a person.
+	sessionCfg.IsPlacedToCustomer = facts.isOutboundToCustomer()
 	session, err := New(FromDialog(dialog), model, profile, sessionCfg)
 	if err != nil {
 		return err
