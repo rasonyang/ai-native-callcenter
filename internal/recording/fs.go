@@ -15,9 +15,20 @@ import (
 )
 
 // fsStorage keeps recordings where the switch wrote them.
-type fsStorage struct{ root string }
+type fsStorage struct {
+	root string
+	// releaser removes a file as the switch's user. The directory is the
+	// store, but on the shipped compose stack it is mounted read-only — and
+	// even mounted writable, the switch's dated directories are 0750 — so
+	// deleting a recording needs the switch that owns it (#536).
+	releaser SpoolReleaser
+}
 
 func newFSStorage(root string) *fsStorage { return &fsStorage{root: root} }
+
+// SetSpoolReleaser gives the storage a way to remove a file the operating
+// system refuses it. Set once at start-up, before the first Delete.
+func (s *fsStorage) SetSpoolReleaser(r SpoolReleaser) { s.releaser = r }
 
 func (s *fsStorage) Backend() string { return "FS" }
 func (s *fsStorage) Bucket() string  { return "" }
@@ -156,14 +167,30 @@ func (s *fsStorage) Open(_ context.Context, key string) (io.ReadSeekCloser, int6
 	return file, info.Size(), nil
 }
 
+// Delete removes the recording itself first — all a deployment needs where
+// the application runs as the switch's user — and, when the operating system
+// refuses and a releaser is configured, asks the switch that owns the file
+// (the compose stack mounts the volume read-only, and the switch's dated
+// directories are 0750 besides). A refusal from both returns both causes.
 func (s *fsStorage) Delete(_ context.Context, key string) error {
 	full, err := s.resolve(key)
 	if err != nil {
 		return err
 	}
-	err = os.Remove(full)
-	if os.IsNotExist(err) {
+	rmErr := os.Remove(full)
+	if rmErr == nil {
+		_ = removeEmptyParents(full, s.root)
+		return nil
+	}
+	if errors.Is(rmErr, fs.ErrNotExist) {
 		return nil // already gone is the outcome deletion wanted
 	}
-	return err
+	if s.releaser == nil {
+		return rmErr
+	}
+	if switchErr := s.releaser.ReleaseSpoolFile(key); switchErr != nil {
+		return fmt.Errorf("recording: delete %s: the application could not remove it (%w) and the switch could not either (%w)",
+			key, rmErr, switchErr)
+	}
+	return nil
 }

@@ -251,14 +251,21 @@ type SpoolReleaser interface {
 // application itself may not. Set once at start-up, before the first Release.
 func (s *s3Storage) SetSpoolReleaser(r SpoolReleaser) { s.releaser = r }
 
-// AttachSpoolReleaser gives st a SpoolReleaser if it keeps a spool that
-// needs one, and reports whether it did.
+// AttachSpoolReleaser gives st a SpoolReleaser if it keeps files it cannot
+// always remove itself — an S3 spool, or the filesystem backend's whole
+// store on a read-only mount — and reports whether it did.
 func AttachSpoolReleaser(st Storage, r SpoolReleaser) bool {
-	s3, ok := st.(*s3Storage)
-	if !ok || s3.spool == nil {
+	switch s := st.(type) {
+	case *s3Storage:
+		if s.spool == nil {
+			return false
+		}
+		s.SetSpoolReleaser(r)
+	case *fsStorage:
+		s.SetSpoolReleaser(r)
+	default:
 		return false
 	}
-	s3.SetSpoolReleaser(r)
 	return true
 }
 

@@ -998,12 +998,13 @@ func checkRecordingStorage(ctx context.Context, d doctorDeps) []doctorResult {
 	return []doctorResult{pass(check, "uploaded, read back and deleted a probe object in "+where)}
 }
 
-// checkRecordingSpool proves that the switch can clear its own spool and that
-// it is the spool the application reads. With the S3 backend and a spool the
-// application uploads a recording and then asks the switch to remove its copy
-// (the switch's directories are not the application's to unlink in); a switch
-// that cannot, or a volume the two do not share, leaves every recording on the
-// disk.
+// checkRecordingSpool proves that the switch can clear files in its
+// recordings directory and that it is the directory the application reads.
+// With the S3 backend and a spool the application uploads a recording and
+// then asks the switch to remove its copy; on the filesystem backend the
+// same ask comes from retention — and either way the switch's directories
+// are not the application's to unlink in. A switch that cannot, or a volume
+// the two do not share, leaves every recording on the disk.
 func checkRecordingSpool(d doctorDeps, sw switchReader) []doctorResult {
 	const check = DoctorCheckRecordingSpool
 	var st recording.Storage
@@ -1014,10 +1015,12 @@ func checkRecordingSpool(d doctorDeps, sw switchReader) []doctorResult {
 	switch {
 	case st == nil:
 		return []doctorResult{skip(check, "no recording storage is configured")}
-	case st.Backend() != "S3":
-		return []doctorResult{skip(check, "the recording backend is "+st.Backend()+", not S3")}
-	case d.cfg.RecordingDir == "":
+	case st.Backend() == "S3" && d.cfg.RecordingDir == "":
 		return []doctorResult{skip(check, "no spool directory (AICC_RECORDING_DIR): the switch uploads recordings itself")}
+	case st.Backend() == "FS" && d.cfg.RecordingRetentionDays == 0:
+		return []doctorResult{skip(check, "the filesystem backend with retention off asks the switch to clear nothing")}
+	case st.Backend() != "S3" && st.Backend() != "FS":
+		return []doctorResult{skip(check, "the recording backend is "+st.Backend()+", which the switch clears nothing for")}
 	case sw == nil:
 		return []doctorResult{skip(check, "doctor could not connect to the switch")}
 	}

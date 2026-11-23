@@ -290,12 +290,15 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	// An S3 spool is cleared by the switch that wrote it, on the
-	// application's request; the switch's directories are not the
+	// An S3 spool — and the FS backend's whole store when something asks for
+	// removals, retention does — is cleared by the switch that wrote it, on
+	// the application's request; the switch's directories are not the
 	// application's to unlink in.
 	var spoolProbe *spoolCheck
 	if recordings != nil && recording.AttachSpoolReleaser(recordings, adapter) {
-		spoolProbe = newSpoolCheck(adapter, cfg.RecordingDir, slog.Default())
+		if recordings.Backend() == "S3" || cfg.RecordingRetentionDays > 0 {
+			spoolProbe = newSpoolCheck(adapter, cfg.RecordingDir, slog.Default())
+		}
 	}
 	if recordings != nil {
 		if s3, ok := recordings.(interface{ EnsureBucket(context.Context) error }); ok {
