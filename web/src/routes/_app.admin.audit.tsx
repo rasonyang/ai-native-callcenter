@@ -192,9 +192,11 @@ function ActorCell({ entry, unknownLabel }: { entry: AuditEntry; unknownLabel: s
   return <span className="text-muted-foreground">—</span>
 }
 
-/** Ids are for recognising a row again, not for reading aloud. */
+/** Ids are for recognising a row again, not for reading aloud. A target that
+ * is not a uuid — a phone number — is itself the recognisable value and is
+ * shown whole. */
 function shortId(id: string): string {
-  return id.length > 8 ? id.slice(0, 8) : id
+  return /^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(id) ? id.slice(0, 8) : id
 }
 
 /**
