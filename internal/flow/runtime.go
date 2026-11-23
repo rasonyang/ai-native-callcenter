@@ -288,6 +288,18 @@ func (r *Runtime) ReturnTo(phase string) bool { return r.engine.ReturnTo(phase) 
 // writes from, and this is wording the flow is not asking anybody to rephrase.
 func (r *Runtime) Announce() string { return r.engine.Announce() }
 
+// Farewell is the short goodbye the current phase declares apart from its
+// announce (Engine.Farewell).
+func (r *Runtime) Farewell() string { return r.engine.Farewell() }
+
+// TerminalLine is the closing text a terminal phase speaks on being entered:
+// announce, then farewell (Engine.TerminalLine).
+func (r *Runtime) TerminalLine() string { return r.engine.TerminalLine() }
+
+// OwedLine is the line the caller must have heard before the armed ending
+// runs: the farewell where declared, else the announce (Engine.OwedLine).
+func (r *Runtime) OwedLine() string { return r.engine.OwedLine() }
+
 // ToolWaitLine is the line said while a slow HTTP tool runs
 // (Engine.ToolWaitLine).
 func (r *Runtime) ToolWaitLine() string { return r.engine.ToolWaitLine() }

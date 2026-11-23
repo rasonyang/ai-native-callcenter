@@ -289,6 +289,41 @@ func (e *Engine) Announce() string {
 	return e.render(e.current.Announce.For(e.lang))
 }
 
+// Farewell is the short goodbye the current phase declares apart from its
+// announce (Node.Farewell), with collected values substituted in. Empty when
+// the phase declares none — which is every phase but a terminal one with an
+// announce, the only shape load accepts.
+func (e *Engine) Farewell() string {
+	return e.render(e.current.Farewell.For(e.lang))
+}
+
+// TerminalLine is the closing text a terminal phase speaks on being entered:
+// its announce, then its farewell, one line. It is the announce alone when
+// the phase declares no farewell — and on any other phase it is the announce
+// too, so a caller asking for "the phase's own line" needs no branching.
+func (e *Engine) TerminalLine() string {
+	line := e.Announce()
+	if farewell := e.Farewell(); farewell != "" {
+		if line == "" {
+			return farewell
+		}
+		return line + "\n" + farewell
+	}
+	return line
+}
+
+// OwedLine is the line the caller must have heard before the ending a
+// terminal phase arms may run: the farewell where the phase declares one
+// (#568), else the whole announce. A caller who talks over the announce's
+// instructions is answered, and then the farewell — alone — is the line they
+// are owed before the call ends.
+func (e *Engine) OwedLine() string {
+	if farewell := e.Farewell(); farewell != "" {
+		return farewell
+	}
+	return e.Announce()
+}
+
 // declaredLead is the lead the current phase declares (Node.Lead), as it is
 // recorded: its notes rendered from the slots as they are now, in the call's
 // language, trimmed and cut to MaxLeadNotesRunes (isCut says they were). ok is

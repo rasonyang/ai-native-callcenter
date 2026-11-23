@@ -197,6 +197,12 @@ func (s *Spec) validate() error {
 		if node.IsFlowHangupAllowed && node.IsTerminal {
 			report("phase %q is terminal but declares isFlowHangupAllowed: a hangup's reason is not judged in a terminal phase", id)
 		}
+		if !node.Farewell.IsEmpty() && !node.IsTerminal {
+			report("phase %q declares a farewell but is not terminal: it is the goodbye a terminal phase's closing line ends in", id)
+		}
+		if !node.Farewell.IsEmpty() && node.Announce.IsEmpty() {
+			report("phase %q declares a farewell but no announce: the farewell is the tail of the announce's line, not a line of its own", id)
+		}
 		s.validateTransitions("phase "+id, node.Transitions, &problems)
 		if node.Lead != nil {
 			validateDeclaredLead(id, node.Lead, report)
@@ -242,6 +248,7 @@ func (s *Spec) validate() error {
 	for id, node := range s.Nodes {
 		checkTemplate(declared, "phase "+id+" instruction", node.Instruction, report)
 		checkTemplate(declared, "phase "+id+" announce", node.Announce, report)
+		checkTemplate(declared, "phase "+id+" farewell", node.Farewell, report)
 		if node.Lead != nil {
 			checkTemplate(declared, "phase "+id+" lead notes", node.Lead.Notes, report)
 		}

@@ -7,6 +7,20 @@ carries the one-line installer's files.
 
 ## Unreleased
 
+### Added
+
+- **A terminal phase may split its closing line into an `announce` and a
+  `farewell`** (#568). With only an `announce`, a caller who talked over a long
+  closing line twice got their question answered and the call ended with no
+  goodbye at all: the whole announce was the line they were owed, and the
+  second interruption counted it as said. A terminal phase may now declare a
+  short `farewell` beside its `announce` — the phase speaks the two as one
+  line, announce then farewell, and the farewell alone is what the caller is
+  owed: a cut inside the instructions leaves it owed and it is re-asked on its
+  own, short enough to be heard before the next interruption ends the call.
+  Load rejects a `farewell` on a non-terminal phase or beside no announce, and
+  flows that declare none are unchanged.
+
 ### Fixed
 
 - **A machine that answers a campaign call records no lead** (#409). On a call

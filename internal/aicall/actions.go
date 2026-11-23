@@ -132,8 +132,18 @@ type callActions struct {
 	// closingLine is the rendered line the caller is owed while isLineOwed
 	// holds, in the language the flow wrote it in (expectClosingLine). The
 	// words of the turns after the arming one are compared with it (onTurnDone,
-	// #262).
+	// #262). On a terminal phase that splits its line into announce and
+	// farewell (#568) it is the farewell alone: the part of the line the
+	// caller must hear, and the only part asked for again after an
+	// interruption.
 	closingLine string
+	// spokenLine is the whole closing text the phase's line says
+	// (expectClosingLine): closingLine, plus whatever instruction precedes
+	// the farewell in it. The played/unplayed of a cut over that turn are
+	// dated inside it, so the final-sentence rule needs the full text, not
+	// the owed tail (cutInFinalSentence). It is closingLine itself when the
+	// phase declares no farewell.
+	spokenLine string
 	// said holds the words the model has spoken, by turn, in the turns after
 	// the arming one while the line is owed (onBotSaid). A turn's entry is
 	// consumed when the turn finishes.
@@ -478,6 +488,7 @@ func (a *callActions) armAs(_ context.Context, isTransfer bool, action func()) {
 	a.isHangupRefused = false
 	a.isLineOwed = false
 	a.closingLine = ""
+	a.spokenLine = ""
 	a.said = nil
 	a.isLineAskedAgain = false
 	a.notLineThrough = 0
@@ -630,11 +641,17 @@ func (a *callActions) interruptedHangupHint() string {
 // has been entered, on profiles that do not speak the line themselves
 // (doubao's RequiresTerminalAnnounce), with the line as rendered for the call.
 //
+// line is the part the caller is owed — a terminal phase's farewell where it
+// declares one apart from its announce (#568), else the whole line — and
+// spoken is the whole text the phase's line says: the two differ only then,
+// and spoken is what a cut's played/unplayed are dated inside
+// (cutInFinalSentence), since they span the line's whole turn.
+//
 // The line is kept so the words of the turn that follows can be held against
 // it (onTurnDone, #262): a model that answers a tool batch ending the call
 // with its own confirmation, not the line, has not said the line. An empty line
 // cannot be compared, and any turn with audio counts as it.
-func (a *callActions) expectClosingLine(line string) {
+func (a *callActions) expectClosingLine(line, spoken string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if a.armed == nil || a.isArmedTransfer || a.isEndingLocked || a.isLineSpoken {
@@ -642,6 +659,7 @@ func (a *callActions) expectClosingLine(line string) {
 	}
 	a.isLineOwed = true
 	a.closingLine = line
+	a.spokenLine = spoken
 }
 
 // onBotSaid collects the words of a final transcript of the model's, for the
@@ -1068,8 +1086,8 @@ func (a *callActions) onBargeIn(cut Event) {
 		a.finishedLineCutTurn = cut.Turn
 		var finalSentence time.Duration
 		isFinalSentence := false
-		if count == 1 && a.closingLine != "" {
-			finalSentence, isFinalSentence = cutInFinalSentence(a.closingLine, played, unplayed)
+		if count == 1 && a.spokenLine != "" {
+			finalSentence, isFinalSentence = cutInFinalSentence(a.spokenLine, played, unplayed)
 			if isFinalSentence {
 				a.isLineOwed = false
 				a.isLineSaidByRule = true

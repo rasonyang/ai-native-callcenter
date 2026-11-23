@@ -71,6 +71,7 @@ A revision stored before this check existed may still carry such a key. It keeps
 | --- | --- |
 | `instruction` | Required. What the model is trying to accomplish now. A brief the model writes from. May reference `{slots.name}`. |
 | `announce` | Optional. A line spoken **as written** on entering the phase, also rendered with `{slots.name}`. |
+| `farewell` | Optional, only on a terminal phase that has an `announce`. The short goodbye the closing line ends in, declared apart from the announce's instructions so a caller who talks over them is owed only this line, which is then re-asked on its own (2.7, 5.2, #568). Rendered with `{slots.name}` like an announce. |
 | `tools` | The allowlist for this phase. `"*"` allows every tool. Empty allows only `alwaysAllowedTools`. |
 | `transitions` | Rules that move the call out of this phase (2.5). |
 | `isTerminal` | The conversation does not leave this phase. A terminal phase may not declare `transitions`. |

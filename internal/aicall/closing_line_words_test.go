@@ -175,7 +175,7 @@ func TestTheArmingTurnsOwnWordsAreNotKept(t *testing.T) {
 	actions, session, model := testActions(t, &fakeSwitch{})
 	actions.arm(t.Context(), func() {})
 	armedTurn := session.currentTurn()
-	actions.expectClosingLine("Goodbye.")
+	actions.expectClosingLine("Goodbye.", "Goodbye.")
 	actions.onBotSaid(armedTurn, "Goodbye.")
 	actions.mu.Lock()
 	n := len(actions.said)
@@ -194,7 +194,7 @@ func TestTheLineIsNotAskedOverATurnAlreadyBeingMade(t *testing.T) {
 	actions, session, model := testActions(t, &fakeSwitch{})
 	actions.arm(t.Context(), func() {})
 	armedTurn := session.currentTurn()
-	actions.expectClosingLine("Goodbye, Ann.")
+	actions.expectClosingLine("Goodbye, Ann.", "Goodbye, Ann.")
 
 	session.beginTurn(false, false) // armedTurn+1
 	actions.onBotSaid(armedTurn+1, "Okay, noted.")
@@ -228,7 +228,7 @@ func TestTheLineIsNotAskedOverATurnAlreadyBeingMade(t *testing.T) {
 func TestWordsAfterATransferAreNotHeldAgainstALine(t *testing.T) {
 	actions, session, model := testActions(t, &fakeSwitch{})
 	actions.armAs(t.Context(), true, func() {})
-	actions.expectClosingLine("Goodbye.")
+	actions.expectClosingLine("Goodbye.", "Goodbye.")
 	armedTurn := session.currentTurn()
 	actions.onBotSaid(armedTurn+1, "Putting you through.")
 	actions.onTurnDone(armedTurn+1, false, true)
