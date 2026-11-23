@@ -546,11 +546,12 @@ cross-campaign frequency window. The environment runs with
 `AICC_CAMPAIGN_FREQUENCY_WINDOW=0` so repeat runs are not held, so
 `e2e.sh frequency` recreates the application with `E2E_CAMPAIGN_FREQUENCY_WINDOW=24h`
 (the compose overlay's variable, empty by default), runs the case, and recreates
-the application on the defaults again, whatever the result. The case needs an
-environment that is up and, since it touches its numbers for 24 h, a fresh one
-for each run (`make e2e-down`, `make e2e-up`); the driver deletes its entries
-from the list before and after, and a repeat run fails at campaign A with a
-timeout.
+the application on the defaults again, whatever the result. One run of the
+case needs no environment of its own — it sits after the other cases on the
+same one, as the workflow runs it — but the window holds the case's numbers
+for 24 h, so running the case a second time needs a fresh environment
+(`make e2e-down`, `make e2e-up`); the driver deletes its entries from the list
+before and after, and a repeat run fails at campaign A with a timeout.
 
 Two numbers of the US range, dedicated to this case (`+1 202 555 0181` as N1,
 `0182` as N2), each answered with 200 and hung up by the callee after 3 s. They
@@ -580,10 +581,11 @@ the contact's local day. The environment runs with the cap at 0 (off:
 turns into 0), so smoke, campaign and capacity runs, which dial one number many
 times, are never held. `e2e.sh dailycap` recreates the application with the cap
 at 3, runs the case, and recreates the application on the default again,
-whatever the result. The case needs an environment that is up and a simulator
-with a fresh record (`e2e.sh dailycap` restarts it); the day's count lives in the
-application's database, so a repeat run in the same environment is held at once:
-`make e2e-down`, `make e2e-up` for each run.
+whatever the result. One run of the case needs no environment of its own — it sits
+after the other cases on the same one, as the workflow runs it — but the day's
+count lives in the application's database, so running the case a second time
+is held at once: `make e2e-down`, `make e2e-up`, and a simulator restart
+(`e2e.sh dailycap` restarts it) for each run.
 
 One number of the US range, dedicated to this case (`+1 202 555 0192`), whose
 callee sends 180 and rings until our ring timeout cancels the call, with four

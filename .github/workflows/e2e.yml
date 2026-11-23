@@ -8,7 +8,10 @@
 # scenarios of issue #246 (no redial after an answer, a HIGH lead's callback)
 # and the run-wide invariants checked after every run; then the capacity
 # scenarios of issue #247 (bot-slot overflow, the DID outbound line limit),
-# each in an application start of its own.
+# each in an application start of its own; then the cases that recreate the
+# application with their own setting and restore the defaults: the caller who
+# speaks first of issue #594, the carrier's 408 of issue #576, the test-number
+# frequency window of issue #578 and the day's dial cap of issue #577.
 #
 # Path-filtered to what can break an outbound call. The application is built
 # from the checkout; the switch image is the published one the base compose
@@ -137,6 +140,30 @@ jobs:
       - name: Caller-first tests
         if: ${{ !cancelled() && steps.up.outcome == 'success' }}
         run: make e2e-callerfirst
+
+      # The carrier's own refusal (#576): the callee rings 25 s, then answers
+      # 408; the attempt ends NO_ANSWER with the 180-to-408 ringSec and
+      # tech.sipStatus 408, spending one of maxAttempts. About half a minute.
+      - name: Carrier-timeout test
+        if: ${{ !cancelled() && steps.up.outcome == 'success' }}
+        run: make e2e-carrier-timeout
+
+      # Two campaigns in a row on a listed test number under a 24 h frequency
+      # window (#578). The case recreates the application with the window and
+      # recreates it on the defaults again, so it runs on this environment —
+      # what a repeat run of the case itself needs a fresh environment for is
+      # the window's 24 h hold on the case's numbers. About a quarter of a
+      # minute.
+      - name: Frequency-window test
+        if: ${{ !cancelled() && steps.up.outcome == 'success' }}
+        run: make e2e-frequency
+
+      # One number dialled to the day's cap of 3 and no further (#577), with
+      # the application recreated under the cap and restored after; about
+      # four minutes.
+      - name: Daily dial cap test
+        if: ${{ !cancelled() && steps.up.outcome == 'success' }}
+        run: make e2e-dailycap
 
       # The run directory holds the simulator's record, the CDRs, the smoke
       # summary, the campaign report with its failure bundles, the capacity
