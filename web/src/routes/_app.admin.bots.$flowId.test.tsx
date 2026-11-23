@@ -853,5 +853,22 @@ describe('the runtime panel', () => {
     await openTab(user, 'Persona & rules')
     const label = await screen.findByText('Listen before opening (outbound)')
     expect(label.nextElementSibling).toHaveTextContent('Off')
+    expect(screen.queryByText('Silent-callee wait')).not.toBeInTheDocument()
+  })
+
+  it('shows the wait the flow sets (#603)', async () => {
+    historyServer({ ...SPEC, global: { ...SPEC.global, isCallerFirst: true, callerFirstWaitMs: 1200 } })
+    const { user } = renderEditor()
+    await openTab(user, 'Persona & rules')
+    const label = await screen.findByText('Silent-callee wait')
+    expect(label.nextElementSibling).toHaveTextContent('1200 ms')
+  })
+
+  it('shows the platform default when the flow sets no wait (#603)', async () => {
+    historyServer({ ...SPEC, global: { ...SPEC.global, isCallerFirst: true } })
+    const { user } = renderEditor()
+    await openTab(user, 'Persona & rules')
+    const label = await screen.findByText('Silent-callee wait')
+    expect(label.nextElementSibling).toHaveTextContent('Default (2000 ms)')
   })
 })

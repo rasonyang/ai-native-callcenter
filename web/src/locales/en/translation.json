@@ -788,6 +788,9 @@
     "off": "Off",
     "on": "On",
     "isCallerFirst": "Listen before opening (outbound)",
+    "callerFirstWait": "Silent-callee wait",
+    "callerFirstWaitMs": "{{ms}} ms",
+    "callerFirstWaitDefault": "Default (2000 ms)",
     "alwaysAllowed": "Always allowed",
     "builtinTool": "Built in — implemented by the platform, no HTTP call",
     "builtin": {
