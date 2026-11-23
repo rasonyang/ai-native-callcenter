@@ -774,7 +774,9 @@ and starts_W + n ≤ SessionLimit × W / SessionPeriod            -- when Sessio
 and tokens_T + n × tokens_T / max(1, botSessionsInUse) ≤ TokenLimit   -- when TokenLimit > 0
 where n = pendingAnswered + startsWaiting + Σ_campaigns (p̂_c × ringing_c) + 1
       W = max(SessionPeriod, 10 s), T = TokenPeriod
-      backoff = the longer period of the limits in force; 60 s when neither is
+      backoff = the refusing limit's own period (#652): SessionPeriod for a
+                REQUESTS refusal, TokenPeriod for a TOKENS one, the longer of
+                both for UNKNOWN; 60 s when no limit is in force
 ```
 
 - The meter counts starts over `W` and tokens over `T`, and the drop times that wake the dialer

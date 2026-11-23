@@ -232,13 +232,13 @@ func TestTheLatestQuotaRefusalIsKept(t *testing.T) {
 	if r := m.Read(); !r.LastQuotaRefusal.IsZero() {
 		t.Fatalf("a fresh meter has a refusal at %v", r.LastQuotaRefusal)
 	}
-	m.QuotaRefused()
+	m.QuotaRefused("UNKNOWN")
 	first := c.Now()
 	c.advance(5 * time.Minute)
 	if r := m.Read(); !r.LastQuotaRefusal.Equal(first) {
 		t.Errorf("refusal at %v, want %v", r.LastQuotaRefusal, first)
 	}
-	m.QuotaRefused()
+	m.QuotaRefused("UNKNOWN")
 	if r := m.Read(); !r.LastQuotaRefusal.Equal(c.Now()) {
 		t.Errorf("refusal at %v, want the latest, %v", r.LastQuotaRefusal, c.Now())
 	}
@@ -256,7 +256,7 @@ func TestNothingAndNilCountNothing(t *testing.T) {
 	var none *Meter
 	none.SessionStarted()
 	none.TokensUsed(10)
-	none.QuotaRefused()
+	none.QuotaRefused("UNKNOWN")
 	if r := none.Read(); r.Starts != 0 || r.Tokens != 0 || !r.LastQuotaRefusal.IsZero() {
 		t.Errorf("a nil meter reads %+v", r)
 	}
@@ -303,7 +303,7 @@ func TestConcurrentUseIsSafe(t *testing.T) {
 				}
 				m.TokensUsed(2)
 				if i%100 == 0 {
-					m.QuotaRefused()
+					m.QuotaRefused("UNKNOWN")
 				}
 				_ = m.Read()
 			}

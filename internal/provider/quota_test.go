@@ -24,6 +24,51 @@ import (
 // start error read then. It is the one shape this classification exists for.
 const qwenQuotaText = "Allocated quota exceeded, please increase your quota limit."
 
+// Which limit a quota refusal spoke for, on the vendor texts the
+// classification is written from (#652): qwen's two production refusals of
+// 2026-11-19, the DashScope throttling codes, OpenAI's message variants, an
+// HTTP 429's bare meaning and doubao's concurrency refusal. A quota refusal
+// whose words name neither window is UNKNOWN, and a non-quota failure is none.
+func TestAQuotaRefusalNamesTheLimitItsWordsSettle(t *testing.T) {
+	t.Parallel()
+	refused := func(status int, body string) error {
+		return fmt.Errorf("x: %w", &wsconn.HandshakeError{
+			Endpoint: "wss://p.example", StatusCode: status, Body: body, Err: websocket.ErrBadHandshake})
+	}
+	closed := func(code int, text string) error {
+		return fmt.Errorf("session rejected: %w", &websocket.CloseError{Code: code, Text: text})
+	}
+	event := func(code, message string) error {
+		return fmt.Errorf("session rejected: %w", &wireError{Code: code, Message: message})
+	}
+	for _, tt := range []struct {
+		name string
+		err  error
+		want string
+	}{
+		{"qwen's session-rate refusal", event("", "Requests rate limit exceeded, please try again later."), LimitRequests},
+		{"qwen's token refusal", closed(1007, qwenQuotaText), LimitTokens},
+		{"dashscope's throttling", refused(429, `{"code":"Throttling"}`), LimitRequests},
+		{"dashscope's request-rate quota", event("Throttling.RateQuota", ""), LimitRequests},
+		{"dashscope's allocation quota", refused(429, `{"code":"Throttling.AllocationQuota"}`), LimitTokens},
+		{"openai's requests variant", event("rate_limit_exceeded", "Rate limit reached for requests per min"), LimitRequests},
+		{"openai's tokens variant", event("rate_limit_exceeded", "Rate limit reached for tokens per min"), LimitTokens},
+		{"openai's insufficient quota", event("insufficient_quota", "You exceeded your current quota"), LimitTokens},
+		{"an HTTP 429 with an empty body", refused(429, ""), LimitRequests},
+		{"doubao's concurrency refusal", event("ExceededConcurrentLimit", ""), LimitRequests},
+		{"a quota text naming neither window", closed(1007, "QUOTA reached"), LimitUnknown},
+		{"a rate_limit_exceeded with no unit", event("rate_limit_exceeded", "slow down"), LimitRequests},
+		{"not a quota refusal", refused(401, ""), ""},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			_, reason, limit, _ := ClassifyStart(tt.err)
+			if limit != tt.want {
+				t.Errorf("ClassifyStart limit = %q (reason %s), want %q", limit, reason, tt.want)
+			}
+		})
+	}
+}
+
 func TestAStartFailureIsClassifiedByWhatTheProviderSaid(t *testing.T) {
 	t.Parallel()
 	refused := func(status int, body string) error {
@@ -64,7 +109,7 @@ func TestAStartFailureIsClassifiedByWhatTheProviderSaid(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			status, reason, _ := ClassifyStart(tt.err)
+			status, reason, _, _ := ClassifyStart(tt.err)
 			if status != tt.status || reason != tt.reason {
 				t.Errorf("ClassifyStart = %s/%s, want %s/%s", status, reason, tt.status, tt.reason)
 			}
@@ -132,7 +177,7 @@ func (m *fakeMeter) TokensUsed(n int) {
 	m.tokens = append(m.tokens, n)
 }
 
-func (m *fakeMeter) QuotaRefused() {
+func (m *fakeMeter) QuotaRefused(limit string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.refusals++
