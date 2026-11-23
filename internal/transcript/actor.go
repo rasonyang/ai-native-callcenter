@@ -60,9 +60,10 @@ type Line struct {
 	// SpokenAt is when the words were said, when the producer knows: a
 	// caller's utterance is transcribed after it was spoken, and a line
 	// stamped at arrival can land later than the bot's reaction to it (#587).
-	// With it the line's occurredAt and offsetMs are the speaking time;
-	// without it, the arrival time, as before. seq stays in receipt order,
-	// so a late-transcribed line is the one content.transcribedLate marks.
+	// With it the line carries speechStartMs — the words' time beside
+	// occurredAt and offsetMs, which stay the arrival time. seq stays in
+	// receipt order, so a late-transcribed line is the one
+	// content.transcribedLate marks.
 	SpokenAt time.Time
 }
 
