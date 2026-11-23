@@ -147,11 +147,13 @@ func TestAnUnansweredTurnWithWordsDuringASettlingHandoverSendsNothing(t *testing
 }
 
 func TestAnUnansweredTurnWithWordsDoesNotStopATimeLimitWaitingForTheFloor(t *testing.T) {
-	h, _ := driveHarness(t, sessionBudget{limitAfter: 20 * time.Millisecond, floorWait: time.Minute})
+	clock := &manualClock{}
+	h, _ := driveHarness(t, sessionBudget{limitAfter: 20 * time.Millisecond, floorWait: time.Minute}, clock)
 	// The bot holds the floor past the limit, so the limit waits.
 	h.model.events <- provider.Event{Type: provider.EventTypeResponseStarted}
 	h.model.events <- provider.Event{Type: provider.EventTypeAudioDelta, Audio: make([]byte, 320)}
 	waitFor(t, "the bot to hold the floor", h.session.isHoldingTheFloor)
+	clock.fire(t, 20*time.Millisecond)
 	settle()
 
 	h.session.emit(droppedTurn(rma1003Words))
