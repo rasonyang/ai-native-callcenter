@@ -20,11 +20,8 @@ const openingLine = "Hello, this is StarCom Mobile. Is now a good moment?"
 // startOpeningCall starts a session on a profile with an opening line, on a
 // fake that names every caller message (announceItems) and creates the
 // response.create requests numbered in created, and returns once the client
-// has asked for the opening turn. openingCreated answers the opening's own
-// request from the fake's read loop, so a test that means it answered never
-// puts a test-goroutine send inside the request's bound (#397); the opening
-// turn itself is still left to the test.
-func startOpeningCall(t *testing.T, profile Profile, text string, openingCreated bool, created ...int) (*fakeProvider, *Realtime, *syncBuffer) {
+// has asked for the opening turn. The opening turn itself is left to the test.
+func startOpeningCall(t *testing.T, profile Profile, text string, created ...int) (*fakeProvider, *Realtime, *syncBuffer) {
 	t.Helper()
 	var mu sync.Mutex
 	var requests int
@@ -37,10 +34,6 @@ func startOpeningCall(t *testing.T, profile Profile, text string, openingCreated
 		requests++
 		n := requests
 		mu.Unlock()
-		if n == 1 && openingCreated {
-			f.send(map[string]any{"type": "response.created"})
-			return
-		}
 		for _, number := range created {
 			if n == number {
 				f.send(map[string]any{"type": "response.created"})
@@ -81,6 +74,14 @@ func awaitDirectionNamed(t *testing.T, session *Realtime) {
 	t.Fatal("the client never learned the provider's name for the opening's direction")
 }
 
+// openResponse has the fake create a response and waits for the client to
+// report it.
+func openResponse(t *testing.T, f *fakeProvider, session *Realtime) {
+	t.Helper()
+	f.send(map[string]any{"type": "response.created"})
+	awaitEvent(t, session, EventTypeResponseStarted)
+}
+
 // endResponse ends the open response with a status and waits for the client to
 // report it.
 func endResponse(t *testing.T, f *fakeProvider, session *Realtime, status string) {
@@ -100,13 +101,13 @@ func endResponse(t *testing.T, f *fakeProvider, session *Realtime, status string
 func TestTheOpeningDirectionIsTakenOutWhenTheOpeningEnds(t *testing.T) {
 	for _, status := range []string{statusCompleted, statusCancelled} {
 		t.Run(status, func(t *testing.T) {
-			f, session, logs := startOpeningCall(t, QwenProfile(), openingLine, true)
+			f, session, logs := startOpeningCall(t, QwenProfile(), openingLine)
 			texts, ids := lineItems(t, f, openingLine)
 			if len(texts) != 1 || texts[0] != SayExactly(openingLine, "en") {
 				t.Fatalf("caller items %q, want the opening's direction", texts)
 			}
 
-			awaitResponseOpen(t, session) // the fake created the opening request as it arrived
+			openResponse(t, f, session)
 			f.awaitMessages("conversation.item.delete", 0)
 			endResponse(t, f, session, status)
 
@@ -118,8 +119,7 @@ func TestTheOpeningDirectionIsTakenOutWhenTheOpeningEnds(t *testing.T) {
 				t.Errorf("no log line about taking the direction out:\n%s", logs.String())
 			}
 			// Once: the next turn's end deletes nothing.
-			f.send(map[string]any{"type": "response.created"})
-			awaitResponseOpen(t, session)
+			openResponse(t, f, session)
 			endResponse(t, f, session, statusCompleted)
 			f.awaitMessages("conversation.item.delete", 1)
 		})
@@ -131,8 +131,8 @@ func TestTheOpeningDirectionIsTakenOutWhenTheOpeningEnds(t *testing.T) {
 // it. The cancel the line sent to make room ends the opening as a cancelled
 // response.
 func TestTheOpeningDirectionIsTakenOutBeforeTheRequestsTheEndReleases(t *testing.T) {
-	f, session, _ := startOpeningCall(t, QwenProfile(), openingLine, true)
-	awaitResponseOpen(t, session) // the fake created the opening request as it arrived
+	f, session, _ := startOpeningCall(t, QwenProfile(), openingLine)
+	openResponse(t, f, session)
 	if err := session.SpeakText(phaseLine, false); err != nil {
 		t.Fatalf("speak: %v", err)
 	}
@@ -152,7 +152,7 @@ func TestTheOpeningDirectionIsTakenOutBeforeTheRequestsTheEndReleases(t *testing
 // response that finally answers it has ended, and the retry puts no second
 // copy in.
 func TestARetriedOpeningKeepsItsDirectionUntilTheRetryEnds(t *testing.T) {
-	f, session, logs := startOpeningCall(t, QwenProfile(), openingLine, false, 2)
+	f, session, logs := startOpeningCall(t, QwenProfile(), openingLine, 2)
 	f.awaitMessages("response.create", 2)
 	if texts, _ := lineItems(t, f, openingLine); len(texts) != 1 {
 		t.Fatalf("caller items %q, want the direction once", texts)
@@ -171,7 +171,7 @@ func TestARetriedOpeningKeepsItsDirectionUntilTheRetryEnds(t *testing.T) {
 // for the floor: the line's turn is the one that answers the opening, and the
 // direction goes when it ends.
 func TestAnOpeningReplacedByALineKeepsItsDirectionUntilTheLineEnds(t *testing.T) {
-	f, session, _ := startOpeningCall(t, QwenProfile(), openingLine, false, 2)
+	f, session, _ := startOpeningCall(t, QwenProfile(), openingLine, 2)
 	if err := session.SpeakText(phaseLine, false); err != nil {
 		t.Fatalf("speak: %v", err)
 	}
@@ -205,21 +205,21 @@ func TestAnOpeningDirectionNeverNamedStays(t *testing.T) {
 // put nothing in it, so there is nothing to take out.
 func TestNothingIsTakenOutWhereTheOpeningHasNoNamedDirection(t *testing.T) {
 	t.Run("qwen without an opening line", func(t *testing.T) {
-		f, session, _ := startOpeningCall(t, QwenProfile(), "", true)
+		f, session, _ := startOpeningCall(t, QwenProfile(), "")
 		if n := len(f.messagesOfType("conversation.item.create")); n != 1 {
 			t.Fatalf("%d caller items, want the greeting cue", n)
 		}
-		awaitResponseOpen(t, session) // the fake created the opening request as it arrived
+		openResponse(t, f, session)
 		endResponse(t, f, session, statusCompleted)
 		f.awaitMessages("conversation.item.delete", 0)
 	})
 	for _, profile := range []Profile{OpenAIProfile(), GrokProfile(), GatewayProfile()} {
 		t.Run(profile.Name, func(t *testing.T) {
-			f, session, _ := startOpeningCall(t, profile, openingLine, true)
+			f, session, _ := startOpeningCall(t, profile, openingLine)
 			if n := len(f.messagesOfType("conversation.item.create")); n != 0 {
 				t.Fatalf("%d caller items, want none", n)
 			}
-			awaitResponseOpen(t, session) // the fake created the opening request as it arrived
+			openResponse(t, f, session)
 			endResponse(t, f, session, statusCompleted)
 			f.awaitMessages("conversation.item.delete", 0)
 		})
