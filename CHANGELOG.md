@@ -9,6 +9,7 @@ carries the one-line installer's files.
 
 ### Fixed
 
+- A `hangup` whose response only announced the ending ("好的，我这就结束通话。", "I'll end the call now.") is no longer refused by the answer guard as an answer: words that announce the ending do not count toward the substantive-answer floor, so the call ends with its closing line (#561).
 - **A machine that answers a campaign call records no lead** (#409). On a call
   the platform placed to a customer, each final transcript of the callee's
   words is now checked against a built-in Chinese and English list of what a
