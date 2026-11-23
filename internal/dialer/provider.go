@@ -51,6 +51,25 @@ func (q providerQuota) backoff() time.Duration {
 	return d
 }
 
+// backoffFor is how long admission holds after a refusal that named a limit
+// (#652): a REQUESTS refusal clears with the session-start window and a
+// TOKENS refusal with the token window, each falling back to the longer of
+// the periods in force when its own limit is not configured. An UNKNOWN
+// refusal, or none at all, holds as it always did.
+func (q providerQuota) backoffFor(limit string) time.Duration {
+	switch limit {
+	case "REQUESTS":
+		if q.sessionLimit > 0 {
+			return q.sessionPeriod
+		}
+	case "TOKENS":
+		if q.tokenLimit > 0 {
+			return q.tokenPeriod
+		}
+	}
+	return q.backoff()
+}
+
 // providerHold applies the provider's quota to one more admission (design 10
 // section 6.3, as built for #604 and #644):
 //
@@ -93,8 +112,27 @@ func (q providerQuota) backoff() time.Duration {
 // start or token entry leaving its window); zero when only an event can
 // change it.
 func providerHold(r ratemeter.Reading, q providerQuota, pending, unstarted, expected float64, active int) (string, time.Time) {
-	if backoff := q.backoff(); !r.LastQuotaRefusal.IsZero() && r.At.Before(r.LastQuotaRefusal.Add(backoff)) {
-		return obs.DialerBlockedProviderBackoff, r.LastQuotaRefusal.Add(backoff)
+	// Each outstanding refusal holds for its own limit's period; refusals of
+	// both kinds end when the later one ends (#652).
+	until := time.Time{}
+	limit := ""
+	for _, refusal := range []struct {
+		kind string
+		at   time.Time
+	}{
+		{"REQUESTS", r.LastQuotaRefusalRequests},
+		{"TOKENS", r.LastQuotaRefusalTokens},
+		{"UNKNOWN", r.LastQuotaRefusalUnknown},
+	} {
+		if refusal.at.IsZero() {
+			continue
+		}
+		if end := refusal.at.Add(q.backoffFor(refusal.kind)); r.At.Before(end) && end.After(until) {
+			until, limit = end, refusal.kind
+		}
+	}
+	if !until.IsZero() {
+		return obs.DialerBlockedProviderBackoff + "/" + limit, until
 	}
 	n := max(pending+float64(r.StartsWaiting), unstarted) + expected + 1
 	if q.sessionLimit > 0 {

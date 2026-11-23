@@ -465,15 +465,15 @@ func sumByLabels(t *testing.T, reader sdkmetric.Reader, name string, labels ...s
 func TestAProviderDialFailureIsCountedByStatusAndReason(t *testing.T) {
 	reader := useTestReader()
 	const name = "aicc_provider_dial_failures_total"
-	before := sumByLabels(t, reader, name, "provider", "status", "reason")
-	RecordProviderDialFailure("qwen", "CLOSE_1007", "QUOTA_EXCEEDED")
-	RecordProviderDialFailure("qwen", "CLOSE_1007", "QUOTA_EXCEEDED")
-	RecordProviderDialFailure("openai", "401", "AUTH_REJECTED")
-	after := sumByLabels(t, reader, name, "provider", "status", "reason")
+	before := sumByLabels(t, reader, name, "provider", "status", "reason", "limit")
+	RecordProviderDialFailure("qwen", "CLOSE_1007", "QUOTA_EXCEEDED", "UNKNOWN")
+	RecordProviderDialFailure("qwen", "CLOSE_1007", "QUOTA_EXCEEDED", "UNKNOWN")
+	RecordProviderDialFailure("openai", "401", "AUTH_REJECTED", "")
+	after := sumByLabels(t, reader, name, "provider", "status", "reason", "limit")
 	for key, want := range map[string]int64{
-		"qwen/CLOSE_1007/QUOTA_EXCEEDED": 2,
-		"openai/401/AUTH_REJECTED":       1,
-		"qwen/429/QUOTA_EXCEEDED":        0,
+		"qwen/CLOSE_1007/QUOTA_EXCEEDED/UNKNOWN": 2,
+		"openai/401/AUTH_REJECTED/":              1,
+		"qwen/429/QUOTA_EXCEEDED/UNKNOWN":        0,
 	} {
 		if got := after[key] - before[key]; got != want {
 			t.Errorf("%s gained %d, want %d", key, got, want)

@@ -26,7 +26,7 @@ func (m *fakeMeter) TokensUsed(n int) {
 	m.tokens = append(m.tokens, n)
 }
 
-func (m *fakeMeter) QuotaRefused() {
+func (m *fakeMeter) QuotaRefused(limit string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.refusals++

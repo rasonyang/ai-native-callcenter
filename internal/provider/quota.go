@@ -63,14 +63,30 @@ const (
 // words, which are vendor text and belong to this package.
 var ErrQuotaExceeded = errors.New("provider: quota exceeded")
 
+// The limits a quota refusal can speak for (aicc_provider_dial_failures_total
+// {limit}, the meter's per-kind refusal times, the dialer's hold period):
+// REQUESTS is the session-start rate and TOKENS the token spend, the two
+// windows a quota carries (#604). UNKNOWN is a refusal whose words name
+// neither, and "" a failure that is not a quota refusal. The values reuse the
+// rate-limit header kinds on purpose: the words mean the same windows.
+const (
+	LimitRequests = RateLimitRequests
+	LimitTokens   = RateLimitTokens
+	LimitUnknown  = "UNKNOWN"
+)
+
 // StartFailure is a session that could not be started, as a number: the
-// bounded status and reason it was counted under, the request id the vendor's
-// support asks for, and what the provider said. Its text is the text of the
-// error it wraps, so a record that carried the old error reads the same.
+// bounded status and reason it was counted under, which limit a quota refusal
+// spoke for, the request id the vendor's support asks for, and what the
+// provider said. Its text is the text of the error it wraps, so a record that
+// carried the old error reads the same.
 type StartFailure struct {
-	Provider  string
-	Status    string
-	Reason    StartReason
+	Provider string
+	Status   string
+	Reason   StartReason
+	// Limit is which limit a quota refusal spoke for (REQUESTS, TOKENS or
+	// UNKNOWN); empty when Reason is not QUOTA_EXCEEDED (#652).
+	Limit     string
 	RequestID string
 	// Detail is the provider's own words: a close frame's text, an error
 	// event's code and message, the start of a refused upgrade's body.
@@ -106,8 +122,9 @@ func (startTimeout) Timeout() bool   { return true }
 
 // ClassifyStart says what a failed session start was. The first match wins, in
 // the order the provider can have said it: an error event, a close frame, a
-// refused upgrade; then a timeout, and anything else is NETWORK.
-func ClassifyStart(err error) (status string, reason StartReason, detail string) {
+// refused upgrade; then a timeout, and anything else is NETWORK. limit is the
+// limit a quota refusal spoke for, empty for anything else (#652).
+func ClassifyStart(err error) (status string, reason StartReason, limit, detail string) {
 	var event EventError
 	var closed *websocket.CloseError
 	var refused *wsconn.HandshakeError
@@ -115,9 +132,11 @@ func ClassifyStart(err error) (status string, reason StartReason, detail string)
 	switch {
 	case errors.As(err, &event):
 		words := event.EventCode() + " " + event.EventMessage()
-		return StartStatusErrorEvent, reasonOf(words), strings.TrimSpace(words)
+		reason = reasonOf(words)
+		return StartStatusErrorEvent, reason, limitOf(reason, words), strings.TrimSpace(words)
 	case errors.As(err, &closed):
-		return closeStatus(closed.Code), reasonOf(closed.Text), closed.Text
+		reason = reasonOf(closed.Text)
+		return closeStatus(closed.Code), reason, limitOf(reason, closed.Text), closed.Text
 	case errors.As(err, &refused):
 		switch {
 		case refused.StatusCode == http.StatusTooManyRequests || isQuotaText(refused.Body):
@@ -128,11 +147,18 @@ func ClassifyStart(err error) (status string, reason StartReason, detail string)
 		default:
 			reason = StartReasonOther
 		}
-		return httpStatus(refused.StatusCode), reason, refused.Body
+		limit = limitOf(reason, refused.Body)
+		// A bare 429 is HTTP's own rate limiting: a refusal of requests
+		// (RFC 6585), whatever the body leaves unsaid.
+		if reason == StartReasonQuotaExceeded && limit == LimitUnknown &&
+			refused.StatusCode == http.StatusTooManyRequests {
+			limit = LimitRequests
+		}
+		return httpStatus(refused.StatusCode), reason, limit, refused.Body
 	case errors.As(err, &timeout) && timeout.Timeout():
-		return StartStatusTimeout, StartReasonOther, ""
+		return StartStatusTimeout, StartReasonOther, "", ""
 	default:
-		return StartStatusNetwork, StartReasonOther, ""
+		return StartStatusNetwork, StartReasonOther, "", ""
 	}
 }
 
@@ -159,6 +185,46 @@ var authWords = []string{"api key", "api_key", "apikey", "unauthorized", "authen
 
 func isQuotaText(text string) bool { return containsAnyFold(text, quotaWords) }
 func isAuthText(text string) bool  { return containsAnyFold(text, authWords) }
+
+// tokenLimitWords and requestLimitWords split a quota refusal by the limit it
+// names (#652), matched case-insensitively like quotaWords:
+//
+//   - TOKENS: qwen's close-1007 "Allocated quota exceeded, please increase
+//     your quota limit." (production, 2026-11-19: the token-period refusal —
+//     allocation is the token pool), DashScope's "Throttling.AllocationQuota",
+//     OpenAI's "insufficient_quota" (a spend cap, tokens) and the
+//     "tokens per ..." variant of its "rate_limit_exceeded" message;
+//   - REQUESTS: qwen's "Requests rate limit exceeded, please try again
+//     later." (same production day, the session-start refusal), DashScope's
+//     "Throttling" and "Throttling.RateQuota", the "requests per ..." variant
+//     of OpenAI's message, a bare "rate limit"/"throttl"/"too many requests"
+//     (a rate limit with no unit named is a request rate) and doubao's
+//     "ExceededConcurrentLimit" (a bound on sessions opened).
+//
+// A quota refusal naming neither stays UNKNOWN, not guessed.
+var tokenLimitWords = []string{
+	"allocationquota", "allocated quota", "insufficient_quota", "tokens per",
+}
+var requestLimitWords = []string{
+	"requests per", "requests rate limit", "throttling.ratequota", "throttling",
+	"rate limit", "rate_limit", "ratelimit", "too many requests", "concurrentlimit",
+}
+
+// limitOf is which limit a quota refusal spoke for: REQUESTS, TOKENS, or
+// UNKNOWN when the words settle neither; empty when the failure is not a
+// quota refusal at all.
+func limitOf(reason StartReason, text string) string {
+	if reason != StartReasonQuotaExceeded {
+		return ""
+	}
+	if containsAnyFold(text, tokenLimitWords) {
+		return LimitTokens
+	}
+	if containsAnyFold(text, requestLimitWords) {
+		return LimitRequests
+	}
+	return LimitUnknown
+}
 
 func containsAnyFold(text string, words []string) bool {
 	lower := strings.ToLower(text)
@@ -197,12 +263,12 @@ func closeStatus(code int) string {
 
 // QuotaMeter is the process-wide account of the provider's quota that campaign
 // admission reads (internal/provider/ratemeter): a session tells it what its
-// turns cost and when the provider said the quota was spent. Session starts are
-// counted where a session is made (cmd/aicc), before the dial, as the start
-// counter is.
+// turns cost and when the provider said the quota was spent, naming the limit
+// that refused (REQUESTS, TOKENS or UNKNOWN, #652). Session starts are counted
+// where a session is made (cmd/aicc), before the dial, as the start counter is.
 type QuotaMeter interface {
 	TokensUsed(n int)
-	QuotaRefused()
+	QuotaRefused(limit string)
 }
 
 // Option configures a session client beyond its profile.
@@ -361,27 +427,27 @@ func (q Quota) Refused(ctx context.Context, log *slog.Logger, upgrade http.Heade
 	if ctx.Err() != nil {
 		return err
 	}
-	status, reason, detail := ClassifyStart(err)
+	status, reason, limit, detail := ClassifyStart(err)
 	header := upgrade
 	var refused *wsconn.HandshakeError
 	if errors.As(err, &refused) {
 		header = refused.Header
 	}
 	failure := &StartFailure{
-		Provider: q.provider, Status: status, Reason: reason, Detail: detail, Err: err,
+		Provider: q.provider, Status: status, Reason: reason, Limit: limit, Detail: detail, Err: err,
 	}
 	if header != nil {
 		failure.RequestID = header.Get(q.requestIDHeader)
 	}
-	obs.RecordProviderDialFailure(q.provider, status, string(reason))
-	attrs := []any{"status", status, "reason", string(reason), "requestId", failure.RequestID,
-		"detail", detail, "error", err}
+	obs.RecordProviderDialFailure(q.provider, status, string(reason), limit)
+	attrs := []any{"status", status, "reason", string(reason), "limit", limit,
+		"requestId", failure.RequestID, "detail", detail, "error", err}
 	attrs = append(attrs, Handshake{RateLimits: RateLimits(header)}.LogAttrs()...)
 	if reason == StartReasonQuotaExceeded {
 		if q.meter != nil {
-			q.meter.QuotaRefused()
+			q.meter.QuotaRefused(limit)
 		}
-		log.Warn("provider refused the session: its quota is spent; campaign admission holds for a minute", attrs...)
+		log.Warn("provider refused the session: its quota is spent; campaign admission holds for the refused limit's period", attrs...)
 	} else {
 		log.Warn("provider session could not be started", attrs...)
 	}
@@ -394,14 +460,16 @@ func (q Quota) Refused(ctx context.Context, log *slog.Logger, upgrade http.Heade
 // start; it is not a dial failure and is not counted as one. It reports
 // whether it was a quota refusal.
 func (q Quota) RefusedMidCall(log *slog.Logger, event EventError) bool {
-	if !isQuotaText(event.EventCode() + " " + event.EventMessage()) {
+	words := event.EventCode() + " " + event.EventMessage()
+	if !isQuotaText(words) {
 		return false
 	}
+	limit := limitOf(StartReasonQuotaExceeded, words)
 	if q.meter != nil {
-		q.meter.QuotaRefused()
+		q.meter.QuotaRefused(limit)
 	}
-	log.Warn("provider said its quota is spent during a call; campaign admission holds for a minute",
-		"code", event.EventCode(), "message", event.EventMessage())
+	log.Warn("provider said its quota is spent during a call; campaign admission holds for the refused limit's period",
+		"limit", limit, "code", event.EventCode(), "message", event.EventMessage())
 	return true
 }
 

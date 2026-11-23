@@ -89,7 +89,12 @@ type Reading struct {
 	Tokens int64
 	// LastQuotaRefusal is when the provider last said the quota was spent:
 	// a refused start, or an error mid-call. Zero when it never has.
-	LastQuotaRefusal time.Time
+	// LastQuotaRefusalRequests/Tokens/Unknown are that time per limit the
+	// refusal spoke for (#652); a kind never refused is zero.
+	LastQuotaRefusal         time.Time
+	LastQuotaRefusalRequests time.Time
+	LastQuotaRefusalTokens   time.Time
+	LastQuotaRefusalUnknown  time.Time
 	// StartsDropAt and TokensDropAt are when the oldest entry still counted
 	// leaves its window, which is the next time that count can fall. Zero
 	// when there is none.
@@ -123,6 +128,11 @@ type Meter struct {
 	tokens  window[int64]    // over the token period
 	tokenIn int64            // the sum of tokens's values
 	refused time.Time
+	// refusedRequests/Tokens/Unknown are refused by the limit the refusal
+	// spoke for (#652).
+	refusedRequests time.Time
+	refusedTokens   time.Time
+	refusedUnknown  time.Time
 	// queue is the paced starts waiting for room, oldest first, and stopWake
 	// stops the timer that looks at it next; nil when none is set.
 	queue    []*waiter
@@ -333,9 +343,10 @@ func (m *Meter) TokensUsed(n int) {
 	m.tokenIn += int64(n)
 }
 
-// QuotaRefused notes that the provider said its quota is spent, now. It
-// satisfies provider.QuotaMeter.
-func (m *Meter) QuotaRefused() {
+// QuotaRefused notes that the provider said its quota is spent, now, naming
+// the limit that refused (REQUESTS, TOKENS or UNKNOWN). It satisfies
+// provider.QuotaMeter.
+func (m *Meter) QuotaRefused(limit string) {
 	if m == nil {
 		return
 	}
@@ -343,6 +354,14 @@ func (m *Meter) QuotaRefused() {
 	defer m.mu.Unlock()
 	if now := m.now(); now.After(m.refused) {
 		m.refused = now
+		switch limit {
+		case "REQUESTS":
+			m.refusedRequests = now
+		case "TOKENS":
+			m.refusedTokens = now
+		default:
+			m.refusedUnknown = now
+		}
 	}
 }
 
@@ -356,7 +375,8 @@ func (m *Meter) Read() Reading {
 	now := m.now()
 	m.expireLocked(now)
 	r := Reading{At: now, Starts: m.starts.len(), Tokens: m.tokenIn, LastQuotaRefusal: m.refused,
-		StartsWaiting: len(m.queue)}
+		LastQuotaRefusalRequests: m.refusedRequests, LastQuotaRefusalTokens: m.refusedTokens,
+		LastQuotaRefusalUnknown: m.refusedUnknown, StartsWaiting: len(m.queue)}
 	if at, ok := m.starts.oldest(); ok {
 		r.StartsDropAt = at.Add(m.starts.period)
 	}
