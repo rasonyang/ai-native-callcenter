@@ -293,6 +293,7 @@ function CampaignDetail() {
 
       <CampaignImportDialog
         campaignId={data.id}
+        campaignName={data.name}
         flowFields={data.flowFields}
         open={isImporting}
         onOpenChange={setIsImporting}
