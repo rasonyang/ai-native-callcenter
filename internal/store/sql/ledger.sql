@@ -30,7 +30,7 @@ INSERT INTO cdrs (
     ring_sec, bot_sec, queue_wait_sec, talk_sec, bill_sec, total_sec,
     status, hangup_cause, missed_reason, disposition,
     is_contained, has_recording, user_data, tech, legs, unbacked_claims, campaign_id,
-    to_number_e164
+    to_number_e164, recording_expected
 ) VALUES (
     $1, $2, $3, $4, $5, $6,
     $7, $8, $9, $10, $11,
@@ -41,7 +41,8 @@ INSERT INTO cdrs (
     -- The campaign whose attempt carries this call, else NULL (migration 00039).
     (SELECT a.campaign_id FROM campaign_attempts a WHERE a.call_id = $1),
     -- The callee in canonical form, for OUTBOUND rows that canonicalise (migration 00049).
-    sqlc.narg('to_number_e164')::text
+    sqlc.narg('to_number_e164')::text,
+    sqlc.narg('recording_expected')::bool
 ) ON CONFLICT (call_id) DO UPDATE SET
     started_at = EXCLUDED.started_at,
     answered_at = EXCLUDED.answered_at,
@@ -68,6 +69,8 @@ INSERT INTO cdrs (
     is_contained = EXCLUDED.is_contained,
     -- An object stored by MarkRecorded outlives a later rewrite of the row.
     has_recording = cdrs.has_recording OR EXCLUDED.has_recording,
+    -- Same rule: a recording once announced as started stays expected.
+    recording_expected = cdrs.recording_expected OR EXCLUDED.recording_expected,
     user_data = EXCLUDED.user_data,
     tech = EXCLUDED.tech,
     legs = EXCLUDED.legs,

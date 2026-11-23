@@ -285,6 +285,9 @@ func (a *CDRAssembler) assemble(ctx context.Context, snap Snapshot) store.CDR {
 		DID:       snap.Bot.DID,
 		FlowID:    snap.Bot.FlowID,
 		BotSec:    snap.Bot.Sec,
+		// RECORD_START was announced: an object is owed unless the upload
+		// failed, which is what separates PENDING from NONE on the API (#538).
+		RecordingExpected: snap.IsRecordingStarted,
 	}
 	if snap.EndedAt != nil {
 		cdr.EndedAt = *snap.EndedAt

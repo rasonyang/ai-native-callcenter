@@ -218,7 +218,7 @@ func (q *Queries) ExpiredRecordings(ctx context.Context, arg ExpiredRecordingsPa
 }
 
 const getCDR = `-- name: GetCDR :one
-SELECT call_id, started_at, answered_at, ended_at, call_type, language, from_number, to_number, did, flow_id, queue_id, agent_ids, primary_agent_id, ring_sec, bot_sec, queue_wait_sec, talk_sec, total_sec, status, hangup_cause, missed_reason, disposition, is_contained, has_recording, user_data, tech, legs, bill_sec, unbacked_claims, campaign_id, to_number_e164 FROM cdrs WHERE call_id = $1
+SELECT call_id, started_at, answered_at, ended_at, call_type, language, from_number, to_number, did, flow_id, queue_id, agent_ids, primary_agent_id, ring_sec, bot_sec, queue_wait_sec, talk_sec, total_sec, status, hangup_cause, missed_reason, disposition, is_contained, has_recording, user_data, tech, legs, bill_sec, unbacked_claims, campaign_id, to_number_e164, recording_expected FROM cdrs WHERE call_id = $1
 `
 
 func (q *Queries) GetCDR(ctx context.Context, callID uuid.UUID) (Cdr, error) {
@@ -256,6 +256,7 @@ func (q *Queries) GetCDR(ctx context.Context, callID uuid.UUID) (Cdr, error) {
 		&i.UnbackedClaims,
 		&i.CampaignID,
 		&i.ToNumberE164,
+		&i.RecordingExpected,
 	)
 	return i, err
 }
@@ -402,7 +403,7 @@ INSERT INTO cdrs (
     ring_sec, bot_sec, queue_wait_sec, talk_sec, bill_sec, total_sec,
     status, hangup_cause, missed_reason, disposition,
     is_contained, has_recording, user_data, tech, legs, unbacked_claims, campaign_id,
-    to_number_e164
+    to_number_e164, recording_expected
 ) VALUES (
     $1, $2, $3, $4, $5, $6,
     $7, $8, $9, $10, $11,
@@ -413,7 +414,8 @@ INSERT INTO cdrs (
     -- The campaign whose attempt carries this call, else NULL (migration 00039).
     (SELECT a.campaign_id FROM campaign_attempts a WHERE a.call_id = $1),
     -- The callee in canonical form, for OUTBOUND rows that canonicalise (migration 00049).
-    $30::text
+    $30::text,
+    $31::bool
 ) ON CONFLICT (call_id) DO UPDATE SET
     started_at = EXCLUDED.started_at,
     answered_at = EXCLUDED.answered_at,
@@ -440,6 +442,8 @@ INSERT INTO cdrs (
     is_contained = EXCLUDED.is_contained,
     -- An object stored by MarkRecorded outlives a later rewrite of the row.
     has_recording = cdrs.has_recording OR EXCLUDED.has_recording,
+    -- Same rule: a recording once announced as started stays expected.
+    recording_expected = cdrs.recording_expected OR EXCLUDED.recording_expected,
     user_data = EXCLUDED.user_data,
     tech = EXCLUDED.tech,
     legs = EXCLUDED.legs,
@@ -459,36 +463,37 @@ END
 `
 
 type InsertCDRParams struct {
-	CallID         uuid.UUID          `json:"callId"`
-	StartedAt      pgtype.Timestamptz `json:"startedAt"`
-	AnsweredAt     pgtype.Timestamptz `json:"answeredAt"`
-	EndedAt        pgtype.Timestamptz `json:"endedAt"`
-	CallType       string             `json:"callType"`
-	Language       string             `json:"language"`
-	FromNumber     string             `json:"fromNumber"`
-	ToNumber       string             `json:"toNumber"`
-	Did            string             `json:"did"`
-	FlowID         *uuid.UUID         `json:"flowId"`
-	QueueID        *uuid.UUID         `json:"queueId"`
-	AgentIds       []uuid.UUID        `json:"agentIds"`
-	PrimaryAgentID *uuid.UUID         `json:"primaryAgentId"`
-	RingSec        int32              `json:"ringSec"`
-	BotSec         int32              `json:"botSec"`
-	QueueWaitSec   int32              `json:"queueWaitSec"`
-	TalkSec        int32              `json:"talkSec"`
-	BillSec        int32              `json:"billSec"`
-	TotalSec       int32              `json:"totalSec"`
-	Status         string             `json:"status"`
-	HangupCause    string             `json:"hangupCause"`
-	MissedReason   *string            `json:"missedReason"`
-	Disposition    string             `json:"disposition"`
-	IsContained    bool               `json:"isContained"`
-	HasRecording   bool               `json:"hasRecording"`
-	UserData       []byte             `json:"userData"`
-	Tech           []byte             `json:"tech"`
-	Legs           []byte             `json:"legs"`
-	UnbackedClaims []string           `json:"unbackedClaims"`
-	ToNumberE164   *string            `json:"toNumberE164"`
+	CallID            uuid.UUID          `json:"callId"`
+	StartedAt         pgtype.Timestamptz `json:"startedAt"`
+	AnsweredAt        pgtype.Timestamptz `json:"answeredAt"`
+	EndedAt           pgtype.Timestamptz `json:"endedAt"`
+	CallType          string             `json:"callType"`
+	Language          string             `json:"language"`
+	FromNumber        string             `json:"fromNumber"`
+	ToNumber          string             `json:"toNumber"`
+	Did               string             `json:"did"`
+	FlowID            *uuid.UUID         `json:"flowId"`
+	QueueID           *uuid.UUID         `json:"queueId"`
+	AgentIds          []uuid.UUID        `json:"agentIds"`
+	PrimaryAgentID    *uuid.UUID         `json:"primaryAgentId"`
+	RingSec           int32              `json:"ringSec"`
+	BotSec            int32              `json:"botSec"`
+	QueueWaitSec      int32              `json:"queueWaitSec"`
+	TalkSec           int32              `json:"talkSec"`
+	BillSec           int32              `json:"billSec"`
+	TotalSec          int32              `json:"totalSec"`
+	Status            string             `json:"status"`
+	HangupCause       string             `json:"hangupCause"`
+	MissedReason      *string            `json:"missedReason"`
+	Disposition       string             `json:"disposition"`
+	IsContained       bool               `json:"isContained"`
+	HasRecording      bool               `json:"hasRecording"`
+	UserData          []byte             `json:"userData"`
+	Tech              []byte             `json:"tech"`
+	Legs              []byte             `json:"legs"`
+	UnbackedClaims    []string           `json:"unbackedClaims"`
+	ToNumberE164      *string            `json:"toNumberE164"`
+	RecordingExpected *bool              `json:"recordingExpected"`
 }
 
 // SPDX-License-Identifier: Apache-2.0
@@ -546,6 +551,7 @@ func (q *Queries) InsertCDR(ctx context.Context, arg InsertCDRParams) (int64, er
 		arg.Legs,
 		arg.UnbackedClaims,
 		arg.ToNumberE164,
+		arg.RecordingExpected,
 	)
 	if err != nil {
 		return 0, err
@@ -862,7 +868,7 @@ func (q *Queries) ListAuditLogs(ctx context.Context, arg ListAuditLogsParams) ([
 }
 
 const listCDRs = `-- name: ListCDRs :many
-SELECT call_id, started_at, answered_at, ended_at, call_type, language, from_number, to_number, did, flow_id, queue_id, agent_ids, primary_agent_id, ring_sec, bot_sec, queue_wait_sec, talk_sec, total_sec, status, hangup_cause, missed_reason, disposition, is_contained, has_recording, user_data, tech, legs, bill_sec, unbacked_claims, campaign_id, to_number_e164 FROM cdrs
+SELECT call_id, started_at, answered_at, ended_at, call_type, language, from_number, to_number, did, flow_id, queue_id, agent_ids, primary_agent_id, ring_sec, bot_sec, queue_wait_sec, talk_sec, total_sec, status, hangup_cause, missed_reason, disposition, is_contained, has_recording, user_data, tech, legs, bill_sec, unbacked_claims, campaign_id, to_number_e164, recording_expected FROM cdrs
 WHERE started_at >= coalesce($1::timestamptz, '-infinity'::timestamptz)
   AND started_at <  coalesce($2::timestamptz,   'infinity'::timestamptz)
   AND ($3::uuid IS NULL OR queue_id = $3)
@@ -948,6 +954,7 @@ func (q *Queries) ListCDRs(ctx context.Context, arg ListCDRsParams) ([]Cdr, erro
 			&i.UnbackedClaims,
 			&i.CampaignID,
 			&i.ToNumberE164,
+			&i.RecordingExpected,
 		); err != nil {
 			return nil, err
 		}

@@ -108,6 +108,14 @@ type CDR struct {
 	Disposition  string `json:"disposition,omitempty"`
 	IsContained  bool   `json:"isContained"`
 	HasRecording bool   `json:"hasRecording"`
+	// RecordingExpected: the switch announced RECORD_START on the call, so an
+	// object is owed unless the upload failed (migration 00052). With
+	// HasRecording it yields RecordingState — the field the API exposes.
+	RecordingExpected bool `json:"-"`
+	// RecordingState is NONE (never started), PENDING (started, object not
+	// booked yet) or STORED (object stored) — derived from the two flags at
+	// read time, never stored itself.
+	RecordingState string `json:"recordingState"`
 	// UnbackedClaims is what the bot told the caller it was doing, or had
 	// done, in a turn with no tool call behind it: each kind once
 	// (UnbackedClaim*), empty when it made none. Recording it does not change
@@ -235,36 +243,37 @@ func (l *LedgerStore) InsertCDR(ctx context.Context, cdr CDR) error {
 	}
 
 	params := queries.InsertCDRParams{
-		CallID:         cdr.CallID,
-		StartedAt:      stamp(cdr.StartedAt),
-		AnsweredAt:     stamp(cdr.AnsweredAt),
-		EndedAt:        stamp(cdr.EndedAt),
-		CallType:       cdr.CallType,
-		Language:       cdr.Language,
-		FromNumber:     cdr.FromNumber,
-		ToNumber:       cdr.ToNumber,
-		Did:            cdr.DID,
-		FlowID:         cdr.FlowID,
-		QueueID:        cdr.QueueID,
-		AgentIds:       agentIDs,
-		PrimaryAgentID: cdr.PrimaryAgentID,
-		RingSec:        int32(cdr.RingSec),
-		BotSec:         int32(cdr.BotSec),
-		QueueWaitSec:   int32(cdr.QueueWaitSec),
-		TalkSec:        int32(cdr.TalkSec),
-		BillSec:        int32(cdr.BillSec),
-		TotalSec:       int32(cdr.TotalSec),
-		Status:         cdr.Status,
-		HangupCause:    cdr.HangupCause,
-		MissedReason:   missed,
-		Disposition:    cdr.Disposition,
-		IsContained:    cdr.IsContained,
-		HasRecording:   cdr.HasRecording,
-		UserData:       userData,
-		Tech:           tech,
-		Legs:           legs,
-		UnbackedClaims: unbackedClaims,
-		ToNumberE164:   calleeE164,
+		CallID:            cdr.CallID,
+		StartedAt:         stamp(cdr.StartedAt),
+		AnsweredAt:        stamp(cdr.AnsweredAt),
+		EndedAt:           stamp(cdr.EndedAt),
+		CallType:          cdr.CallType,
+		Language:          cdr.Language,
+		FromNumber:        cdr.FromNumber,
+		ToNumber:          cdr.ToNumber,
+		Did:               cdr.DID,
+		FlowID:            cdr.FlowID,
+		QueueID:           cdr.QueueID,
+		AgentIds:          agentIDs,
+		PrimaryAgentID:    cdr.PrimaryAgentID,
+		RingSec:           int32(cdr.RingSec),
+		BotSec:            int32(cdr.BotSec),
+		QueueWaitSec:      int32(cdr.QueueWaitSec),
+		TalkSec:           int32(cdr.TalkSec),
+		BillSec:           int32(cdr.BillSec),
+		TotalSec:          int32(cdr.TotalSec),
+		Status:            cdr.Status,
+		HangupCause:       cdr.HangupCause,
+		MissedReason:      missed,
+		Disposition:       cdr.Disposition,
+		IsContained:       cdr.IsContained,
+		HasRecording:      cdr.HasRecording,
+		RecordingExpected: &cdr.RecordingExpected,
+		UserData:          userData,
+		Tech:              tech,
+		Legs:              legs,
+		UnbackedClaims:    unbackedClaims,
+		ToNumberE164:      calleeE164,
 	}
 
 	// The row and the deliveries it owes go together. A CDR that exists with
@@ -484,33 +493,55 @@ func (l *LedgerStore) GetCDR(ctx context.Context, callID uuid.UUID) (CDR, error)
 	return out[0], nil
 }
 
+// Recording states, byte-identical across JSON, TS and DB per the naming spec.
+const (
+	RecordingStateNone    = "NONE"
+	RecordingStatePending = "PENDING"
+	RecordingStateStored  = "STORED"
+)
+
+// recordingStateOf derives the one state a CDR advertises from its two flags:
+// stored outranks pending, pending outranks none (#538).
+func recordingStateOf(hasRecording, recordingExpected bool) string {
+	switch {
+	case hasRecording:
+		return RecordingStateStored
+	case recordingExpected:
+		return RecordingStatePending
+	default:
+		return RecordingStateNone
+	}
+}
+
 func fromRow(row queries.Cdr) CDR {
 	cdr := CDR{
-		CallID:         row.CallID,
-		StartedAt:      row.StartedAt.Time,
-		EndedAt:        row.EndedAt.Time,
-		CallType:       row.CallType,
-		Language:       row.Language,
-		FromNumber:     row.FromNumber,
-		ToNumber:       row.ToNumber,
-		DID:            row.Did,
-		FlowID:         row.FlowID,
-		QueueID:        row.QueueID,
-		CampaignID:     row.CampaignID,
-		AgentIDs:       row.AgentIds,
-		PrimaryAgentID: row.PrimaryAgentID,
-		RingSec:        int(row.RingSec),
-		BotSec:         int(row.BotSec),
-		QueueWaitSec:   int(row.QueueWaitSec),
-		TalkSec:        int(row.TalkSec),
-		BillSec:        int(row.BillSec),
-		TotalSec:       int(row.TotalSec),
-		Status:         row.Status,
-		HangupCause:    row.HangupCause,
-		Disposition:    row.Disposition,
-		IsContained:    row.IsContained,
-		HasRecording:   row.HasRecording,
-		UnbackedClaims: row.UnbackedClaims,
+		CallID:            row.CallID,
+		StartedAt:         row.StartedAt.Time,
+		EndedAt:           row.EndedAt.Time,
+		CallType:          row.CallType,
+		Language:          row.Language,
+		FromNumber:        row.FromNumber,
+		ToNumber:          row.ToNumber,
+		DID:               row.Did,
+		FlowID:            row.FlowID,
+		QueueID:           row.QueueID,
+		CampaignID:        row.CampaignID,
+		AgentIDs:          row.AgentIds,
+		PrimaryAgentID:    row.PrimaryAgentID,
+		RingSec:           int(row.RingSec),
+		BotSec:            int(row.BotSec),
+		QueueWaitSec:      int(row.QueueWaitSec),
+		TalkSec:           int(row.TalkSec),
+		BillSec:           int(row.BillSec),
+		TotalSec:          int(row.TotalSec),
+		Status:            row.Status,
+		HangupCause:       row.HangupCause,
+		Disposition:       row.Disposition,
+		IsContained:       row.IsContained,
+		HasRecording:      row.HasRecording,
+		RecordingExpected: row.RecordingExpected,
+		RecordingState:    recordingStateOf(row.HasRecording, row.RecordingExpected),
+		UnbackedClaims:    row.UnbackedClaims,
 	}
 	if row.AnsweredAt.Valid {
 		cdr.AnsweredAt = row.AnsweredAt.Time

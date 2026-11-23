@@ -2767,6 +2767,11 @@ export interface components {
             /** @description True when the bot finished the conversation without a human. */
             isContained: boolean;
             hasRecording: boolean;
+            /**
+             * @description Where the call's recording is. STORED: the object exists and `recordings` lists it. PENDING: the switch announced RECORD_START and the object has not been booked yet — the upload lands after hangup, within seconds to a few tens of seconds, and the spool sweep books stragglers, so a client that wants the file reads again instead of concluding there is none. NONE: recording never started on the call, `recordings` stays empty. Replaces guessing from hasRecording alone, which reads false both while a booking is in flight and on a call that was never recorded.
+             * @enum {string}
+             */
+            recordingState: "NONE" | "PENDING" | "STORED";
             /** @description Each kind of claim the bot made with no tool call behind it, once. Absent when it made none. Recording one does not change whether the call counts as contained: a call can be contained and still carry one, and a containment figure that should not count a caller who was told something that never happened leaves such calls out. */
             unbackedClaims?: components["schemas"]["UnbackedClaim"][];
             userData?: {
@@ -2860,6 +2865,7 @@ export interface components {
         CDRDetail: {
             cdr: components["schemas"]["CDR"];
             transcript: components["schemas"]["TranscriptLine"][];
+            /** @description The call's stored recordings. Fills in after hangup — with a spool backend the upload is booked seconds after endedAt — so an empty list right after the call ends does not mean there is no recording; the CDR's recordingState says whether one is still on its way. */
             recordings: components["schemas"]["Recording"][];
         };
         /** @enum {string} */
