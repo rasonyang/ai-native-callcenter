@@ -334,6 +334,11 @@ type SwitchEvent struct {
 	// originate's own variables, so it is there from CHANNEL_CREATE. Empty on a
 	// channel this application did not originate.
 	PlacedBy string
+	// PlacedTo is the aicc_placed_to stamped on a leg the platform placed to
+	// a customer: the number dialled, kept honest after a hand-over rewrites
+	// the channel's own destination to whatever answered the transfer (a
+	// queue's extension). Empty on every other leg.
+	PlacedTo string
 	// PlacedCallID is the aicc_call_id the originating operation minted; the
 	// zero value when the channel has none or it is not a uuid.
 	PlacedCallID uuid.UUID
@@ -537,6 +542,7 @@ func normalizeChannel(ev *esl.Event, out SwitchEvent) (SwitchEvent, bool) {
 	out.CallTypeHint = ev.Get("variable_aicc_call_type")
 	out.LegDID = ev.Variable("aicc_did")
 	out.PlacedBy = ev.Variable(VarPlacedBy)
+	out.PlacedTo = ev.Variable(VarPlacedTo)
 	out.PlacedCallID, _ = uuid.Parse(ev.Variable("aicc_call_id"))
 
 	// mod_callcenter dials the agent on a waiting caller's behalf and stamps
