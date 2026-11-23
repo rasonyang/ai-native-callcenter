@@ -26,6 +26,7 @@ var (
 	flagMockProvider = flag.String("e2e.mockprovider", "", "mock provider HTTP base, for its session counters")
 	flagMetrics      = flag.String("e2e.metrics", "", "application metrics exposition, e.g. http://10.1.2.10:9090/metrics")
 	flagProviderScn  = flag.String("e2e.provider-scenario", "", "the mock provider's scenario file")
+	flagProviderVAD  = flag.String("e2e.provider-vad", "", "the mock provider's VAD file (its utterance queue)")
 	flagESL          = flag.String("e2e.esl", "", "switch event socket address")
 	flagCompose      = flag.String("e2e.compose-config", "", "resolved compose configuration (JSON)")
 	flagScenario     = flag.String("e2e.scenario", "", "the simulator's scenario file")

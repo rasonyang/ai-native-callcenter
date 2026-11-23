@@ -107,17 +107,19 @@ func CheckComposeConfig(data []byte) error {
 		if got := env("AICC_OUTBOUND_ENDPOINT"); got != OutboundEndpoint {
 			add("AICC_OUTBOUND_ENDPOINT is %q, want %q", got, OutboundEndpoint)
 		}
-		if got := env("AICC_PROVIDER"); got != "openai" {
-			add("AICC_PROVIDER is %q, want openai pointed at the mock", got)
+		// The profiles the mock can stand in for: openai (the default) and,
+		// for the server-cancels runs (e2e.sh greeting-cut), gateway. Whichever
+		// runs, every provider key that is set must be the placeholder: nothing
+		// real may be present.
+		provider := env("AICC_PROVIDER")
+		if provider != "openai" && provider != "gateway" {
+			add("AICC_PROVIDER is %q, want openai or gateway pointed at the mock", provider)
 		}
 		if err := privateWebSocket(env("AICC_PROVIDER_ENDPOINT")); err != nil {
 			add("AICC_PROVIDER_ENDPOINT: %v", err)
 		}
-		if got := env("OPENAI_API_KEY"); got != "not-a-key" {
-			add("OPENAI_API_KEY is not the placeholder")
-		}
-		for _, key := range providerKeys[1:] {
-			if env(key) != "" {
+		for _, key := range providerKeys {
+			if got := env(key); got != "" && got != "not-a-key" {
 				add("%s is set; no real provider key may be present", key)
 			}
 		}

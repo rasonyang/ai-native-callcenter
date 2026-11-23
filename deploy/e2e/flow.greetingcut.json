@@ -1,0 +1,74 @@
+{
+  "id": "e2e_greeting_cut",
+  "specVersion": "v2",
+  "initialNode": "entry",
+  "global": {
+    "persona": {
+      "en": "You are a short, polite voice assistant used by an automated test.",
+      "zh": "你是自动化测试使用的简短、礼貌的语音助手。"
+    },
+    "closingTarget": "farewell",
+    "maxTurns": 10
+  },
+  "nodes": {
+    "entry": {
+      "announce": {
+        "en": "Hello, this is an automated test call. May I have a minute of your time?",
+        "zh": "你好，这是一通自动化测试电话。可以占用你一分钟吗？"
+      },
+      "instruction": {
+        "en": "Ask the caller whether they have a minute, then record their intent with set_intent.",
+        "zh": "询问对方是否方便，然后用 set_intent 记录其意向。"
+      },
+      "tools": ["set_intent"],
+      "transitions": [
+        {
+          "on": "TOOL_RESULT",
+          "tool": "set_intent",
+          "target": "pitched"
+        }
+      ]
+    },
+    "pitched": {
+      "announce": {
+        "en": "Thanks for your answer.",
+        "zh": "谢谢你的回答。"
+      },
+      "instruction": {
+        "en": "Thank the caller and end the call politely.",
+        "zh": "感谢对方并礼貌结束通话。"
+      },
+      "tools": ["hangup"],
+      "transitions": [
+        {
+          "on": "TOOL_RESULT",
+          "tool": "hangup",
+          "target": "farewell"
+        }
+      ]
+    },
+    "farewell": {
+      "isTerminal": true,
+      "announce": {
+        "en": "Goodbye.",
+        "zh": "再见。"
+      },
+      "instruction": {
+        "en": "Say goodbye.",
+        "zh": "道别。"
+      },
+      "tools": []
+    }
+  },
+  "tools": {
+    "set_intent": {
+      "kind": "slot",
+      "description": {
+        "en": "Record the caller's intent, only once they have clearly said yes or no. yes=they have a minute, no=they do not.",
+        "zh": "记录来电者意向，仅在对方明确表示可否之后调用。yes=方便，no=不方便。"
+      },
+      "slot": "intent",
+      "enum": ["yes", "no"]
+    }
+  }
+}

@@ -53,6 +53,8 @@ func main() {
 		"wait between deltas; 0 delivers a turn as fast as the socket takes it, as real providers do")
 	scenarioFile := flag.String("scenario", "",
 		"scenario file: sessions play scripted steps (speak, call a tool, await its result, end) instead of timed turns; see docs/load-tests.md")
+	vadFile := flag.String("vad", "",
+		"vad file: speech on the uplink (by level) cancels the turn in progress and earns a scripted transcript and reply, as a provider's server-side turn detection does")
 	upstream := flag.String("upstream", "",
 		"relay mode: forward sessions to this real provider WebSocket URL (ws:// or wss://) instead of playing the mock")
 	faultName := flag.String("fault", "",
@@ -106,6 +108,14 @@ func main() {
 			os.Exit(2)
 		}
 	}
+	var vad *mockprovider.VAD
+	if *vadFile != "" {
+		var err error
+		if vad, err = mockprovider.LoadVAD(*vadFile); err != nil {
+			fmt.Fprintln(os.Stderr, "error:", err)
+			os.Exit(2)
+		}
+	}
 
 	server := mockprovider.New(mockprovider.Config{
 		FirstAudio:   *firstAudio,
@@ -115,6 +125,7 @@ func main() {
 		DeltaAudio:   *deltaAudio,
 		DeltaPace:    *deltaPace,
 		Scenario:     scenario,
+		VAD:          vad,
 		Log:          log,
 	})
 

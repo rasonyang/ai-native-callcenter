@@ -35,9 +35,13 @@ services:
       AICC_SEED: ""
       # The mock provider speaks the Realtime protocol; the key is a placeholder
       # no provider would accept, and no real one exists in this environment.
-      AICC_PROVIDER: openai
+      # E2E_PROVIDER picks the profile a test needs (e2e.sh greeting-cut runs
+      # the app as gateway so the session takes the server-cancels path);
+      # both keys are placeholders, set always since only one is ever read.
+      AICC_PROVIDER: ${E2E_PROVIDER:-openai}
       AICC_PROVIDER_ENDPOINT: ws://${E2E_MOCK_IP:?}:9099/v1/realtime
       OPENAI_API_KEY: not-a-key
+      REALTIME_API_KEY: not-a-key
       # The only way out for an outbound call is the simulator's gateway.
       AICC_OUTBOUND_ENDPOINT: ${E2E_OUTBOUND_ENDPOINT:-sofia/gateway/e2e_calleesim/%s}
       # Campaign tests (make e2e-campaign, internal/e2e/campaign*.go). The
@@ -129,9 +133,15 @@ services:
     image: aicc-e2e-tools:${E2E_PROJECT}
     restart: "no"
     entrypoint: ["/usr/local/bin/aicc-mockprovider"]
-    command: ["-addr=0.0.0.0:9099", "-scenario=/etc/e2e/provider-scenario.json"]
+    # Scenario mode is the default; VAD mode (-vad) makes the mock hear the
+    # uplink instead, for the server-cancels-by-itself runs (e2e.sh
+    # greeting-cut). The two are exclusive there; an empty value drops the
+    # flag.
+    command: ["-addr=0.0.0.0:9099", "-scenario=${E2E_MOCK_SCENARIO_FILE-/etc/e2e/provider-scenario.json}",
+              "-vad=${E2E_MOCK_VAD_FILE:-}"]
     volumes:
       - ./e2e/provider-scenario.json:/etc/e2e/provider-scenario.json:ro
+      - ./e2e/provider-vad.json:/etc/e2e/provider-vad.json:ro
     networks:
       default:
         ipv4_address: ${E2E_MOCK_IP:?}
@@ -150,6 +160,8 @@ services:
     volumes:
       - ./e2e/flow.json:/etc/e2e/flow.json:ro
       - ./e2e/flow.callerfirst.json:/etc/e2e/flow.callerfirst.json:ro
+      - ./e2e/flow.greetingcut.json:/etc/e2e/flow.greetingcut.json:ro
+      - ./e2e/provider-vad.json:/etc/e2e/provider-vad.json:ro
       # The campaign driver checks its cases against the simulator's scenario
       # and the mock provider's.
       - ./e2e/${E2E_SCENARIO_FILE:-scenario.json}:/etc/e2e/scenario.json:ro

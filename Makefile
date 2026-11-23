@@ -93,6 +93,10 @@ e2e-carrier-timeout: ## Run the carrier's 408 case (a ringing callee that answer
 e2e-callerfirst: ## Run the caller-first case (AI outbound calls that listen to the callee's greeting before they open) in the end-to-end environment
 	deploy/e2e/e2e.sh callerfirst
 
+.PHONY: e2e-greeting-cut
+e2e-greeting-cut: ## Run the greeting-cut case (a callee's "喂" cuts the bot's opening on a server-cancels provider profile) in the end-to-end environment
+	deploy/e2e/e2e.sh greeting-cut
+
 .PHONY: e2e-down
 e2e-down: ## Collect logs and remove the end-to-end environment, its volumes and its network
 	deploy/e2e/e2e.sh down

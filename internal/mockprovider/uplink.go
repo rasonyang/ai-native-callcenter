@@ -48,6 +48,17 @@ type SessionStat struct {
 	// FirstResponseCreateAfterMs is when the application first asked for a
 	// response (the opening line).
 	FirstResponseCreateAfterMs *float64 `json:"firstResponseCreateAfterMs,omitempty"`
+
+	// VAD mode only: bursts detected on this session, the turns they
+	// cancelled, and the transcripts they were answered with.
+	VADStarts  int64    `json:"vadStarts,omitempty"`
+	VADCancels int64    `json:"vadCancels,omitempty"`
+	VADTexts   []string `json:"vadTexts,omitempty"`
+
+	// ToolOutputs is the text of each tool result the application returned
+	// (function_call_output), in order: a refusal's reason reads differently
+	// from a result's, which is how a run tells them apart.
+	ToolOutputs []string `json:"toolOutputs,omitempty"`
 }
 
 // uplinkMeter is a session's uplink counters.
@@ -55,6 +66,8 @@ type uplinkMeter struct {
 	mu      sync.Mutex
 	started time.Time // keeps its monotonic reading
 	format  string    // the input format the application declared
+	outEnc  string    // the output encoding the application declared
+	outRate int       // and its rate
 	stat    SessionStat
 }
 
@@ -95,9 +108,9 @@ func (m *uplinkMeter) noteResponseCreate() {
 	}
 }
 
-// noteSessionUpdate reads the audio format the application declared for its
-// input, from a session.update: "audio/pcmu", "audio/pcma" or "audio/pcm" in
-// the GA dialect.
+// noteSessionUpdate reads the audio formats the application declared, from
+// a session.update: "audio/pcmu", "audio/pcma" or "audio/pcm" in the GA
+// dialect, with a rate on the linear form.
 func (m *uplinkMeter) noteSessionUpdate(data []byte) {
 	var update struct {
 		Session struct {
@@ -107,12 +120,29 @@ func (m *uplinkMeter) noteSessionUpdate(data []byte) {
 						Type string `json:"type"`
 					} `json:"format"`
 				} `json:"input"`
+				Output struct {
+					Format struct {
+						Type string `json:"type"`
+						Rate int    `json:"rate"`
+					} `json:"format"`
+				} `json:"output"`
 			} `json:"audio"`
-			InputAudioFormat string `json:"input_audio_format"`
+			InputAudioFormat  string `json:"input_audio_format"`
+			OutputAudioFormat string `json:"output_audio_format"`
 		} `json:"session"`
 	}
 	if json.Unmarshal(data, &update) != nil {
 		return
+	}
+	outFormat, outRate := update.Session.Audio.Output.Format.Type,
+		update.Session.Audio.Output.Format.Rate
+	if outFormat == "" {
+		outFormat = update.Session.OutputAudioFormat
+	}
+	if outFormat != "" {
+		m.mu.Lock()
+		m.outEnc, m.outRate = outputEncoding(outFormat, outRate)
+		m.mu.Unlock()
 	}
 	format := update.Session.Audio.Input.Format.Type
 	if format == "" {
@@ -191,4 +221,71 @@ func rms(samples []int16) float64 {
 		sum += float64(s) * float64(s)
 	}
 	return math.Sqrt(sum / float64(len(samples)))
+}
+
+// outputFormatOf is the output audio the application declared, as the mock
+// must speak it: an encoding ("mu", "alaw", "pcm16") and its rate. Empty and
+// zero mean the declaration never came; the caller's default is the g711
+// mu-law of a telephone leg.
+func (m *uplinkMeter) outputFormatOf() (string, int) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.outEnc, m.outRate
+}
+
+// outputEncoding maps a wire name to the mock's ("mu"|"alaw"|"pcm16", rate):
+// "audio/pcmu"/"g711_ulaw" and the alaw forms at 8 kHz, linear "audio/pcm"
+// (rate from the payload), "pcm24" and "pcm16" by their digits.
+func outputEncoding(name string, rate int) (string, int) {
+	switch n := strings.ToLower(name); {
+	case strings.Contains(n, "pcmu"), strings.Contains(n, "ulaw"):
+		return "mu", media.RateTelephone
+	case strings.Contains(n, "pcma"), strings.Contains(n, "alaw"):
+		return "alaw", media.RateTelephone
+	case strings.Contains(n, "pcm24"):
+		return "pcm16", 24000
+	case strings.Contains(n, "pcm16"):
+		return "pcm16", 16000
+	case strings.Contains(n, "pcm"):
+		if rate <= 0 {
+			rate = media.RateProviderOut // the vendors' linear default
+		}
+		return "pcm16", rate
+	default:
+		return "mu", media.RateTelephone
+	}
+}
+
+// formatOf is the input format the application declared, for code paths that
+// measure the uplink outside the meter (the VAD).
+func (m *uplinkMeter) formatOf() string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.format
+}
+
+// noteVADStart counts a detected burst (and, when a turn was live, the cancel
+// it caused) on the session's record.
+func (m *uplinkMeter) noteVADStart(cancelled bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.stat.VADStarts++
+	if cancelled {
+		m.stat.VADCancels++
+	}
+}
+
+// noteVADText records the transcript the session's burst was answered with.
+func (m *uplinkMeter) noteVADText(text string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.stat.VADTexts = append(m.stat.VADTexts, text)
+}
+
+// noteToolOutput records the output text of a tool result the application
+// sent for one of the session's calls.
+func (m *uplinkMeter) noteToolOutput(output string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.stat.ToolOutputs = append(m.stat.ToolOutputs, output)
 }

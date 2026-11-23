@@ -67,6 +67,28 @@ provider. The default mode is unchanged. Each session plays one script:
   error and the application rescues the caller instead.
 * Unknown fields and malformed scripts are rejected at startup.
 
+**VAD mode** (`-vad file.json`, combinable with `-scenario`) detects caller
+speech on the uplink by level: at speech start it cancels the response in
+progress (`response.done` with status `cancelled`, as qwen's server VAD does),
+at speech end it sends the file's scripted caller transcript and starts its own
+reply, which may carry a scripted tool call. With the mode on, `-delta-pace`
+defaults to `-delta-audio` so bursts land inside a turn as the wire's real-time
+audio does. Built for end-to-end runs of an application on a self-cancelling
+profile (`gateway`); `make e2e-greeting-cut` exercises it.
+
+```json
+{"utterances": [
+  {"text": "喂？", "speakSec": 0.5,
+   "toolName": "set_intent", "toolArgs": {"value": "yes"}},
+  {"text": "不需要，谢谢", "speakSec": 0}]}
+```
+
+One utterance answers one burst of uplink speech, in file order: `text` is the
+caller transcript sent at speech end, `speakSec` how long the reply's audio
+plays, and an optional `toolName`/`toolArgs` makes the reply a moving tool call
+as qwen would send one. What the mode saw is on `/_stats` (`vadStarts`,
+`vadCancels`, `vadTexts`, `vadReplies`, `toolOutputs`).
+
 **Relay mode** (`-upstream wss://...`) is for fault injection on the dev stack,
 not for load. The command then serves no script: it accepts the application's
 WebSocket on any path, dials the real provider (the client's query string and its

@@ -60,6 +60,11 @@
     "+12025550201": [{"provisionals":[{"status":180,"atMs":100}],"finalAfterMs":300,"byeAfterMs":10000,"uplink":{"kind":"BURSTS","frequencyHz":300,"bursts":[{"atMs":800,"durationMs":400}]}}],
     "+12025550202": [{"provisionals":[{"status":180,"atMs":100}],"finalAfterMs":300,"byeAfterMs":10000,"uplink":{"kind":"BURSTS","frequencyHz":300,"bursts":[{"atMs":2600,"durationMs":400}]}}],
     "+12025550203": [{"provisionals":[{"status":180,"atMs":100}],"finalAfterMs":300,"byeAfterMs":10000,"uplink":{"kind":"SILENCE"}}],
-    "+12025550204": [{"provisionals":[{"status":180,"atMs":100}],"finalAfterMs":300,"byeAfterMs":10000,"uplink":{"kind":"BURSTS","frequencyHz":300,"bursts":[{"atMs":7000,"durationMs":400}]}}]
+    "+12025550204": [{"provisionals":[{"status":180,"atMs":100}],"finalAfterMs":300,"byeAfterMs":10000,"uplink":{"kind":"BURSTS","frequencyHz":300,"bursts":[{"atMs":7000,"durationMs":400}]}}],
+    "+12025550210": [{"provisionals":[{"status":180,"atMs":100}],"finalAfterMs":300,"byeAfterMs":15000,"uplink":{"kind":"BURSTS","frequencyHz":300,"bursts":[{"atMs":1500,"durationMs":400}]}}],
+    "+12025550211": [{"provisionals":[{"status":180,"atMs":100}],"finalAfterMs":300,"byeAfterMs":15000,"uplink":{"kind":"BURSTS","frequencyHz":300,"bursts":[{"atMs":1200,"durationMs":900}]}}],
+    "+12025550212": [{"provisionals":[{"status":180,"atMs":100}],"finalAfterMs":300,"byeAfterMs":15000,"uplink":{"kind":"BURSTS","frequencyHz":300,"bursts":[{"atMs":1500,"durationMs":600}]}}],
+    "+12025550213": [{"provisionals":[{"status":180,"atMs":100}],"finalAfterMs":300,"byeAfterMs":15000,"uplink":{"kind":"BURSTS","frequencyHz":300,"bursts":[{"atMs":1500,"durationMs":400},{"atMs":6000,"durationMs":400}]}}],
+    "+12025550214": [{"provisionals":[{"status":180,"atMs":100}],"finalAfterMs":300,"byeAfterMs":15000,"uplink":{"kind":"SILENCE"}}]
   }
 }
