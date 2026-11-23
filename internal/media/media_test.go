@@ -247,15 +247,15 @@ func TestSilenceFrameIsPrebuilt(t *testing.T) {
 func TestBufferPoolHandsBackUsableBuffers(t *testing.T) {
 	t.Parallel()
 	b := GetBytes(160)
-	if len(b) != 0 || cap(b) < 160 {
-		t.Fatalf("borrowed byte buffer has len %d cap %d", len(b), cap(b))
+	if len(*b) != 0 || cap(*b) < 160 {
+		t.Fatalf("borrowed byte buffer has len %d cap %d", len(*b), cap(*b))
 	}
-	b = append(b, 1, 2, 3)
+	*b = append(*b, 1, 2, 3)
 	PutBytes(b)
 
 	// A buffer smaller than asked for is replaced rather than returned short.
-	if big := GetBytes(100000); cap(big) < 100000 {
-		t.Errorf("asked for 100000 bytes, got capacity %d", cap(big))
+	if big := GetBytes(100000); cap(*big) < 100000 {
+		t.Errorf("asked for 100000 bytes, got capacity %d", cap(*big))
 	}
 }
 
@@ -357,5 +357,14 @@ func TestMeanSquareIsTheLevelOfAFrame(t *testing.T) {
 				t.Errorf("%s amplitude %d: decoded level %d is not near %d", law, amplitude, want, int64(amplitude)*int64(amplitude))
 			}
 		}
+	}
+}
+
+// The borrow/return round trip is what every per-frame path does; a boxing
+// allocation here is the regression this benchmark exists to catch.
+func BenchmarkBytePoolRoundTrip(b *testing.B) {
+	b.ReportAllocs()
+	for b.Loop() {
+		PutBytes(GetBytes(FrameSamples))
 	}
 }

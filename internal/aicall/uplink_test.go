@@ -60,10 +60,10 @@ var loudFrame = bytes.Repeat([]byte{0x10}, media.FrameSamples)
 // a plain allocation, not a pooled buffer: a scenario builds 30,000 of them,
 // and sync.Pool under -race drops a quarter of what it is given, so pooled
 // buffers of 8 KiB would turn the run into an allocator benchmark.
-func realFrame(_ media.Law, seq int) []byte {
+func realFrame(_ media.Law, seq int) *[]byte {
 	frame := append(make([]byte, 0, media.FrameSamples), loudFrame...)
 	frame[0], frame[1] = byte(seq>>8), byte(seq)
-	return frame
+	return &frame
 }
 
 type uplinkFormat struct {
@@ -217,7 +217,7 @@ func driveClock(t *testing.T, total time.Duration, arrivals []arrival, tickAt fu
 		for ; next < len(arrivals) && arrivals[next].at <= at; next++ {
 			token := tokens[2*next : 2*next+2 : 2*next+2]
 			token[0], token[1] = byte(arrivals[next].seq>>8), byte(arrivals[next].seq)
-			run.clock.push(token)
+			run.clock.push(&token)
 			if run.clock.queued() > uplinkMaxBacklog {
 				t.Fatalf("backlog %d passed the bound", run.clock.queued())
 			}
@@ -225,7 +225,7 @@ func driveClock(t *testing.T, total time.Duration, arrivals []arrival, tickAt fu
 		for n := run.clock.owed(epoch.Add(at)); n > 0; n-- {
 			run.sent++
 			if token := run.clock.pop(); token != nil {
-				run.leftIn = append(run.leftIn, int(token[0])<<8|int(token[1]))
+				run.leftIn = append(run.leftIn, int((*token)[0])<<8|int((*token)[1]))
 			} else {
 				run.filled++
 			}
@@ -416,7 +416,7 @@ func TestAFillIsSilenceInTheProvidersFormat(t *testing.T) {
 			session, _ := newUplinkSession(t, f)
 			fill := session.uplinkSilence
 			// The length of a real frame after the call's own conversion.
-			converted := session.uplink.Convert(nil, realFrame(f.law, 0))
+			converted := session.uplink.Convert(nil, *realFrame(f.law, 0))
 			if len(fill) != len(converted) {
 				t.Fatalf("fill is %d bytes, a converted frame is %d", len(fill), len(converted))
 			}
@@ -525,7 +525,7 @@ type virtualPump struct {
 	session *Session
 	model   *fakeModel
 	// frames is the fake leg's inbound queue; nil when the leg brings its own.
-	frames chan []byte
+	frames chan *[]byte
 	epoch  time.Time
 	ticks  chan time.Time
 	offset atomic.Int64
@@ -533,14 +533,14 @@ type virtualPump struct {
 	logs   *lockedBuffer
 }
 
-func startVirtualPump(t *testing.T, leg Leg, frames chan []byte, profile provider.Profile) *virtualPump {
+func startVirtualPump(t *testing.T, leg Leg, frames chan *[]byte, profile provider.Profile) *virtualPump {
 	t.Helper()
 	return startVirtualPumpWith(t, leg, frames, profile, nil)
 }
 
 // startVirtualPumpWith is startVirtualPump with a hook that may adjust the
 // session before it starts.
-func startVirtualPumpWith(t *testing.T, leg Leg, frames chan []byte, profile provider.Profile,
+func startVirtualPumpWith(t *testing.T, leg Leg, frames chan *[]byte, profile provider.Profile,
 	adjust func(*Session)) *virtualPump {
 
 	t.Helper()
@@ -770,7 +770,7 @@ type rtpLeg struct {
 	rtp *voice.RTPSession
 }
 
-func (l rtpLeg) Frames() <-chan []byte         { return l.rtp.Frames() }
+func (l rtpLeg) Frames() <-chan *[]byte        { return l.rtp.Frames() }
 func (l rtpLeg) MediaStarted() <-chan struct{} { return l.rtp.MediaStarted() }
 func (l rtpLeg) FirstMediaAt() time.Time       { return l.rtp.FirstMediaAt() }
 func (l rtpLeg) RxDropped() int64              { return l.rtp.RxDropped() }
@@ -849,9 +849,9 @@ func TestFillsDoNotFeedMediaLiveness(t *testing.T) {
 	}
 }
 
-// The real-frame slot, without media.PutBytes: the pool's Put boxes a slice
-// header (24 B), which is the same in every consumer of the pool and is not
-// what is being measured here.
+// The real-frame slot the way the pump runs it: a pooled frame queued, then
+// sendDueSlots popping it and handing the buffer back. A boxing PutBytes
+// shows up here.
 func BenchmarkUplinkClockRealFrame(b *testing.B) {
 	for _, f := range []uplinkFormat{uplinkFormats[0], uplinkFormats[2]} {
 		b.Run(f.name, func(b *testing.B) {
@@ -866,11 +866,9 @@ func BenchmarkUplinkClockRealFrame(b *testing.B) {
 			now := epoch
 			b.ReportAllocs()
 			for b.Loop() {
-				clock.push(frame)
+				clock.push(pooledFrame(frame))
 				now = now.Add(uplinkSlot)
-				for n := clock.owed(now); n > 0; n-- {
-					converted, _ = session.feedSlot(clock, clock.pop(), converted)
-				}
+				converted, _ = session.sendDueSlots(clock, nil, now, converted)
 			}
 		})
 	}

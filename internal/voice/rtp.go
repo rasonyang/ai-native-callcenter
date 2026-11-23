@@ -89,8 +89,8 @@ type RTPSession struct {
 	// dtmfPayloadType is negotiated from the offer; -1 disables DTMF entirely.
 	dtmfPayloadType int
 
-	rx   chan []byte // inbound G.711 frames, oldest dropped when full
-	tx   chan []byte // outbound G.711 frames
+	rx   chan *[]byte // inbound G.711 frames, oldest dropped when full
+	tx   chan *[]byte // outbound G.711 frames
 	dtmf chan string
 
 	// ssrc and timestamp are read by the RTCP reporter while the send loop
@@ -176,8 +176,8 @@ func NewRTPSession(localPort int, law media.Law, dtmfPayloadType int, log *slog.
 		// sender cannot block on it — it is the same goroutine that has to
 		// notice the caller barging in. Thirty seconds of frames; anything
 		// beyond that is a runaway response and is dropped with a warning.
-		rx:   make(chan []byte, 50),
-		tx:   make(chan []byte, 1500),
+		rx:   make(chan *[]byte, 50),
+		tx:   make(chan *[]byte, 1500),
 		dtmf: make(chan string, 50),
 
 		mediaStarted: make(chan struct{}),
@@ -197,7 +197,7 @@ func NewRTPSession(localPort int, law media.Law, dtmfPayloadType int, log *slog.
 //
 // Each frame comes from the media pool and stays valid until the receiver
 // hands it back with media.PutBytes.
-func (r *RTPSession) Frames() <-chan []byte { return r.rx }
+func (r *RTPSession) Frames() <-chan *[]byte { return r.rx }
 
 // DTMF yields digits from RFC 2833 events and SIP INFO alike.
 func (r *RTPSession) DTMF() <-chan string { return r.dtmf }
@@ -294,7 +294,7 @@ func (r *RTPSession) SetTxTap(tap TxTap) {
 // queue means the provider is producing faster than real time.
 func (r *RTPSession) Send(frame []byte) bool {
 	buf := media.GetBytes(len(frame))
-	buf = append(buf, frame...)
+	*buf = append(*buf, frame...)
 	select {
 	case r.tx <- buf:
 		return true
@@ -409,7 +409,7 @@ func (r *RTPSession) handlePacket(data []byte) {
 	r.rxStats.onPacket(pkt.SequenceNumber, pkt.Timestamp, pkt.SSRC)
 
 	payload := media.GetBytes(len(pkt.Payload))
-	payload = append(payload, pkt.Payload...)
+	*payload = append(*payload, pkt.Payload...)
 	for _, frame := range r.jitter.push(pkt.SequenceNumber, payload) {
 		r.deliver(frame)
 	}
@@ -418,7 +418,7 @@ func (r *RTPSession) handlePacket(data []byte) {
 // deliver hands a frame to the consumer, discarding the oldest when it has
 // fallen behind: for a live conversation, catching up matters more than
 // completeness.
-func (r *RTPSession) deliver(frame []byte) {
+func (r *RTPSession) deliver(frame *[]byte) {
 	select {
 	case r.rx <- frame:
 		return
@@ -470,14 +470,17 @@ func (r *RTPSession) Run() {
 		}
 
 		var frame []byte
-		var pooled bool
+		var frameP *[]byte
 		queued := len(r.tx)
 		switch {
 		case playing:
 			if queued > 0 {
-				frame, pooled = r.popTx()
+				frameP = r.popTx()
+				if frameP != nil {
+					frame = *frameP
+				}
 			}
-			if pooled {
+			if frameP != nil {
 				underruns = 0
 			} else {
 				// A brief gap in supply is padded rather than treated as the
@@ -490,7 +493,8 @@ func (r *RTPSession) Run() {
 			}
 		case queued >= prebufferFrames ||
 			(queued > 0 && !prebufferDeadline.IsZero() && !time.Now().Before(prebufferDeadline)):
-			if frame, pooled = r.popTx(); pooled {
+			if frameP = r.popTx(); frameP != nil {
+				frame = *frameP
 				playing = true
 			} else {
 				prebufferDeadline = time.Now().Add(prebufferFrames * FrameDuration)
@@ -504,7 +508,7 @@ func (r *RTPSession) Run() {
 			}
 			frame = silence
 		}
-		if !pooled {
+		if frameP == nil {
 			r.idleFrames.Add(1)
 		}
 		if len(frame) > media.FrameSamples {
@@ -513,7 +517,7 @@ func (r *RTPSession) Run() {
 		if tap := r.txTap.Load(); tap != nil {
 			// The frame actually handed to the socket this tick; nil when the
 			// tick carried padding rather than the bot's audio.
-			if pooled {
+			if frameP != nil {
 				(*tap)(frame, time.Now())
 			} else {
 				(*tap)(nil, time.Now())
@@ -522,8 +526,8 @@ func (r *RTPSession) Run() {
 
 		packet = packRTPHeader(packet, r.seq, r.timestamp.Load(), r.ssrc.Load(), r.payloadType)
 		packet = append(packet, frame...)
-		if pooled {
-			media.PutBytes(frame)
+		if frameP != nil {
+			media.PutBytes(frameP)
 		}
 
 		r.remoteMu.Lock()
@@ -546,15 +550,15 @@ func (r *RTPSession) Run() {
 // length it read earlier, and ClearTx may have emptied the queue since, so an
 // empty queue is an answer here, not a wait: the caller pads the tick with
 // silence and the stream keeps its 20 ms cadence.
-func (r *RTPSession) popTx() ([]byte, bool) {
+func (r *RTPSession) popTx() *[]byte {
 	if r.beforeTxRecv != nil {
 		r.beforeTxRecv()
 	}
 	select {
 	case frame := <-r.tx:
-		return frame, true
+		return frame
 	default:
-		return nil, false
+		return nil
 	}
 }
 

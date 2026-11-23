@@ -310,7 +310,7 @@ func (r *listenRig) wake() {
 func (r *listenRig) slot(frame []byte) {
 	r.t.Helper()
 	if frame != nil {
-		r.leg.frames <- frame
+		r.leg.frames <- &frame
 	}
 	r.at += uplinkSlot
 	r.offset.Store(int64(r.at))
@@ -417,7 +417,7 @@ func (r *listenRig) graceLine() map[string]any {
 func (r *listenRig) opening(n int) {
 	r.model.events <- provider.Event{Type: provider.EventTypeResponseStarted}
 	for i := 0; i < n; i++ {
-		r.model.events <- provider.Event{Type: provider.EventTypeAudioDelta, Audio: callerFrame(media.LawMu, byte(i+1))}
+		r.model.events <- provider.Event{Type: provider.EventTypeAudioDelta, Audio: *callerFrame(media.LawMu, byte(i+1))}
 	}
 	r.model.events <- provider.Event{Type: provider.EventTypeOutputTranscript, Text: "Hello, this is Ann.", IsFinal: true}
 	r.model.events <- provider.Event{Type: provider.EventTypeResponseDone}

@@ -53,7 +53,7 @@ type uplinkClock struct {
 	start     time.Time
 	slotsDone int64
 
-	queue [uplinkMaxBacklog][]byte
+	queue [uplinkMaxBacklog]*[]byte
 	head  int
 	count int
 
@@ -64,7 +64,7 @@ func newUplinkClock(start time.Time) *uplinkClock { return &uplinkClock{start: s
 
 // push queues one frame, taking ownership. When the queue is full the oldest
 // frame is released to the pool and counted.
-func (c *uplinkClock) push(frame []byte) {
+func (c *uplinkClock) push(frame *[]byte) {
 	c.stats.Received++
 	if c.count == uplinkMaxBacklog {
 		media.PutBytes(c.queue[c.head])
@@ -94,7 +94,7 @@ func (c *uplinkClock) owed(now time.Time) int {
 
 // pop takes the oldest queued frame for a slot; nil when none is queued.
 // The caller returns a non-nil frame to the pool.
-func (c *uplinkClock) pop() []byte {
+func (c *uplinkClock) pop() *[]byte {
 	if c.count == 0 {
 		return nil
 	}

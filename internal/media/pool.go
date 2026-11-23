@@ -11,23 +11,26 @@ import "sync"
 
 var bytePool = sync.Pool{New: func() any { b := make([]byte, 0, 8192); return &b }}
 
-// GetBytes borrows a byte buffer with at least the given capacity.
-func GetBytes(capacity int) []byte {
+// GetBytes borrows a byte buffer with at least the given capacity. The
+// pointer it returns is the pool's own token: PutBytes puts that same
+// pointer back, so nothing is boxed and the per-frame paths stay at zero
+// allocations.
+func GetBytes(capacity int) *[]byte {
 	p := bytePool.Get().(*[]byte)
-	b := *p
-	if cap(b) < capacity {
-		b = make([]byte, 0, capacity)
+	if cap(*p) < capacity {
+		*p = make([]byte, 0, capacity)
 	}
-	return b[:0]
+	*p = (*p)[:0]
+	return p
 }
 
-// PutBytes returns a byte buffer.
-func PutBytes(b []byte) {
-	if cap(b) == 0 {
+// PutBytes returns a byte buffer borrowed with GetBytes.
+func PutBytes(p *[]byte) {
+	if p == nil || cap(*p) == 0 {
 		return
 	}
-	b = b[:0]
-	bytePool.Put(&b)
+	*p = (*p)[:0]
+	bytePool.Put(p)
 }
 
 // SilenceFrame returns one encoded 20 ms frame of silence in the given law.

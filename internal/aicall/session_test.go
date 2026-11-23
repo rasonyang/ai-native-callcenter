@@ -28,7 +28,7 @@ import (
 // fakeLeg stands in for the telephone side.
 type fakeLeg struct {
 	law     media.Law
-	frames  chan []byte
+	frames  chan *[]byte
 	digits  chan string
 	stopped chan struct{}
 
@@ -58,7 +58,7 @@ type fakeLeg struct {
 func newFakeLeg(law media.Law) *fakeLeg {
 	return &fakeLeg{
 		law:     law,
-		frames:  make(chan []byte, 64),
+		frames:  make(chan *[]byte, 64),
 		digits:  make(chan string, 8),
 		stopped: make(chan struct{}),
 
@@ -90,7 +90,7 @@ func (l *fakeLeg) AnsweredAt() time.Time         { return l.answeredAt }
 
 func (l *fakeLeg) ID() string               { return "call-test" }
 func (l *fakeLeg) Law() media.Law           { return l.law }
-func (l *fakeLeg) Frames() <-chan []byte    { return l.frames }
+func (l *fakeLeg) Frames() <-chan *[]byte   { return l.frames }
 func (l *fakeLeg) Digits() <-chan string    { return l.digits }
 func (l *fakeLeg) Stopped() <-chan struct{} { return l.stopped }
 
@@ -405,11 +405,18 @@ func awaitBridgeEvent(t *testing.T, session *Session, want EventType) Event {
 }
 
 // callerFrame builds one frame of caller audio in the leg's law.
-func callerFrame(law media.Law, marker byte) []byte {
+func callerFrame(law media.Law, marker byte) *[]byte {
 	frame := media.GetBytes(media.FrameSamples)
 	for range media.FrameSamples {
-		frame = append(frame, marker)
+		*frame = append(*frame, marker)
 	}
+	return frame
+}
+
+// pooledFrame builds one pooled uplink frame carrying b's bytes.
+func pooledFrame(b []byte) *[]byte {
+	frame := media.GetBytes(media.FrameSamples)
+	*frame = append(*frame, b...)
 	return frame
 }
 
@@ -450,7 +457,7 @@ func TestCallerAudioReachesTheModelUntouchedOnThePassthroughPath(t *testing.T) {
 	if len(frame) != media.FrameSamples {
 		t.Fatalf("model got %d bytes, want an untouched %d-byte frame", len(frame), media.FrameSamples)
 	}
-	if !bytes.Equal(frame, callerFrame(media.LawMu, 0x42)) {
+	if !bytes.Equal(frame, *callerFrame(media.LawMu, 0x42)) {
 		t.Errorf("the frame was altered: first byte %#x", frame[0])
 	}
 }

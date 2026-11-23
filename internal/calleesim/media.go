@@ -70,7 +70,7 @@ func (d *dialog) receive(session *voice.RTPSession) {
 			return
 		case frame := <-session.Frames():
 			at := time.Now()
-			rms := frameRMS(d.law, frame)
+			rms := frameRMS(d.law, *frame)
 			media.PutBytes(frame)
 
 			d.mu.Lock()

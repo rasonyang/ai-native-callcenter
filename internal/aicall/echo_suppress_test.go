@@ -250,7 +250,7 @@ func TestWithSuppressionOnHushedAndFillSlotsAreAsBefore(t *testing.T) {
 		// rather than by what the model received.
 		for k := 100; k < 150; k++ {
 			leg.tick(c.bot[k], v.epoch.Add(time.Duration(k)*uplinkSlot))
-			v.frames <- append(media.GetBytes(media.FrameSamples), c.uplink[k]...)
+			v.frames <- pooledFrame(c.uplink[k])
 			v.step(1)
 		}
 		v.session.hush(false)
@@ -320,16 +320,21 @@ func BenchmarkUplinkClockWithEchoSuppression(b *testing.B) {
 					} else {
 						copy(frame, ups[i&63])
 					}
-					clock.push(frame)
+					clock.push(pooledFrame(frame))
 					now = now.Add(uplinkSlot)
 					i++
-					// sendDueSlots minus the pool return, as in
-					// BenchmarkUplinkClockWithEchoProbe.
+					// sendDueSlots' slot loop as the pump runs it, pool
+					// return included, as in BenchmarkUplinkClockWithEchoProbe.
 					for n := clock.owed(now); n > 0; n-- {
 						f := clock.pop()
-						probe.FeedUplink(f)
-						probe.Suppress(f)
-						converted, _ = session.feedSlot(clock, f, converted)
+						var fb []byte
+						if f != nil {
+							fb = *f
+						}
+						probe.FeedUplink(fb)
+						probe.Suppress(fb)
+						converted, _ = session.feedSlot(clock, fb, converted)
+						media.PutBytes(f)
 					}
 				}
 			})
