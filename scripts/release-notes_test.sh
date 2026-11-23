@@ -236,18 +236,18 @@ nothas 'v0.1.0: no changelog subsections' "$TMP/notes-v0.1.0.md" '### All change
 
 # A pre-release compares with the previous tag of any kind — here the last rc.
 notes v0.2.0-rc.2
-has 'v0.2.0-rc.2: compares with previous tag' "$TMP/notes-v0.2.0-rc.2.md" 'compared with `v0.2.0-rc.1`'
-nothas 'v0.2.0-rc.2: not with the previous full release' "$TMP/notes-v0.2.0-rc.2.md" 'compared with `v0.1.0`'
+has 'v0.2.0-rc.2: compares with previous tag' "$TMP/notes-v0.2.0-rc.2.md" "compared with \`v0.2.0-rc.1\`"
+nothas 'v0.2.0-rc.2: not with the previous full release' "$TMP/notes-v0.2.0-rc.2.md" "compared with \`v0.1.0\`"
 has 'v0.2.0-rc.2: breaking changes first' "$TMP/notes-v0.2.0-rc.2.md" '### Breaking changes'
 has 'v0.2.0-rc.2: removed endpoint is breaking' "$TMP/notes-v0.2.0-rc.2.md" 'DELETE /calls'
-has 'v0.2.0-rc.2: required parameter is breaking' "$TMP/notes-v0.2.0-rc.2.md" 'request parameter `state`'
+has 'v0.2.0-rc.2: required parameter is breaking' "$TMP/notes-v0.2.0-rc.2.md" "request parameter \`state\`"
 has 'v0.2.0-rc.2: whole changelog follows' "$TMP/notes-v0.2.0-rc.2.md" '### All changes'
 
 # A full release compares with the previous full release, so the delta covers
 # the whole rc line: POST /queues arrived in rc.1 and v0.1.0 never had it.
 notes v0.2.0
-has 'v0.2.0: compares with previous full release' "$TMP/notes-v0.2.0.md" 'compared with `v0.1.0`'
-nothas 'v0.2.0: not with the last rc' "$TMP/notes-v0.2.0.md" 'compared with `v0.2.0-rc.2`'
+has 'v0.2.0: compares with previous full release' "$TMP/notes-v0.2.0.md" "compared with \`v0.1.0\`"
+nothas 'v0.2.0: not with the last rc' "$TMP/notes-v0.2.0.md" "compared with \`v0.2.0-rc.2\`"
 has 'v0.2.0: rc-era endpoint in the delta' "$TMP/notes-v0.2.0.md" 'POST /queues'
 has 'v0.2.0: removed endpoint is breaking' "$TMP/notes-v0.2.0.md" 'DELETE /calls'
 has 'v0.2.0: CHANGELOG body used' "$TMP/notes-v0.2.0.md" 'fixture changelog body for the full release'
@@ -258,7 +258,7 @@ eq 'v0.2.0: API changes before the images' "$order" '## API changes ## The image
 # The contract did not move between v0.2.0 and v0.3.0-rc.1.
 notes v0.3.0-rc.1
 has 'v0.3.0-rc.1: unchanged contract' "$TMP/notes-v0.3.0-rc.1.md" 'No API changes'
-has 'v0.3.0-rc.1: compare base named' "$TMP/notes-v0.3.0-rc.1.md" 'compared with `v0.2.0`'
+has 'v0.3.0-rc.1: compare base named' "$TMP/notes-v0.3.0-rc.1.md" "compared with \`v0.2.0\`"
 has 'v0.3.0-rc.1: commit-subject body used' "$TMP/notes-v0.3.0-rc.1.md" '## Changes since v0.2.0'
 has 'v0.3.0-rc.1: commit listed' "$TMP/notes-v0.3.0-rc.1.md" 'unrelated change'
 nothas 'v0.3.0-rc.1: no changelog subsections' "$TMP/notes-v0.3.0-rc.1.md" '### All changes'
