@@ -319,6 +319,7 @@ func (e *Engine) OnToolResult(tool string, args, result map[string]any) string {
 	e.resetTurnsWithoutTool()
 	e.isCallerAwaitingReply = false
 	e.slots["noInput.count"] = 0
+	e.slots["ackOnly.count"] = 0
 
 	// The transient view is replaced wholesale so a condition on result.x
 	// cannot match a value left over from an earlier tool.
@@ -427,6 +428,7 @@ func (e *Engine) OnCallerSpoke(transcript string) {
 		return
 	}
 	e.slots["noInput.count"] = 0
+	e.slots["ackOnly.count"] = 0
 	e.isCallerAwaitingReply = true
 }
 
@@ -435,6 +437,51 @@ func (e *Engine) OnCallerSpoke(transcript string) {
 // something the caller said.
 func (e *Engine) OnCallerKeyed() {
 	e.slots["noInput.count"] = 0
+	e.slots["ackOnly.count"] = 0
+}
+
+// defaultAckOnlyLimit is how many acknowledgement-only caller turns the engine
+// tolerates before closing the call itself (see defaultAckOnly). Chosen to
+// match defaultNoInputLimit, the run of silence a caller already gets away
+// with: acknowledgement-only turns are not silence — each is a caller turn the
+// bot answered — but a run of them with no words and no tool call is the same
+// loop with audio on it (#635).
+const defaultAckOnlyLimit = defaultNoInputLimit
+
+// OnCallerAcknowledged records one finished caller utterance that was only an
+// acknowledgement ("mm-hmm", "嗯", "好的"), said over the bot and held: it
+// was not taken as the caller's turn, so OnCallerSpoke never ran for it. It
+// returns the new phase when the run of such turns has hit the bound the flow
+// set for it (defaultAckOnly), or an empty string.
+//
+// ackOnly.count is consecutive acknowledgement-only turns, not a lifetime
+// total: any sign of the caller making progress resets it — words
+// (OnCallerSpoke), a keypress (OnCallerKeyed) or a tool the conversation led
+// to (OnToolResult). A run of them is one the bot kept replying to without a
+// tool call, because the tool that would have moved the call was refused on
+// the first cut and the model kept re-asking instead. The bound is the
+// engine's, not the flow's: no event reaches the author for an acknowledgement
+// held out of the transcript, so there is no authored rule to defer to the
+// way defaultNoInput defers to a declared NO_INPUT rule.
+func (e *Engine) OnCallerAcknowledged() string {
+	e.slots["ackOnly.count"] = e.countOf("ackOnly.count") + 1
+	return e.defaultAckOnly()
+}
+
+// defaultAckOnly supplies "count >= defaultAckOnlyLimit -> closingTarget"
+// when the flow named a closing target to send the call to. Without one there
+// is nowhere to send the call — the behaviour before this existed, not a
+// regression.
+func (e *Engine) defaultAckOnly() string {
+	if e.current.IsTerminal || e.spec.Global.ClosingTarget == "" {
+		return ""
+	}
+	if e.countOf("ackOnly.count") < defaultAckOnlyLimit {
+		return ""
+	}
+	e.log.Warn("caller has only acknowledged for a run of turns; closing the call",
+		"node", e.current.id, "count", e.countOf("ackOnly.count"), "target", e.spec.Global.ClosingTarget)
+	return e.enter(e.spec.Global.ClosingTarget)
 }
 
 // OnBotTurnDone accounts for one bot turn the model has finished producing,
@@ -574,6 +621,7 @@ func (e *Engine) ReturnTo(nodeID string) bool {
 	e.slots["node"] = nodeID
 	e.resetTurnsWithoutTool()
 	e.slots["noInput.count"] = 0
+	e.slots["ackOnly.count"] = 0
 	e.isCallerAwaitingReply = false
 	e.isToolReplyNext = false
 	e.log.Info("flow returned to phase", "node", nodeID, "from", from)

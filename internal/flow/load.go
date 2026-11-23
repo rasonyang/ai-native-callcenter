@@ -615,7 +615,7 @@ func (s *Spec) collectCollision(d declaredSlots, owner, written string) string {
 	if slices.Contains(engineSlots, written) {
 		return "written by the engine"
 	}
-	for _, root := range []string{"result", "userData", "noInput"} {
+	for _, root := range []string{"result", "userData", "noInput", "ackOnly"} {
 		if written == root || strings.HasPrefix(written, root+".") {
 			return "in the namespace of " + root + ", which the engine owns"
 		}
