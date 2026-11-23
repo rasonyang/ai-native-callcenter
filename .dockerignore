@@ -33,8 +33,11 @@ prompts.md
 # trust a copy found somewhere else. Excluding the directory made the image
 # build fail with "no required module provides package .../docs" while
 # `go build ./...` on a workstation passed. Everything under docs/ that is
-# genuinely prose is excluded below instead.
+# genuinely prose is excluded below instead — except docs/SKILL.md, which
+# docs/embed.go embeds for `aicc skill` and the image build needs as much as
+# openapi.json.
 docs/design/
 docs/*.md
+!docs/SKILL.md
 docs/auth/
 docs/assets/
