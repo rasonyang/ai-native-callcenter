@@ -90,11 +90,11 @@ func startStallCall(t *testing.T, f *fakeProvider, options ...callOption) (*Real
 	session, logs := loggedSession(t, f, QwenProfile())
 	session.firstAudioDeadline = stallDeadline
 	session.deltaStallDeadline = stallDeadline
+	session.stallHoldDeadline = holdDeadline
+	session.responseCreatedDeadline = turnDeadline
 	for _, option := range options {
 		option(session)
 	}
-	session.stallHoldDeadline = holdDeadline
-	session.responseCreatedDeadline = turnDeadline
 	if err := session.Start(t.Context(), basicConfig()); err != nil {
 		t.Fatalf("start: %v", err)
 	}
@@ -111,6 +111,13 @@ type callOption func(*Realtime)
 func calmWatchdogs(session *Realtime) {
 	session.firstAudioDeadline = time.Minute
 	session.deltaStallDeadline = time.Minute
+}
+
+// calmRequests keeps the request watchdog out of the way of a test that
+// answers the re-ask in its own time: the caller-turn watchdog still runs on
+// turnDeadline, but a slow send no longer reads as a dropped request (#540).
+func calmRequests(session *Realtime) {
+	session.requestDeadline = time.Minute
 }
 
 // awaitAbandon waits for the consumer to be told the turn was given up and
@@ -345,7 +352,7 @@ func TestACancelRefusedAsNoActiveResponseFreesTheFloorAndAsksOnce(t *testing.T) 
 
 func TestACallerTurnTheProviderNeverAnswersIsAskedForOnce(t *testing.T) {
 	s := newStrictProvider(t)
-	session, logs := startStallCall(t, s.fakeProvider)
+	session, logs := startStallCall(t, s.fakeProvider, calmRequests)
 
 	s.send(map[string]any{"type": "input_audio_buffer.speech_started"})
 	callerSays(s.fakeProvider, "I want to check my plan")
