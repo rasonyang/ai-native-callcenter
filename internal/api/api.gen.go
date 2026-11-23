@@ -3209,7 +3209,7 @@ type TranscriptKind string
 type TranscriptLine struct {
 	AgentID *openapi_types.UUID `json:"agentId,omitempty"`
 
-	// Content TEXT carries {text}; TOOL_CALL and TOOL_RESULT carry the tool name and arguments or result.
+	// Content TEXT carries {text}; TOOL_CALL and TOOL_RESULT carry the tool name and arguments or result. A bot line the caller heard none of carries heard NONE, and one heard only partway carries heard PARTIAL with playedMs; a line the caller heard whole carries neither (#579).
 	Content    map[string]interface{} `json:"content"`
 	Kind       TranscriptKind         `json:"kind"`
 	Language   *string                `json:"language,omitempty"`
