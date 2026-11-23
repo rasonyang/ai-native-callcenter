@@ -1341,6 +1341,18 @@ during the greeting into the switch.
   its own, the one answered outcome a campaign may redial. Phase 1 leaves room for it without
   building any of it: outcomes are an additive enum, and the "never redial after answer" rule is
   stated per outcome (§7.2). The measurement above sizes the work.
+  **Phase 1 of that detection exists (#409): a machine never produces a lead.** On a call the
+  platform placed to a customer, every final caller transcript is checked against a built-in zh/en
+  list of machine wording (voicemail prompts, call assistants speaking of the line's owner,
+  carrier announcements); a match marks the call for the rest of its life, and the lead guard
+  refuses every tool call that would record `HIGH` or `MEDIUM` interest on it, so a marked call
+  writes no such lead and files no callback. Marked calls are counted by kind
+  (`aicc_bot_machine_answered_calls_total`), which is the false-mark count the next phase waits
+  for. Design 02 §6 has the rule. Still deferred: ending a marked call (through
+  `global.closingTarget`, which would hang up on a person marked by mistake), the answered outcome
+  of its own and its redial (`MACHINE_ANSWERED`, contract first), and anything for a call whose
+  caller side has no transcript. Until then a marked call ends as `ANSWERED`, its contact `DONE`,
+  as before.
 - **Answer rate by caller id.** Caller-id reputation and attestation sit at the trunk, outside
   AICC.
 

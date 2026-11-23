@@ -145,6 +145,7 @@ func TestTheInterestRefusalsAreConversations(t *testing.T) {
 			"unheard, not said again": r.RefuseAsUnheardOffer("classify", false),
 			"declined":                r.RefuseAsDeclined("classify"),
 			"unconfirmed":             r.RefuseAsUnconfirmed("classify"),
+			"machine":                 r.RefuseAsMachine("classify"),
 		} {
 			got := decodeOutput(t, output)
 			if got["ok"] != "0" || !strings.Contains(asString(got["error"]), "classify") ||

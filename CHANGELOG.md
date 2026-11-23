@@ -9,6 +9,27 @@ carries the one-line installer's files.
 
 ### Fixed
 
+- **A machine that answers a campaign call records no lead** (#409). On a call
+  the platform placed to a customer, each final transcript of the callee's
+  words is now checked against a built-in Chinese and English list of what a
+  voicemail prompt, a phone's call assistant or a carrier announcement says
+  ("请在提示音后录制留言", "我是机主的智能助理，机主现在不方便接听",
+  "您拨打的用户已关机", "please leave a message after the tone"). A match marks
+  the call for the rest of it, and every tool call that would then record a
+  `HIGH` or `MEDIUM` lead is refused as a conversation, a call assistant's later
+  「好的，我会转告他」 included: no such lead is written and no callback is
+  filed, and the model is told that what answered is a recording or an
+  automated assistant, not the customer. Nothing configures it and a flow needs
+  no change. The call itself goes on as before and still ends as `ANSWERED`;
+  inbound and internal calls are never checked. Expect fewer `HIGH` and
+  `MEDIUM` leads on campaigns whose numbers often reach voicemail or a call
+  assistant. The new counter
+  `aicc_bot_machine_answered_calls_total{category,provider}` counts marked calls
+  by kind (`VOICEMAIL`, `CALL_ASSISTANT`, `CARRIER_ANNOUNCEMENT`), each logged
+  once (`the call is marked as answered by a machine`), and
+  `aicc_bot_lead_guard_total` has a new reason, `MACHINE_WORDING`.
+  `docs/flow-authoring.md` section 4.6 describes how a flow can also report a
+  machine itself and end such a call.
 - Docs: `deploy/README.md` names `grok` among the installer's `--provider`
   values, and says the `aicc_bot` gateway reads `Status DOWN` while the AI leg
   is off (an install made with `--provider none`, or `AICC_BOT_ENABLED=false`):

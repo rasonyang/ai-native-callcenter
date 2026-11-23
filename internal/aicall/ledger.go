@@ -499,6 +499,15 @@ func (f *callFacts) isPlacedByAgent() bool {
 	return f != nil && f.callType != callTypeInbound && !f.isPlacedToCustomer
 }
 
+// isOutboundToCustomer reports whether the platform placed this call to a
+// customer: a campaign call or an ad-hoc AI outbound dial, never an inbound
+// call, an internal one, or one an agent placed to the bot's number. A call
+// that listens before it opens (listensFirst) and one judged for a machine's
+// wording (Config.IsPlacedToCustomer, #409) are such calls.
+func (f *callFacts) isOutboundToCustomer() bool {
+	return f != nil && f.isPlacedToCustomer
+}
+
 // callType mirrors the domain enum without importing the events package into
 // every test.
 type callType string

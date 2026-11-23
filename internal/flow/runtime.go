@@ -600,6 +600,24 @@ func (r *Runtime) RefuseAsDeclined(name string) string {
 	return Failed(reason, r.phasePreamble()+r.engine.Instruction()).asToolOutput()
 }
 
+// RefuseAsMachine is the answer to a tool that would record the customer's
+// interest on a call the application has marked as answered by a machine
+// (#409): the caller side said wording only a voicemail prompt, a phone's call
+// assistant or a carrier announcement says, so nothing on the line is the
+// customer's answer. A refusal as a conversation, ok=0, with the phase's
+// instruction as the way on; nothing runs and no lead is written. It logs
+// nothing.
+func (r *Runtime) RefuseAsMachine(name string) string {
+	reason := "what answered this call is a recording or an automated assistant (a voicemail prompt, " +
+		"a phone's call assistant or a carrier announcement), not the customer, so nothing it says is " +
+		"the customer's answer: " + name + " was not carried out and no interest was recorded"
+	if r.engine.Lang() == LangZH {
+		reason = "接听这通电话的是录音或自动助理(如语音信箱提示、手机的来电助理或运营商的提示音),不是客户本人," +
+			"它说的话不是客户的回答,所以没有执行 " + name + ",也没有记录任何意向"
+	}
+	return Failed(reason, r.phasePreamble()+r.engine.Instruction()).asToolOutput()
+}
+
 // RefuseAsUnconfirmed is the answer to a tool that would record the customer's
 // interest when nothing the caller said confirms it: the words it answered were
 // not caught (no final transcript in time, a blank one, or no caller words at
