@@ -53,6 +53,11 @@ carries the one-line installer's files.
 
 ### Changed
 
+- **Every engine-made cut of a bot line is counted** (#626, step 0):
+  `aicc_bot_turn_cuts_total{provider,words,line}` — what its final transcript
+  made of it (WORDS, BLANK, MISSING) and where it fell (OPENING, LATER,
+  CLOSING). A deployment whose BLANK and MISSING cuts climb is hearing
+  background sound taken for the callee.
 - **Campaign admission paces by each limit's own period** (#644). Session
   starts are judged over the session period, or over 10 seconds when the period
   is shorter, with the limit scaled to it; tokens over the token period. After

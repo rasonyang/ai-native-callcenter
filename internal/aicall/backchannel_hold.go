@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/rasonyang/ai-native-callcenter/internal/obs"
 	"github.com/rasonyang/ai-native-callcenter/internal/provider"
 )
 
@@ -133,6 +134,10 @@ type openCut struct {
 	// isWaitOver says a tool call waited cutVerdictWait for the verdict and no
 	// final came: the lead guard (#612) does not wait for it again.
 	isWaitOver bool
+	// isCounted says the cut is already in aicc_bot_turn_cuts_total (#626):
+	// set once, so a final judged after a MISSING was counted does not count
+	// it twice.
+	isCounted bool
 }
 
 // backchannelState is everything the session keeps for backchannels. mu is
@@ -504,7 +509,6 @@ func (s *Session) openCut(cut Event) {
 	isOpeningLine := s.isOpeningTurn(cut.Turn)
 	isOpening := isOpeningLine
 	s.bc.mu.Lock()
-	defer s.bc.mu.Unlock()
 	if s.bc.isOpeningOwed {
 		isOpening = true
 	}
@@ -525,7 +529,14 @@ func (s *Session) openCut(cut Event) {
 	} else {
 		next.isAdopting = true
 	}
+	prev := s.bc.cut
 	s.bc.cut = next
+	s.bc.mu.Unlock()
+	if prev != nil {
+		// The final transcript of the cut this one replaces never judged
+		// it: it counts as missing (#626).
+		s.countCut(prev, obs.TurnCutWordsMissing)
+	}
 }
 
 // noteResponseStarted tells an open cut which turn answers it.
@@ -592,6 +603,28 @@ func (s *Session) noteCutVerdict(event provider.Event) (replayCut *openCut) {
 	return replayCut
 }
 
+// countCut records the cut in aicc_bot_turn_cuts_total, once (#626): words is
+// what its final transcript made of it — obs.TurnCutWords, TurnCutWordsBlank
+// or TurnCutWordsMissing — and line is where it fell, the call's opening, the
+// armed ending's closing line, or any other.
+func (s *Session) countCut(cut *openCut, words string) {
+	s.bc.mu.Lock()
+	if cut.isCounted {
+		s.bc.mu.Unlock()
+		return
+	}
+	cut.isCounted = true
+	s.bc.mu.Unlock()
+	line := obs.TurnCutLineLater
+	switch {
+	case cut.isOpening:
+		line = obs.TurnCutLineOpening
+	case s.cfg.IsEndingArmed != nil && s.cfg.IsEndingArmed():
+		line = obs.TurnCutLineClosing
+	}
+	obs.RecordBotTurnCut(s.providerName, words, line)
+}
+
 // judgeCut is the verdict on the open cut for a final transcript
 // (noteCutVerdict). It returns the cut when the verdict says the opening is to
 // be said again: a greeting over it, or, while it can still be said again,
@@ -649,6 +682,11 @@ func (s *Session) judgeCut(event provider.Event) (replayCut *openCut) {
 	verdict := cut.verdict
 	close(cut.done)
 	s.bc.mu.Unlock()
+	words := obs.TurnCutWords
+	if text == "" {
+		words = obs.TurnCutWordsBlank
+	}
+	s.countCut(cut, words)
 	if text == "" {
 		// The engine heard speech and its transcriber wrote nothing: the one
 		// trace of words the call's transcript leaves out.
@@ -745,6 +783,7 @@ func (s *Session) cutVerdictOf(cut *openCut) (verdict cutVerdict, waited time.Du
 			if s.expireOpeningCut(cut) {
 				s.log.Info("no verdict on the cut of the opening within the wait; the callee's words are not known",
 					"turn", cut.event.Turn, "waitedMs", waited.Milliseconds())
+				s.countCut(cut, obs.TurnCutWordsMissing)
 				return cutVerdictWordsUnknown, waited, true
 			}
 			s.bc.mu.Lock()
@@ -755,9 +794,11 @@ func (s *Session) cutVerdictOf(cut *openCut) (verdict cutVerdict, waited time.Du
 				// A final judged it as the wait ran out.
 				return verdict, waited, false
 			}
+			s.countCut(cut, obs.TurnCutWordsMissing)
 			s.log.Info("no verdict on the cut within the wait; the tool call runs as it always did")
 			return cutVerdictUnknown, waited, false
 		case <-s.done:
+			s.countCut(cut, obs.TurnCutWordsMissing)
 			return cutVerdictUnknown, time.Since(began), false
 		}
 	}

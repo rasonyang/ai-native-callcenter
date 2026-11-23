@@ -722,6 +722,13 @@ func (s *Session) Close(ctx context.Context) {
 		s.mu.Lock()
 		s.turnOwedUntil = time.Time{}
 		s.mu.Unlock()
+		// A cut the call ends on is never judged: count it missing (#626).
+		s.bc.mu.Lock()
+		cut := s.bc.cut
+		s.bc.mu.Unlock()
+		if cut != nil {
+			s.countCut(cut, obs.TurnCutWordsMissing)
+		}
 		_ = s.model.Close(ctx)
 		s.leg.Stop()
 	})

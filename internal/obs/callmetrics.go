@@ -47,6 +47,7 @@ var (
 	providerRateLeft   metric.Int64Gauge
 	providerUnanswered metric.Int64Counter
 	botInterruptions   metric.Int64Counter
+	botTurnCuts        metric.Int64Counter
 	echoDelay          metric.Int64Histogram
 	echoReturnLoss     metric.Float64Histogram
 	echoCalls          metric.Int64Counter
@@ -246,6 +247,14 @@ func init() {
 			"in place of the dead-air prompt) and outcome (BACKED: the turn that answered "+
 			"the cue made a tool call; NOT_BACKED: it did not). The rate of BACKED is how "+
 			"often the second ask fixes the first."))
+	botTurnCuts, _ = meter.Int64Counter("aicc_bot_turn_cuts_total",
+		metric.WithDescription("Times an engine that detects turns by itself cut a bot "+
+			"line, by what its final transcript made of the words (WORDS: a final with "+
+			"words; BLANK: a final that came back empty; MISSING: no final ever judged "+
+			"it — the verdict wait ran out, another cut took over, or the call ended) "+
+			"and the line it fell on (OPENING, LATER, or CLOSING, the armed ending's "+
+			"line). A deployment whose BLANK and MISSING cuts climb is hearing "+
+			"background sound taken for the callee (#626)."))
 	botInterruptions, _ = meter.Int64Counter("aicc_bot_interruptions_total",
 		metric.WithDescription("Times a caller took the floor back from the bot, by what "+
 			"took it: SPEECH or DTMF. Speech inside the barge-in guard is not counted — "+
@@ -507,6 +516,30 @@ func RecordBotFirstAudio(provider string, ms int64, isBeforeMedia bool) {
 	botFirstAudio.Record(context.Background(), ms, metric.WithAttributes(
 		attribute.String("provider", provider),
 		attribute.Bool("before_media", isBeforeMedia)))
+}
+
+// Turn-cut metric labels (RecordBotTurnCut, #626).
+const (
+	// TurnCutWords* say what the cut's final transcript made of it.
+	TurnCutWords        = "WORDS"
+	TurnCutWordsBlank   = "BLANK"
+	TurnCutWordsMissing = "MISSING"
+	// TurnCutLine* say where the cut fell.
+	TurnCutLineOpening = "OPENING"
+	TurnCutLineLater   = "LATER"
+	TurnCutLineClosing = "CLOSING"
+)
+
+// RecordBotTurnCut counts a cut an engine made by itself, once per cut, as the
+// step-0 measure of background sound taken for the callee (#626).
+func RecordBotTurnCut(provider, words, line string) {
+	if botTurnCuts == nil {
+		return
+	}
+	botTurnCuts.Add(context.Background(), 1, metric.WithAttributes(
+		attribute.String("provider", provider),
+		attribute.String("words", words),
+		attribute.String("line", line)))
 }
 
 // RecordBotInterruption counts a caller taking the floor back from the bot.
