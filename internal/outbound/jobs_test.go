@@ -91,7 +91,7 @@ func jobService(t *testing.T) (*Service, *jobSwitch, *recordingLedger) {
 
 func eventually(t *testing.T, what string, cond func() bool) {
 	t.Helper()
-	deadline := time.Now().Add(10 * time.Second)
+	deadline := time.Now().Add(waitBound)
 	for time.Now().Before(deadline) {
 		if cond() {
 			return
@@ -215,7 +215,16 @@ func TestThreeHundredJobResultsFinishEachCallOnceOrNotAtAll(t *testing.T) {
 		}
 	}
 	eventually(t, "every pre-channel failure to be written", func() bool { return ledger.total() >= wantFailed })
-	time.Sleep(50 * time.Millisecond) // nothing more may arrive
+	// Nothing more may arrive: every claim is given back only after its
+	// write goroutine returns, so no write can still be in flight.
+	eventually(t, "every placement claim to be given back", func() bool {
+		for _, p := range calls {
+			if s.IsPlacing(p.callID) {
+				return false
+			}
+		}
+		return true
+	})
 
 	if got := ledger.total(); got != wantFailed {
 		t.Fatalf("wrote %d cdrs, want exactly %d (one per pre-channel failure)", got, wantFailed)
