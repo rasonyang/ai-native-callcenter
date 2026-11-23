@@ -91,6 +91,7 @@ type Actor struct {
 	log   *slog.Logger
 
 	in   chan any
+	quit chan struct{}
 	done chan struct{}
 	once sync.Once
 
@@ -226,19 +227,35 @@ func (a *Actor) State(state, reason string, degraded []string) {
 
 // Close stops the actor once its mailbox has drained.
 func (a *Actor) Close() {
-	a.once.Do(func() { close(a.in) })
+	a.once.Do(func() { close(a.quit) })
 	<-a.done
 }
 
 func (a *Actor) run() {
 	defer close(a.done)
-	for msg := range a.in {
-		switch m := msg.(type) {
-		case Mark:
-			a.markHeard(m)
-		case Line:
-			a.handle(m)
+	for {
+		select {
+		case msg := <-a.in:
+			a.dispatch(msg)
+		case <-a.quit:
+			for {
+				select {
+				case msg := <-a.in:
+					a.dispatch(msg)
+				default:
+					return
+				}
+			}
 		}
+	}
+}
+
+func (a *Actor) dispatch(msg any) {
+	switch m := msg.(type) {
+	case Mark:
+		a.markHeard(m)
+	case Line:
+		a.handle(m)
 	}
 }
 
@@ -405,6 +422,7 @@ func (r *Registry) For(callID uuid.UUID, callType events.CallType, answeredAt ti
 		pub:        r.pub,
 		log:        r.log,
 		in:         make(chan any, mailboxDepth),
+		quit:       make(chan struct{}),
 		done:       make(chan struct{}),
 	}
 	go a.run()
