@@ -156,6 +156,7 @@ OPENAI_API_KEY=not-a-key \
 | `aicc_provider_first_audio_ms{provider}` | The provider's share of that |
 | `aicc_turn_unanswered_total{provider}` | Caller turns the engine never answered before the application stepped in (a dead-air check, a cue or a line of its own). These are excluded from the two histograms above |
 | `aicc_provider_ws_errors_total` | Sessions that ended on an error |
+| `aicc_sip_socket_drops_total` | Datagrams the kernel dropped from the bot's SIP socket because its receive buffer was full — each dropped INVITE or ACK costs the call a retransmission (#597). Linux only |
 | `go_goroutines`, `go_memstats_heap_inuse_bytes` | Leaks, and the RSS budget |
 
 Goroutines are the leak detector: they must come back to their pre-load

@@ -7,6 +7,14 @@ carries the one-line installer's files.
 
 ## Unreleased
 
+### Added
+
+- **`aicc_sip_socket_drops_total` counts what the bot's SIP socket loses to a
+  full receive buffer** (#597): a burst of INVITEs that overflows the kernel
+  buffer is invisible except as retransmissions, so the UAS samples the
+  socket's drops column in `/proc/net/udp` every 15 s and logs a WARN when it
+  rises. Linux only.
+
 ### Fixed
 
 - **A machine that answers a campaign call records no lead** (#409). On a call
