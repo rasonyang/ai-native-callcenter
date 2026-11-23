@@ -78,6 +78,20 @@ func (f *fakeTranscripts) InsertTranscriptLine(_ context.Context, callID uuid.UU
 	return nil
 }
 
+func (f *fakeTranscripts) MarkTranscriptHeard(_ context.Context, callID uuid.UUID, seq int, heard string, playedMs *int32) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for i := range f.lines[callID] {
+		if f.lines[callID][i].Seq == seq {
+			f.lines[callID][i].Content["heard"] = heard
+			if playedMs != nil {
+				f.lines[callID][i].Content["playedMs"] = *playedMs
+			}
+		}
+	}
+	return nil
+}
+
 func (f *fakeTranscripts) get(callID uuid.UUID) []store.TranscriptLine {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -689,4 +703,32 @@ func placedFacts() *callFacts {
 	f.callType, f.isPlacedToCustomer = callTypeOutbound, true
 	f.tech = map[string]any{"sipCallId": "dialog-1"}
 	return f
+}
+
+// A turn the caller cut partway, and one it never heard, are marked on the
+// transcript's stored bot lines (#579).
+func TestABotLineCarriesWhatTheCallerHeard(t *testing.T) {
+	callID := uuid.Must(uuid.NewV7())
+	recorder, transcripts, flush := recorderWithTranscript(t, callID, time.Now().Add(-30*time.Second))
+
+	recorder.sayBot(3, "前半句还没有说完")
+	recorder.markBotHeard(3, 420*time.Millisecond)
+	recorder.sayBot(4, "the fragment a phase's line replaced")
+	recorder.markBotHeard(4, -1)
+	recorder.sayBot(5, "the line said whole")
+	flush()
+
+	lines := transcripts.get(callID)
+	if len(lines) != 3 {
+		t.Fatalf("transcript holds %d lines, want 3", len(lines))
+	}
+	if lines[0].Content["heard"] != "PARTIAL" || lines[0].Content["playedMs"] != int32(420) {
+		t.Errorf("the cut line reads %v, want heard=PARTIAL playedMs=420", lines[0].Content)
+	}
+	if lines[1].Content["heard"] != "NONE" {
+		t.Errorf("the unheard line reads %v, want heard=NONE", lines[1].Content)
+	}
+	if _, ok := lines[2].Content["heard"]; ok {
+		t.Errorf("the untouched line reads %v, want no heard mark", lines[2].Content)
+	}
 }

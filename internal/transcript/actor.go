@@ -36,6 +36,7 @@ type Publisher interface {
 // Store is the slice of the ledger this package writes to.
 type Store interface {
 	InsertTranscriptLine(ctx context.Context, callID uuid.UUID, line store.TranscriptLine) error
+	MarkTranscriptHeard(ctx context.Context, callID uuid.UUID, seq int, heard string, playedMs *int32) error
 }
 
 // Line is one thing said or done, as a producer reports it. Seq, occurredAt
@@ -64,6 +65,16 @@ func (l Line) content() map[string]any {
 	return map[string]any{"text": l.Text}
 }
 
+// Mark says how much of a stored bot line the caller heard, learned only
+// after the line was written: a turn the caller cut partway through reports
+// the milliseconds played, and a turn replaced or cut before anything of it
+// reached the leg reports none. Turn is the line's UtteranceID; a mark for a
+// turn other than the last bot line stored is ignored (#579).
+type Mark struct {
+	Turn     string
+	PlayedMs int
+}
+
 // mailbox depth. A transcript line is small and rare next to a media frame;
 // this is generous enough that overflow means something upstream is broken,
 // not that a caller talked quickly.
@@ -79,7 +90,7 @@ type Actor struct {
 	pub   Publisher
 	log   *slog.Logger
 
-	in   chan Line
+	in   chan any
 	done chan struct{}
 	once sync.Once
 
@@ -90,6 +101,12 @@ type Actor struct {
 
 	// seq is owned by the actor goroutine alone. No lock, by construction.
 	seq int
+
+	// lastBotSeq and lastBotTurn name the last bot line stored, so a Mark can
+	// find it: a cut or a replaced turn learns how much the caller heard only
+	// after the line has landed. Owned by the actor goroutine, like seq.
+	lastBotSeq  int
+	lastBotTurn string
 
 	// state is the last transcription state published for this call. Held here
 	// because this is the only thing that publishes one, so a reader asking
@@ -180,6 +197,16 @@ func (a *Actor) Post(line Line) {
 	}
 }
 
+// PostMark hands a heard-mark to the actor. Same never-block rule as Post.
+func (a *Actor) PostMark(mark Mark) {
+	select {
+	case <-a.done:
+	case a.in <- mark:
+	default:
+		a.log.Error("transcript mailbox full, mark dropped", "callId", a.callID)
+	}
+}
+
 // State publishes how live transcription is faring, so the panel can say so
 // rather than silently show nothing.
 func (a *Actor) State(state, reason string, degraded []string) {
@@ -205,8 +232,37 @@ func (a *Actor) Close() {
 
 func (a *Actor) run() {
 	defer close(a.done)
-	for line := range a.in {
-		a.handle(line)
+	for msg := range a.in {
+		switch m := msg.(type) {
+		case Mark:
+			a.markHeard(m)
+		case Line:
+			a.handle(m)
+		}
+	}
+}
+
+// markHeard folds into the last stored bot line's content how much of it the
+// caller heard — content.heard NONE or PARTIAL, with playedMs for PARTIAL. A
+// mark names its turn: a line already written can only belong to the turn the
+// cut reports. The stored row is updated in place; the stream is not told
+// twice — the CDR, which the mark exists for, reads the row.
+func (a *Actor) markHeard(mark Mark) {
+	if a.store == nil || a.lastBotTurn == "" || mark.Turn != a.lastBotTurn {
+		return
+	}
+	heard := "NONE"
+	var playedMs *int32
+	if mark.PlayedMs > 0 {
+		heard = "PARTIAL"
+		ms := int32(mark.PlayedMs)
+		playedMs = &ms
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := a.store.MarkTranscriptHeard(ctx, a.callID, a.lastBotSeq, heard, playedMs); err != nil {
+		a.log.Error("could not mark a transcript line's heard",
+			"callId", a.callID, "seq", a.lastBotSeq, "error", err)
 	}
 }
 
@@ -266,6 +322,9 @@ func (a *Actor) handle(line Line) {
 		cancel()
 	}
 	a.publish(events.TypeCallTranscript, a.payload(line, seq, now, true))
+	if line.Speaker == store.SpeakerBot && line.Kind == store.TranscriptKindText {
+		a.lastBotSeq, a.lastBotTurn = seq, line.UtteranceID
+	}
 }
 
 func (a *Actor) payload(line Line, seq int, at time.Time, isFinal bool) map[string]any {
@@ -345,7 +404,7 @@ func (r *Registry) For(callID uuid.UUID, callType events.CallType, answeredAt ti
 		store:      r.store,
 		pub:        r.pub,
 		log:        r.log,
-		in:         make(chan Line, mailboxDepth),
+		in:         make(chan any, mailboxDepth),
 		done:       make(chan struct{}),
 	}
 	go a.run()

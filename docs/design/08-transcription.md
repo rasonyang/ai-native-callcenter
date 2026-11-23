@@ -47,3 +47,5 @@ module must **declare** libspeexdsp. Undefined `speex_resampler_*` symbols are
 normal for a dynamically linked module and resolve at load, so a build that never
 linked the library looks fine (`module_exists` true, attach returning `+OK`) and
 then forwards frames at the wrong rate under the right label.
+
+A bot line's `content.heard` says what of it the caller heard: `NONE` for a turn replaced by a phase's line or cut before anything reached the leg, `PARTIAL` with `playedMs` for one cut mid-play. A line the caller heard whole carries neither. The mark lands on the stored row after the fact (the cut is learned later); the live stream is not told twice.
