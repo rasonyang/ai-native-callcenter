@@ -138,6 +138,15 @@ jobs:
         if: ${{ !cancelled() && steps.up.outcome == 'success' }}
         run: make e2e-callerfirst
 
+      # A callee who says "喂？" over the opening (#596): the mock provider's
+      # VAD mode cancels the turn and answers with a scripted transcript, and
+      # the application on the gateway profile refuses the reply's moving
+      # tool and says the opening again; five calls, about a minute and a
+      # half.
+      - name: Greeting-cut tests
+        if: ${{ !cancelled() && steps.up.outcome == 'success' }}
+        run: make e2e-greeting-cut
+
       # The run directory holds the simulator's record, the CDRs, the smoke
       # summary, the campaign report with its failure bundles, the capacity
       # reports and every container's log; a failed up, smoke, campaign or
