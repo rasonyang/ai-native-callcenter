@@ -32,6 +32,14 @@ curl -fsSL https://github.com/rasonyang/ai-native-callcenter/releases/latest/dow
 
 详见 [deploy/one-line-installer.md](deploy/one-line-installer.md)。
 
+## 设置提示词
+
+粘贴到 Claude Code、Codex、OpenCode 或 pi：
+
+```text
+用一行安装脚本在这台机器上安装 ai-native-callcenter 的最新发布版本，遵循 https://github.com/rasonyang/ai-native-callcenter/blob/main/docs/agent-install.md。问我用哪个语音厂商、电话交换机应对外宣告本机的哪个地址，以及是否要演示数据。永远不要让我把 API 密钥粘贴到这个对话里。当 `aicc doctor` 全部通过后，注册 `aicc skill` 打印的 skill，然后告诉我怎么登录、怎么打第一通测试电话。
+```
+
 ## 它做什么
 
 **用模型应答，而不是按键菜单。** AI 分支是应用内部的一个 SIP 端点：FreeSWITCH 把

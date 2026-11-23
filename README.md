@@ -35,6 +35,14 @@ curl -fsSL https://github.com/rasonyang/ai-native-callcenter/releases/latest/dow
 
 Details: [deploy/one-line-installer.md](deploy/one-line-installer.md).
 
+## Setup prompt
+
+Paste into Claude Code, Codex, OpenCode or pi:
+
+```text
+Install the latest release of ai-native-callcenter on this machine with its one-line installer, following https://github.com/rasonyang/ai-native-callcenter/blob/main/docs/agent-install.md. Ask me which voice provider to use and which of this host's addresses the phone switch should advertise, and whether I want the demo data. Never ask me to paste an API key into this conversation. When `aicc doctor` passes, register the skill printed by `aicc skill`, then tell me how to sign in and place a first test call.
+```
+
 ## What it does
 
 **Answers with a model, not a menu.** The AI leg is a SIP endpoint inside the
