@@ -4677,11 +4677,43 @@ export interface operations {
                     "application/json": components["schemas"]["CreateCallResponse"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            /** @description The request is malformed: unparseable body or an invalid identifier. Codes VALIDATION_FAILED, USER_DATA_TOO_LARGE. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            409: components["responses"]["Conflict"];
-            422: components["responses"]["UnprocessableEntity"];
+            /** @description The identity lacks the role, the CSRF header is missing, the account is suspended, or the account is not an agent. Codes FORBIDDEN, USER_SUSPENDED, NOT_CALL_PARTY. An AI_OUTBOUND request from a credential holding calls:create but not calls:create:ai answers INSUFFICIENT_SCOPE, params.requiredScope naming what is missing. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request collides with current state. For createCall: the DID is at its outbound line limit (DID_CHANNELS_EXHAUSTED), the deployment cannot dial out (OUTBOUND_NOT_CONFIGURED), or something the request names cannot run as asked (CONFLICT: no number marked default-outbound, a DID with no published flow, a callback somebody else holds, a phone not registered or not answering). Nothing was placed and no CDR was written. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The body parsed but a field is missing or invalid. For createCall: VALIDATION_FAILED names the offender in params.field (and params.rule where there is one), a listed destination is refused with NUMBER_ON_DNC, and a DID that cannot place calls with DID_NOT_OUTBOUND. Nothing was placed and no CDR was written. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             502: components["responses"]["BadGateway"];
             503: components["responses"]["ServiceUnavailable"];
         };
@@ -4887,7 +4919,15 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            409: components["responses"]["Conflict"];
+            /** @description The request collides with current state: the call has no leg at an extension to hang up (CONFLICT). An agent's own calls end through their leg; a call with no agent leg — one the bot still holds — cannot be ended through this operation. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             500: components["responses"]["InternalError"];
             503: components["responses"]["ServiceUnavailable"];
         };
@@ -4919,7 +4959,14 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             /** @description The call is INTERNAL: code OPERATION_NOT_ALLOWED_FOR_CALL_TYPE. One extension calling another has no third party to pass it to. Or a transfer of the caller is already on its way and the switch has not confirmed it: code TRANSFER_IN_PROGRESS. Nothing was sent; the outcome of the first arrives on the event stream. */
-            409: components["responses"]["Conflict"];
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
             503: components["responses"]["ServiceUnavailable"];
@@ -5719,8 +5766,24 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            409: components["responses"]["Conflict"];
-            422: components["responses"]["UnprocessableEntity"];
+            /** @description The request collides with current state: publishing this revision would hand a campaign that has not finished a way to a person — code CAMPAIGN_FLOW_HAS_TRANSFER, params.campaigns counting how many. Cancel or finish the campaign, or remove the transfer. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The body parsed but a field is missing or invalid. For publishFlow: VALIDATION_FAILED names the offender, and TERMINAL_ANNOUNCE_REQUIRED names the phases an announce would have to cover on this deployment's speech provider, in params.nodes. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             503: components["responses"]["ServiceUnavailable"];
         };
     };
@@ -7033,7 +7096,15 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            409: components["responses"]["Conflict"];
+            /** @description The request collides with current state: the patch would take the call past 32 keys. Nothing was written — the whole patch applies or none of it does — and params names the keys that would not fit. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             500: components["responses"]["InternalError"];
         };
     };
