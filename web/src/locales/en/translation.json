@@ -1155,7 +1155,7 @@
     "import": {
       "open": "Import contacts",
       "title": "Import contacts",
-      "hint": "Choose a CSV file or an Excel workbook. It is read in this browser and sent in requests of at most {{max}} rows. A number already on the campaign is reported as a duplicate, never added twice.",
+      "hint": "Choose a CSV file or an Excel workbook. It is read in this browser and sent in requests of at most {{max}} rows. A number already on the campaign is reported as a duplicate, never added twice. The first row is a header: a column headed 手机号 (or number) is enough, and other columns are ignored unless the campaign's flow reads them. A file edited in Excel can be saved as .xlsx and imported as it is.",
       "file": "CSV or Excel file",
       "choose": "Choose file",
       "noFile": "No file chosen.",
@@ -1221,7 +1221,10 @@
         "SLOT_UNKNOWN": "The flow does not read a field called {{detail}}.",
         "SLOT_TOO_LONG": "The value of {{detail}} is longer than 256 characters.",
         "ROW_SHAPE": "Wrong number of columns (found/expected {{detail}}); not sent."
-      }
+      },
+      "template": "Download template",
+      "templateNumber": "number",
+      "templateFile": "{{name}}-template.csv"
     }
   },
   "routeError": {
