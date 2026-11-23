@@ -23,7 +23,10 @@ import (
 
 // unansweredDeadline is the bound these tests run with: short, so a test does
 // not wait seconds for behaviour that takes seconds on a real call, and long
-// enough that the fake's round trip never trips it.
+// enough that the fake's read-loop answer never trips it. It only has to
+// cover the wire between the request leaving the client and the fake's hook
+// answering it — an answer the test goroutine sends itself would eat the
+// bound on a loaded runner (#397).
 const unansweredDeadline = 300 * time.Millisecond
 
 // The global meter provider can be set once; every test reads the same reader
@@ -130,19 +133,55 @@ func createOn(numbers ...int) func(f *fakeProvider, n int) {
 
 // startUnansweredCall starts a session on a profile with the short bound and
 // plays its greeting out, so the floor is free and every request from here on
-// is one the fake leaves unanswered unless onRequest answers it.
+// is one the fake leaves unanswered unless onRequest answers it. The opening's
+// own request is answered from the fake's read loop the moment it arrives, as
+// createOn answers later ones: no test-goroutine hop and no settle sits inside
+// the bound (#397).
 func startUnansweredCall(t *testing.T, profile Profile, cfg SessionConfig,
 	onRequest func(f *fakeProvider, n int)) (*fakeProvider, *Realtime, *syncBuffer) {
 	t.Helper()
-	f := newCountingFake(t, onRequest)
+	f := newCountingFake(t, func(f *fakeProvider, n int) {
+		if n == 1 {
+			f.send(map[string]any{"type": "response.created"})
+		}
+		if onRequest != nil {
+			onRequest(f, n)
+		}
+	})
 	session, logs := loggedSession(t, f, profile)
 	session.responseCreatedDeadline = unansweredDeadline
 	if err := session.Start(t.Context(), cfg); err != nil {
 		t.Fatalf("start: %v", err)
 	}
 	awaitEvent(t, session, EventTypeSessionReady)
-	finishTheOpeningTurn(t, f, session)
+	finishTheOpeningAnswered(t, f, session)
 	return f, session, logs
+}
+
+// finishTheOpeningAnswered closes the greeting out when the fake created it
+// itself: the test only waits for the turn and ends it. The wait is on the
+// session's state, not the ResponseStarted event, which the SessionReady
+// await may already have read (#397).
+func finishTheOpeningAnswered(t *testing.T, f *fakeProvider, session *Realtime) {
+	t.Helper()
+	awaitResponseOpen(t, session)
+	f.send(map[string]any{"type": "response.done",
+		"response": map[string]any{"status": "completed"}})
+	awaitEvent(t, session, EventTypeResponseDone)
+}
+
+// awaitResponseOpen waits for a response the fake created itself: the
+// ResponseStarted event may already be gone, so the wait is on the state.
+func awaitResponseOpen(t *testing.T, session *Realtime) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if session.isResponseOpen.Load() {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatal("the response the fake created was never reported open")
 }
 
 // endTurn waits for the response the fake created and ends it.
@@ -394,7 +433,10 @@ func TestALateCreatedAfterTheRetryMakesOneTurn(t *testing.T) {
 			f := newCountingFake(t, func(f *fakeProvider, n int) {
 				// The third request is the retry: the late original
 				// arrives just behind it, and the retry is refused.
-				if n == 3 {
+				switch n {
+				case 1:
+					f.send(map[string]any{"type": "response.created"})
+				case 3:
 					f.send(map[string]any{"type": "response.created"})
 					f.send(map[string]any{"type": "error", "error": tc.refusal})
 					close(refused)
@@ -406,7 +448,7 @@ func TestALateCreatedAfterTheRetryMakesOneTurn(t *testing.T) {
 				t.Fatalf("start: %v", err)
 			}
 			awaitEvent(t, session, EventTypeSessionReady)
-			finishTheOpeningTurn(t, f, session)
+			finishTheOpeningAnswered(t, f, session)
 			before := unansweredCounts(t, tc.profile.Name)
 
 			if err := session.SendToolResult("fc_1", `{"ok":true}`); err != nil {
@@ -454,6 +496,8 @@ func TestALateCreatedAfterTheRetryMakesOneTurn(t *testing.T) {
 func TestALineRefusedForALateTurnIsAskedForWhenThatTurnEnds(t *testing.T) {
 	f := newCountingFake(t, func(f *fakeProvider, n int) {
 		switch n {
+		case 1:
+			f.send(map[string]any{"type": "response.created"})
 		case 3:
 			f.send(map[string]any{"type": "response.created"})
 			f.send(map[string]any{"type": "error", "error": map[string]any{
@@ -470,7 +514,7 @@ func TestALineRefusedForALateTurnIsAskedForWhenThatTurnEnds(t *testing.T) {
 		t.Fatalf("start: %v", err)
 	}
 	awaitEvent(t, session, EventTypeSessionReady)
-	finishTheOpeningTurn(t, f, session)
+	finishTheOpeningAnswered(t, f, session)
 
 	if err := session.SendToolResult("fc_1", `{"ok":true}`); err != nil {
 		t.Fatalf("send tool result: %v", err)
