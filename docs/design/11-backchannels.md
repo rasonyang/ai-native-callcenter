@@ -169,10 +169,19 @@ a. Flow. If the verdict is `ack`, a tool call in the response that answers the
    unreliable. A question mark makes it words, and so does a fifth phrase: a
    longer run is a caller insisting. A fourth repeat of one phrase (对对对对),
    `content` to the classifier, is within the cap and so an acknowledged cut.
-   The run is judged on cuts only. The classifier is shared with the hold, which
-   keeps the single phrase: a held "嗯，可以" on openai is released as words and
-   answered, as words always were. The cost: a caller who meant yes with
-   "嗯，可以" over the bot's audio is asked again.
+   On the hold the run rule stands beside the shared classifier as it does on a
+   cut (`isAckRunSoFar`, #607): a held run is declined like a single
+   acknowledgement — no flush, no `Interrupt`, no `BARGE_IN`, the words are
+   recorded flagged `IsBackchannel` and are not answered — because a held run
+   released as words lets a moving tool run on an answer the caller never gave
+   (openai, "yeah, okay" over the opening's offer). A partial keeps holding
+   while it is, or is a proper prefix of, a run: whole phrases and then the
+   beginning of one more, so "yeah, o…" keeps holding and "yeah, I…" takes the
+   floor at once — a lone "i" is the pronoun, not a growing "isee". A run whose
+   final never arrives is released at the cap, and five phrases are words, both
+   as before. The cost is the one a single acknowledgement already pays: a
+   caller who meant yes with "yeah, okay" over the bot's audio is not answered
+   and hears the rest of the line.
    A greeting that cut the opening line (see "Greetings over the opening") is
    judged the same way: the tool is refused with its own reason (the caller only
    said hello as they picked up), and the opening is said again.

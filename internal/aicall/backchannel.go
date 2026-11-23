@@ -209,16 +209,43 @@ const ackRunMaxPhrases = 4
 // is needed between phrases, because the transcriber's is unreliable. A question
 // mark anywhere makes it words, as for classifyBackchannel, and so does no text.
 //
-// It is for the verdict on a cut only (judgeCut), where a run taken for an
-// answer moves the flow. The hold keeps the shared classifier's single phrase:
-// a held "嗯，可以" is released as words and answered, as words always were.
-// Pure; it runs off the frame path.
+// It is for the verdict on a cut (judgeCut), where a run taken for an answer
+// moves the flow, and beside the shared classifier on the hold (#607): a held
+// run is declined like a single acknowledgement, because a caller who meant
+// yes with "yeah, okay" over the bot's audio must not have a moving tool run
+// on it. Pure; it runs off the frame path.
 func isAckRun(language, text string) bool {
 	if strings.ContainsAny(text, "?？") {
 		return false
 	}
 	compact := compactAck(text)
 	return compact != "" && isPhraseRun(acknowledgements[flow.Lang(language)], compact, ackRunMaxPhrases)
+}
+
+// isAckRunSoFar reports whether a partial transcript is, or is a proper prefix
+// of, a run of acknowledgements: whole phrases and then the beginning of one
+// more, so "yeah, o…" keeps holding while "yeah, I…" takes the floor at once.
+// The trailing clause tells them apart only in what it can still become, and a
+// lone "i" is the pronoun, not a growing "isee": it is the one single letter
+// English writes as a whole word, so it is content. (Every other clause that
+// is a word of the language is either an acknowledgement whole — held — or no
+// prefix — released — already.)
+// Pure; it runs off the frame path.
+func isAckRunSoFar(language, text string) bool {
+	if strings.ContainsAny(text, "?？") {
+		return false
+	}
+	segments := ackSegments(text)
+	if len(segments) == 0 {
+		return true
+	}
+	if flow.Lang(language) == "en" && segments[len(segments)-1] == "i" {
+		return false
+	}
+	list := acknowledgements[flow.Lang(language)]
+	joined := strings.Join(segments, "")
+	return isPhraseRun(list, joined, ackRunMaxPhrases) ||
+		isPhraseRunPrefix(list, joined, ackRunMaxPhrases)
 }
 
 // greetingMaxWords is how many greeting words one utterance may be made of and
@@ -258,7 +285,7 @@ func classifyGreeting(language, text string) backchannelVerdict {
 	if isPhraseRun(list, joined, greetingMaxWords) {
 		return verdictGreeting
 	}
-	if isGreetingRunPrefix(list, joined, greetingMaxWords) {
+	if isPhraseRunPrefix(list, joined, greetingMaxWords) {
 		return verdictGreetingSoFar
 	}
 	return verdictContent
@@ -282,9 +309,9 @@ func isPhraseRun(list []string, s string, max int) bool {
 	return false
 }
 
-// isGreetingRunPrefix reports whether s is a proper prefix of a run of at most
-// max greeting words: whole words, then the beginning of one more.
-func isGreetingRunPrefix(list []string, s string, max int) bool {
+// isPhraseRunPrefix reports whether s is a proper prefix of a run of at most
+// max phrases of the list: whole phrases, then the beginning of one more.
+func isPhraseRunPrefix(list []string, s string, max int) bool {
 	if max == 0 {
 		return false
 	}
@@ -293,7 +320,7 @@ func isGreetingRunPrefix(list []string, s string, max int) bool {
 			return true
 		}
 		if strings.HasPrefix(s, word) && len(s) > len(word) &&
-			isGreetingRunPrefix(list, s[len(word):], max-1) {
+			isPhraseRunPrefix(list, s[len(word):], max-1) {
 			return true
 		}
 	}

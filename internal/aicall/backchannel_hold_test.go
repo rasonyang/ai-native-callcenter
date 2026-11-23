@@ -317,22 +317,30 @@ func TestWordsInAFinalTakeTheFloorAndAreAnsweredAtOnce(t *testing.T) {
 	}
 }
 
-// A run of different acknowledgements is words on the hold: the classifier's
-// single phrase stands there, so "嗯，可以" takes the floor and is answered,
-// whether a partial or the final shows it. Only a cut's verdict takes a run for
-// an acknowledgement (#600).
-func TestARunOfAcknowledgementsIsStillWordsOnTheHold(t *testing.T) {
+// A run of acknowledgements held over the bot's audio is declined like a
+// single one (#607): nothing is cut, nothing answers it, and the words are
+// recorded flagged IsBackchannel — a moving tool the model would make on them
+// never runs.
+func TestARunOfAcknowledgementsOnTheHoldIsDeclined(t *testing.T) {
 	for _, tt := range []struct {
 		name, language string
 		deltas         []string
 		final          string
 	}{
-		{"zh final", "zh", nil, "嗯，可以。"},
-		{"zh partials", "zh", []string{"嗯", "，可以"}, "嗯，可以。"},
-		{"en final", "en", nil, "Yeah, okay."},
+		{"single zh", "zh", nil, "嗯。"},
+		{"single en", "en", nil, "Okay."},
+		{"yeah okay", "en", nil, "Yeah, okay."},
+		{"okay sure", "en", nil, "Okay, sure."},
+		{"oh right", "en", nil, "Oh right."},
+		{"嗯可以", "zh", nil, "嗯，可以。"},
+		{"嗯好的", "zh", nil, "嗯，好的。"},
+		{"对是的", "zh", nil, "对，是的。"},
+		{"yeah okay no punctuation", "en", nil, "Yeah okay."},
+		{"嗯好的 no punctuation", "zh", nil, "嗯好的。"},
+		{"run via partials", "en", []string{"Yeah", ", o", "kay"}, "Yeah, okay."},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			r := startHold(t, tt.language, Config{BargeGuard: -1, NoInput: -1})
+			r := startHold(t, tt.language, Config{NoInput: -1})
 			r.botSpeaks()
 			r.started("item-1")
 			for _, d := range tt.deltas {
@@ -342,11 +350,46 @@ func TestARunOfAcknowledgementsIsStillWordsOnTheHold(t *testing.T) {
 			r.final("item-1", tt.final)
 			events := eventsUntil(t, r.session, EventTypeCustomerSaid, isFinalWords)
 
+			r.assertNoCut(t, events)
+			last := events[len(events)-1]
+			if !last.IsBackchannel || last.Text != tt.final {
+				t.Errorf("the final words = %+v, want the transcript flagged as a backchannel", last)
+			}
+			if got := r.model.declines(); !slices.Equal(got, []string{"item-1"}) {
+				t.Errorf("declined %v, want item-1", got)
+			}
+		})
+	}
+}
+
+// What is not a run of acknowledgements takes the floor and is answered, as
+// words always were: a caller insisting past the run's cap, a question, an
+// answer.
+func TestWhatIsNotAHeldRunTakesTheFloor(t *testing.T) {
+	for _, tt := range []struct {
+		name, language, final string
+	}{
+		{"yeah i want it", "en", "Yeah, I want it."},
+		{"okay let me think", "en", "Okay, let me think about it."},
+		{"嗯需要", "zh", "嗯，需要。"},
+		{"好的我考虑一下", "zh", "好的，我考虑一下。"},
+		{"okay question", "en", "Okay?"},
+		{"嗯 question", "zh", "嗯？"},
+		{"five acknowledgements", "en", "Yeah, yeah, yeah, yeah, yeah."},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			r := startHold(t, tt.language, Config{BargeGuard: -1, NoInput: -1})
+			r.botSpeaks()
+			r.started("item-1")
+			r.stopped("item-1")
+			r.final("item-1", tt.final)
+			events := eventsUntil(t, r.session, EventTypeCustomerSaid, isFinalWords)
+
 			if !slices.Contains(typesOf(events), EventTypeBargeIn) {
 				t.Errorf("events = %v, want the bot cut for the words", typesOf(events))
 			}
 			if events[len(events)-1].IsBackchannel {
-				t.Error("a run of acknowledgements was flagged as a backchannel on the hold")
+				t.Errorf("%q was flagged as a backchannel", tt.final)
 			}
 			if got := r.model.declines(); len(got) != 0 {
 				t.Errorf("declined %v, want none", got)
@@ -357,6 +400,56 @@ func TestARunOfAcknowledgementsIsStillWordsOnTheHold(t *testing.T) {
 			}
 		})
 	}
+}
+
+// A growing partial keeps the hold while it is, or is a proper prefix of, a
+// run ("yeah, o…"), and takes the floor at once when it cannot become one —
+// "yeah, I…" where the lone "i" is the pronoun, not a growing "isee".
+func TestAHeldRunsPartialsKeepHoldingUntilTheyCannot(t *testing.T) {
+	t.Run("yeah, o keeps holding", func(t *testing.T) {
+		r := startHold(t, "en", Config{NoInput: -1})
+		r.botSpeaks()
+		r.started("item-1")
+		r.partial("item-1", "Yeah")
+		r.partial("item-1", "Yeah, o")
+		r.stopped("item-1")
+		r.final("item-1", "Yeah, okay.")
+		events := eventsUntil(t, r.session, EventTypeCustomerSaid, isFinalWords)
+
+		r.assertNoCut(t, events)
+		if got := r.model.declines(); !slices.Equal(got, []string{"item-1"}) {
+			t.Errorf("declined %v, want item-1", got)
+		}
+	})
+	t.Run("yeah, I is released at once", func(t *testing.T) {
+		r := startHold(t, "en", Config{BargeGuard: -1, NoInput: -1})
+		r.botSpeaks()
+		r.started("item-1")
+		r.partial("item-1", "Yeah")
+		r.partial("item-1", "Yeah, I")
+		events := eventsUntil(t, r.session, EventTypeCallerSpeech, nil)
+
+		if !slices.Contains(typesOf(events), EventTypeBargeIn) {
+			t.Errorf("events = %v, want the bot cut on \"Yeah, I\"", typesOf(events))
+		}
+		if got := r.model.declines(); len(got) != 0 {
+			t.Errorf("declined %v, want none", got)
+		}
+	})
+	t.Run("a run whose final never arrives is released at the cap", func(t *testing.T) {
+		r := startHold(t, "en", Config{BargeGuard: -1, NoInput: -1})
+		r.botSpeaks()
+		r.started("item-1")
+		r.partial("item-1", "Yeah, o")
+		// The partial's own event says the utterance (and its cap) exists.
+		eventsUntil(t, r.session, EventTypeCustomerSaid, func(e Event) bool { return !e.IsFinal })
+		r.clock.advance(2000 * time.Millisecond)
+		events := eventsUntil(t, r.session, EventTypeCallerSpeech, nil)
+
+		if !slices.Contains(typesOf(events), EventTypeBargeIn) {
+			t.Errorf("events = %v, want the cap to take the floor", typesOf(events))
+		}
+	})
 }
 
 // Utterances overlap: the first is an acknowledgement, the second is words.

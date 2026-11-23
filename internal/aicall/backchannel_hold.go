@@ -413,7 +413,8 @@ func (s *Session) holdPartial(event provider.Event) {
 	s.bc.mu.Lock()
 	isOpening = u.isOverOpening
 	s.bc.mu.Unlock()
-	isWords := classifyBackchannel(s.cfg.Session.Language, text) == verdictContent
+	isWords := classifyBackchannel(s.cfg.Session.Language, text) == verdictContent &&
+		!isAckRunSoFar(s.cfg.Session.Language, text)
 	if isWords && isOpening {
 		isWords = classifyGreeting(s.cfg.Session.Language, text) == verdictContent
 	}
@@ -428,7 +429,8 @@ func (s *Session) holdPartial(event provider.Event) {
 // was a backchannel (declined, unanswered).
 func (s *Session) holdFinal(event provider.Event) (isBackchannel bool) {
 	text := strings.TrimSpace(event.Text)
-	isAck := text != "" && classifyBackchannel(s.cfg.Session.Language, text) == verdictAck
+	isAck := text != "" && (classifyBackchannel(s.cfg.Session.Language, text) == verdictAck ||
+		isAckRun(s.cfg.Session.Language, text))
 	isGreeting := text != "" && classifyGreeting(s.cfg.Session.Language, text) == verdictGreeting
 
 	s.bc.mu.Lock()
