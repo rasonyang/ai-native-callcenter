@@ -129,7 +129,13 @@ func NewCDRAssembler(ledger CDRLedger, queues QueueDirectory, storage RecordingS
 // whether to do more with it (post-call transcription). It must return at
 // once: it is called on the call's retirement goroutine.
 type RecordingOffer interface {
+	// OfferRecording is a booking made on the hangup path, which still holds
+	// the call's snapshot and can say who answered from it.
 	OfferRecording(rec store.Recording, hadBotLeg, hadHumanLeg bool)
+	// OfferBookedRecording is a booking made by the spool sweep, which has
+	// only the key and the call id; the recipient derives who answered from
+	// the CDR row.
+	OfferBookedRecording(rec store.Recording)
 }
 
 // SetRecordingOffer attaches the recipient of booked recordings. Nil, the

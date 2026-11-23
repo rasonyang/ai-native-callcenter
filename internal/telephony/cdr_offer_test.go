@@ -39,6 +39,10 @@ func (o offerRecorder) OfferRecording(rec store.Recording, bot, human bool) {
 	o.got <- offered{rec, bot, human}
 }
 
+func (o offerRecorder) OfferBookedRecording(rec store.Recording) {
+	o.got <- offered{rec: rec}
+}
+
 func recordedCall(parties ...PartySnapshot) Snapshot {
 	return Snapshot{CallID: uuid.Must(uuid.NewV7()), CallType: events.CallTypeInbound, CreatedAt: at(0), EndedAt: atPtr(60), Parties: parties}
 }

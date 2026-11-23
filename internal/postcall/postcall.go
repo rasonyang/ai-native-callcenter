@@ -278,6 +278,44 @@ func (s *Service) OfferRecording(rec store.Recording, hadBot, hadHuman bool) {
 	}()
 }
 
+// OfferBookedRecording is OfferRecording for a booking made without a call
+// snapshot — the spool sweep has only the key and the call id. Who answered
+// is derived from the CDR row, the way Plan derives it, through the one
+// helper they share so the two cannot drift (#523).
+func (s *Service) OfferBookedRecording(rec store.Recording) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	ctx := s.ctx
+	s.mu.Unlock()
+	if ctx == nil {
+		return
+	}
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(s.settle):
+		}
+		hadBot, hadHuman := s.sidesFromCDR(ctx, rec.CallID)
+		s.offer(ctx, rec.CallID, rec.ID, rec.DurationSec, hadBot, hadHuman)
+	}()
+}
+
+// sidesFromCDR derives who answered from the CDR row, as Plan does: a bot
+// spoke when the call carries bot seconds, a person when an agent is on it.
+// A row that cannot be read answers nobody — as it does for Plan.
+func (s *Service) sidesFromCDR(ctx context.Context, callID uuid.UUID) (hadBot, hadHuman bool) {
+	cdr, err := s.db.GetCDR(ctx, callID)
+	if err != nil {
+		return false, false
+	}
+	return cdr.BotSec > 0, len(cdr.AgentIDs) > 0
+}
+
 func (s *Service) offer(ctx context.Context, callID, recordingID uuid.UUID, durationSec int, hadBot, hadHuman bool) string {
 	v, err := s.Judge(ctx, callID, durationSec, hadBot, hadHuman)
 	if err != nil {
@@ -365,11 +403,7 @@ func (s *Service) Plan(ctx context.Context, since time.Time, limit int) ([]Candi
 		if len(out) >= limit {
 			break
 		}
-		hadBot, hadHuman := false, false
-		if cdr, err := s.db.GetCDR(ctx, r.CallID); err == nil {
-			hadBot = cdr.BotSec > 0
-			hadHuman = len(cdr.AgentIDs) > 0
-		}
+		hadBot, hadHuman := s.sidesFromCDR(ctx, r.CallID)
 		if r.DurationSec < s.cfg.MinDurationSec || (s.cfg.MaxDurationSec > 0 && r.DurationSec > s.cfg.MaxDurationSec) {
 			continue
 		}
