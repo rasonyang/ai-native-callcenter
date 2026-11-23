@@ -24,6 +24,27 @@ and `AICC_POSTCALL_TRANSCRIBE_*` settings; `.env.example` is their registry and
 their comments say what each one does. There is no partials switch: partials go
 to the stream and never to the database, always.
 
+## When a line happened
+
+A caller line's `occurredAt` — and so its `offsetMs` — is the line's arrival
+time: when the transcription reached the actor. Transcription trails speech,
+and a completed transcript can land after the bot's reaction to the words, so
+an arrival-stamped caller line can sit after a tool call that was a reaction
+to it.
+
+When the provider reports the speech start (`speech_started`'s `item_id` ↔
+the completed transcription's `item_id`; doubao has no speech-detect event,
+so its `input_audio_transcription.started` is the start), the caller's line
+carries `speechStartMs` beside `offsetMs` — the speaking time as the same
+kind of offset from the answer.
+
+`seq` is not reordered for this: it is the cursor a backfill resumes from,
+and a moved row is a missed line, so `seq` stays in receipt order. A caller
+line whose speaking time precedes the newest `occurredAt` already stored
+carries `content.transcribedLate` (and the same key on the stream payload),
+so a reviewer reads the later line as the reaction it was, not an answer to
+nothing.
+
 ## The module guard (the old §B.5 — `freeswitch/docker-entrypoint.sh` refers here)
 
 The guarantee is deliberately **not** "the module is in the image" — that is a

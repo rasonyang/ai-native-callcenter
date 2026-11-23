@@ -4,18 +4,78 @@
       "name": "C01_LEAD_HIGH",
       "instructionsContain": "E2E script: C01_LEAD_HIGH.",
       "steps": [
-        {"op": "SPEAK", "durationSec": 2},
-        {"op": "HEAR", "text": "Yes, please have someone call me back.", "afterSec": 4},
-        {"op": "CALL_TOOL", "toolName": "record_lead", "args": {"intent": "HIGH", "notes": "e2e C01: the customer asked to be called back"}},
-        {"op": "AWAIT_TOOL_RESULT", "timeoutSec": 10},
-        {"op": "SPEAK", "durationSec": 1},
-        {"op": "END_SESSION"}
+        {
+          "op": "SPEAK",
+          "durationSec": 2
+        },
+        {
+          "op": "HEAR",
+          "text": "Yes, please have someone call me back.",
+          "afterSec": 4
+        },
+        {
+          "op": "CALL_TOOL",
+          "toolName": "record_lead",
+          "args": {
+            "intent": "HIGH",
+            "notes": "e2e C01: the customer asked to be called back"
+          }
+        },
+        {
+          "op": "AWAIT_TOOL_RESULT",
+          "timeoutSec": 10
+        },
+        {
+          "op": "SPEAK",
+          "durationSec": 1
+        },
+        {
+          "op": "END_SESSION"
+        }
+      ]
+    },
+    {
+      "name": "C02_LATE_TRANSCRIPT",
+      "instructionsContain": "E2E script: C02_LATE_TRANSCRIPT.",
+      "steps": [
+        {
+          "op": "SPEAK",
+          "durationSec": 2
+        },
+        {
+          "op": "HEAR",
+          "text": "I already told you no.",
+          "afterSec": 2,
+          "transcriptDelaySec": 0.5
+        },
+        {
+          "op": "CALL_TOOL",
+          "toolName": "record_lead",
+          "args": {
+            "intent": "LOW",
+            "notes": "e2e C02: the caller declined before the transcript landed"
+          }
+        },
+        {
+          "op": "AWAIT_TOOL_RESULT",
+          "timeoutSec": 10
+        },
+        {
+          "op": "SPEAK",
+          "durationSec": 1
+        },
+        {
+          "op": "END_SESSION"
+        }
       ]
     },
     {
       "name": "DEFAULT_SPEAK",
       "steps": [
-        {"op": "SPEAK", "durationSec": 4}
+        {
+          "op": "SPEAK",
+          "durationSec": 4
+        }
       ]
     }
   ]

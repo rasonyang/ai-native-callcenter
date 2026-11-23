@@ -296,3 +296,89 @@ func TestCurrentStateIsIdleUntilSomethingSaysOtherwise(t *testing.T) {
 	}
 	flush()
 }
+
+// A caller's transcript arrives after the words were said — after the bot may
+// already have reacted to them. offsetMs stays the arrival offset (that is
+// what it is), the speaking time rides beside it as speechStartMs, and the
+// line transcribed after a later one is marked, so the reviewer reads the
+// tool call as a reaction to those words rather than an answer to nothing.
+func TestALateTranscribedCallerLineIsMarked(t *testing.T) {
+	t.Parallel()
+	actor, st, pub, flush := newFixture(t)
+
+	actor.Post(final(store.SpeakerBot, "a one-sentence pitch"))
+	actor.Post(Line{Speaker: store.SpeakerBot, Kind: store.TranscriptKindToolCall,
+		Text: "record_lead", Content: map[string]any{"name": "record_lead"}, IsFinal: true})
+	// The words the tool call answered, spoken before the pitch ended but
+	// transcribed 600 ms after it landed.
+	spoken := time.Now().UTC().Add(-3600 * time.Millisecond)
+	actor.Post(Line{Speaker: store.SpeakerCustomer, Kind: store.TranscriptKindText,
+		Text: "an objection", IsFinal: true, SpokenAt: spoken})
+	actor.Post(final(store.SpeakerCustomer, "said plainly now"))
+	flush()
+
+	lines := st.all()
+	if len(lines) != 4 {
+		t.Fatalf("stored %d lines, want 4", len(lines))
+	}
+	for i, l := range lines {
+		if l.Seq != i+1 {
+			t.Errorf("line %d has seq %d, want %d — seq stays in receipt order", i, l.Seq, i+1)
+		}
+	}
+	late := lines[2]
+	if !late.OccurredAt.After(spoken) {
+		t.Errorf("occurredAt = %v stays the arrival time (after the speaking time %v)",
+			late.OccurredAt, spoken)
+	}
+	if late.SpeechStartMs == nil || *late.SpeechStartMs <= 0 {
+		t.Errorf("speechStartMs = %v, want the offset from the answer (answeredAt is 10 s ago)",
+			late.SpeechStartMs)
+	}
+	if late.Content["transcribedLate"] != true {
+		t.Errorf("a caller line transcribed after the tool call it caused is not marked; content = %v",
+			late.Content)
+	}
+	for _, i := range []int{0, 1, 3} {
+		if lines[i].Content["transcribedLate"] != nil {
+			t.Errorf("line %d is marked transcribedLate though it was not late", i)
+		}
+	}
+	if lines[3].SpeechStartMs != nil {
+		t.Error("a caller line whose speaking time nobody reported carries none")
+	}
+	// Both the mark and the speaking offset reach the live stream.
+	var sawLate, sawStart bool
+	for _, ev := range pub.all() {
+		if ev.Payload["transcribedLate"] == true {
+			sawLate = true
+		}
+		if _, ok := ev.Payload["speechStartMs"]; ok {
+			sawStart = true
+		}
+	}
+	if !sawLate || !sawStart {
+		t.Errorf("the stream carried transcribedLate=%v speechStartMs=%v, want both", sawLate, sawStart)
+	}
+}
+
+// A speaking time from the future is clock skew on the producer's side; the
+// line carries no speechStartMs rather than a time it could not have happened
+// at.
+func TestAFutureSpeakingTimeCarriesNoOffset(t *testing.T) {
+	t.Parallel()
+	actor, st, _, flush := newFixture(t)
+
+	actor.Post(Line{Speaker: store.SpeakerCustomer, Kind: store.TranscriptKindText,
+		Text: "words", IsFinal: true, SpokenAt: time.Now().UTC().Add(time.Hour)})
+	flush()
+
+	lines := st.all()
+	if len(lines) != 1 {
+		t.Fatalf("stored %d lines, want 1", len(lines))
+	}
+	if lines[0].SpeechStartMs != nil {
+		t.Errorf("a future speaking time produced speechStartMs %v, want none",
+			*lines[0].SpeechStartMs)
+	}
+}

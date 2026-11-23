@@ -88,6 +88,13 @@ type Event struct {
 	Text    string
 	IsFinal bool
 
+	// SpokenAt is, on a CUSTOMER_SAID, when the caller's speech began: the
+	// time the provider reported it starting (Event.StartedAt), which can be
+	// well before the transcript that carries these words arrived — after the
+	// model may already have reacted to them. Zero where the provider reports
+	// no speech start.
+	SpokenAt time.Time
+
 	// IsCallerUnanswered is set on a NO_INPUT from the same decision that logs
 	// "caller turn went unanswered reason=NO_INPUT": a turn measurement was
 	// open and no response started since speech_stopped. The caller spoke and

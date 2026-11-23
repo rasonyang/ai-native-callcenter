@@ -385,13 +385,15 @@ func (s *Session) onInputTranscript(event provider.Event) {
 	if isBackchannel {
 		// Recorded as the caller's words, flagged; nothing else hears it: not
 		// the turn timer (#448's cue), not the flow, not the dead-air watch.
-		s.emit(Event{Type: EventTypeCustomerSaid, Text: event.Text, IsFinal: true, IsBackchannel: true})
+		s.emit(Event{Type: EventTypeCustomerSaid, Text: event.Text, IsFinal: true,
+			IsBackchannel: true, SpokenAt: event.StartedAt})
 		return
 	}
 	s.mu.Lock()
 	s.timer.onCallerWords(event.Text)
 	s.mu.Unlock()
-	s.emit(Event{Type: EventTypeCustomerSaid, Text: event.Text, IsFinal: true, openingCut: openingCut})
+	s.emit(Event{Type: EventTypeCustomerSaid, Text: event.Text, IsFinal: true,
+		openingCut: openingCut, SpokenAt: event.StartedAt})
 }
 
 // holdPartial accumulates a partial transcript on its held utterance; words

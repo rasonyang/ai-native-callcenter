@@ -11,6 +11,7 @@
 #   deploy/e2e/e2e.sh frequency  the test-number case: two campaigns in a row on a listed number, in an application start with a 24 h frequency window (#578)
 #   deploy/e2e/e2e.sh carrier-timeout  the carrier's 408 case: a campaign of its own (ring 45 s, the default 2 h NO_ANSWER interval) whose callee rings, then answers 408 after 25 s (#576)
 #   deploy/e2e/e2e.sh callerfirst  the caller-first case: AI outbound calls on a flow with global.isCallerFirst to callees that greet at 800 ms, at 2.6 s, never, and late (#594)
+#   deploy/e2e/e2e.sh transcriptlag  the late-transcript case: the mock completes the caller's transcription 500 ms after the tool call it caused; the caller line is marked and keeps its speaking time (#587)
 #   deploy/e2e/e2e.sh down    collect logs, remove containers, volumes, network
 #   deploy/e2e/e2e.sh config  print the resolved compose configuration
 #
@@ -445,6 +446,29 @@ cmd_callerfirst() {
   fi
 }
 
+cmd_transcriptlag() {
+  [ -n "$(compose ps -q aicc 2>/dev/null)" ] || { say "the environment is not up; run: make e2e-up"; exit 1; }
+  render
+  local id t0=$SECONDS
+  id="transcriptlag-$(date -u +%Y%m%dT%H%M%SZ)"
+  # A fresh record: the simulator answers a number's n-th INVITE with the n-th
+  # behaviour, counted from its start, and the driver refuses one that has
+  # seen the number.
+  compose restart calleesim >&2
+  if compose run --rm -T --no-deps --entrypoint /usr/local/bin/aicc-e2e-campaign.test driver \
+      -test.v -test.run '^TestTranscriptLag$' -test.timeout 10m \
+      -e2e.api "http://$APP_IP:8080" -e2e.calleesim "http://$CALLEE_IP:8771" -e2e.mockprovider "http://$MOCK_IP:9099" \
+      -e2e.scenario /etc/e2e/scenario.json \
+      -e2e.flow /etc/e2e/flow.json -e2e.username admin -e2e.out "/run/e2e/$id" >&2; then
+    say "transcript-lag case passed in $((SECONDS - t0)) s. Results: $RUN/$id"
+  else
+    local rc=$?
+    collect_logs
+    say "transcript-lag case FAILED after $((SECONDS - t0)) s. Report and logs: $RUN"
+    exit "$rc"
+  fi
+}
+
 cmd_down() {
   if [ -n "$(compose ps -aq 2>/dev/null)" ]; then collect_logs; fi
   compose down -v --remove-orphans >&2
@@ -468,6 +492,7 @@ case "${1:-}" in
   dailycap) cmd_dailycap ;;
   carrier-timeout) cmd_carrier_timeout ;;
   callerfirst) cmd_callerfirst ;;
+  transcriptlag) cmd_transcriptlag ;;
   down) cmd_down ;;
   config) build_tools; render; cat "$RUN/compose.json" ;;
   *) echo "usage: $0 up|smoke|campaign|capacity|frequency|dailycap|carrier-timeout|callerfirst|down|config" >&2; exit 2 ;;

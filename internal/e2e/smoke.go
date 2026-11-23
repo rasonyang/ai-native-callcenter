@@ -31,7 +31,7 @@ const silenceRMS = 50
 
 // keyScopes are what the smoke's API key may do: place an AI call, read the
 // ledger, and provision the flow and number the call needs. Nothing else.
-var keyScopes = []string{"calls:create", "calls:create:ai", "history:read:all", "config:read", "config:write"}
+var keyScopes = []string{"calls:create", "calls:create:ai", "history:read:all", "history:read:own", "config:read", "config:write"}
 
 // SmokeConfig is everything the smoke needs to know about its environment.
 type SmokeConfig struct {

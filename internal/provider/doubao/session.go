@@ -158,6 +158,12 @@ type Session struct {
 	// turnAudioBytes is what the turn has actually carried, for the guard on a
 	// turn that carried none.
 	turnAudioBytes int
+	// speechStartedAt is when the caller's transcription started: this
+	// protocol has no speech-detection event, so its .started IS the caller
+	// starting, and the completed transcript carries that time so the caller's
+	// line is stamped when the words were said, not when they were
+	// transcribed (#587). Written by the read loop alone.
+	speechStartedAt time.Time
 	// pendingSpeak is the line this client handed the engine and is waiting to
 	// hear it start. There is at most one: a second commit kills the first.
 	// lineCommittedAt is when it was handed over.

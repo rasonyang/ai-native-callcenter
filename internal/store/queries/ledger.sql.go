@@ -705,25 +705,27 @@ func (q *Queries) InsertRecording(ctx context.Context, arg InsertRecordingParams
 
 const insertTranscriptLine = `-- name: InsertTranscriptLine :exec
 INSERT INTO transcripts (call_id, seq, occurred_at, speaker, kind, content,
-                         party_id, agent_id, offset_ms, language, source, provider, utterance_id)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+                         party_id, agent_id, offset_ms, language, source, provider, utterance_id,
+                         speech_start_ms)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
 ON CONFLICT DO NOTHING
 `
 
 type InsertTranscriptLineParams struct {
-	CallID      uuid.UUID          `json:"callId"`
-	Seq         int32              `json:"seq"`
-	OccurredAt  pgtype.Timestamptz `json:"occurredAt"`
-	Speaker     string             `json:"speaker"`
-	Kind        string             `json:"kind"`
-	Content     []byte             `json:"content"`
-	PartyID     *uuid.UUID         `json:"partyId"`
-	AgentID     *uuid.UUID         `json:"agentId"`
-	OffsetMs    int32              `json:"offsetMs"`
-	Language    string             `json:"language"`
-	Source      string             `json:"source"`
-	Provider    string             `json:"provider"`
-	UtteranceID string             `json:"utteranceId"`
+	CallID        uuid.UUID          `json:"callId"`
+	Seq           int32              `json:"seq"`
+	OccurredAt    pgtype.Timestamptz `json:"occurredAt"`
+	Speaker       string             `json:"speaker"`
+	Kind          string             `json:"kind"`
+	Content       []byte             `json:"content"`
+	PartyID       *uuid.UUID         `json:"partyId"`
+	AgentID       *uuid.UUID         `json:"agentId"`
+	OffsetMs      int32              `json:"offsetMs"`
+	Language      string             `json:"language"`
+	Source        string             `json:"source"`
+	Provider      string             `json:"provider"`
+	UtteranceID   string             `json:"utteranceId"`
+	SpeechStartMs *int32             `json:"speechStartMs"`
 }
 
 // InsertTranscriptLine writes one line as it is spoken. The conflict target is
@@ -744,6 +746,7 @@ func (q *Queries) InsertTranscriptLine(ctx context.Context, arg InsertTranscript
 		arg.Source,
 		arg.Provider,
 		arg.UtteranceID,
+		arg.SpeechStartMs,
 	)
 	return err
 }
@@ -1120,7 +1123,7 @@ func (q *Queries) ListRecordingsByCall(ctx context.Context, callID uuid.UUID) ([
 }
 
 const listTranscriptSince = `-- name: ListTranscriptSince :many
-SELECT id, call_id, seq, occurred_at, speaker, kind, content, party_id, agent_id, offset_ms, language, source, provider, utterance_id FROM transcripts
+SELECT id, call_id, seq, occurred_at, speaker, kind, content, party_id, agent_id, offset_ms, language, source, provider, utterance_id, speech_start_ms FROM transcripts
 WHERE call_id = $1 AND seq > $2
 ORDER BY seq
 LIMIT $3
@@ -1158,6 +1161,7 @@ func (q *Queries) ListTranscriptSince(ctx context.Context, arg ListTranscriptSin
 			&i.Source,
 			&i.Provider,
 			&i.UtteranceID,
+			&i.SpeechStartMs,
 		); err != nil {
 			return nil, err
 		}
@@ -1170,7 +1174,7 @@ func (q *Queries) ListTranscriptSince(ctx context.Context, arg ListTranscriptSin
 }
 
 const listTranscripts = `-- name: ListTranscripts :many
-SELECT id, call_id, seq, occurred_at, speaker, kind, content, party_id, agent_id, offset_ms, language, source, provider, utterance_id FROM transcripts WHERE call_id = $1 ORDER BY seq
+SELECT id, call_id, seq, occurred_at, speaker, kind, content, party_id, agent_id, offset_ms, language, source, provider, utterance_id, speech_start_ms FROM transcripts WHERE call_id = $1 ORDER BY seq
 `
 
 func (q *Queries) ListTranscripts(ctx context.Context, callID uuid.UUID) ([]Transcript, error) {
@@ -1197,6 +1201,7 @@ func (q *Queries) ListTranscripts(ctx context.Context, callID uuid.UUID) ([]Tran
 			&i.Source,
 			&i.Provider,
 			&i.UtteranceID,
+			&i.SpeechStartMs,
 		); err != nil {
 			return nil, err
 		}

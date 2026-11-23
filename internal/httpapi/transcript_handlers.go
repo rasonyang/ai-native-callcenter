@@ -145,6 +145,10 @@ func transcriptLineToAPI(line store.TranscriptLine) api.TranscriptLine {
 	if out.Content == nil {
 		out.Content = map[string]any{}
 	}
+	if line.SpeechStartMs != nil {
+		out.SpeechStartMs = new(int64)
+		*out.SpeechStartMs = int64(*line.SpeechStartMs)
+	}
 	if line.Language != "" {
 		out.Language = &line.Language
 	}

@@ -9,6 +9,18 @@ carries the one-line installer's files.
 
 ### Fixed
 
+- **A caller's transcript line could land after the bot's reaction to it**
+  (#587). A caller line is stamped when its transcription arrives, and the
+  completed transcription trails the speech — and can trail the bot's reaction
+  — so a transcript could read as if the bot had answered before anyone spoke.
+  A caller line now carries `speechStartMs` beside `offsetMs` when the provider
+  reports the speech start (the realtime clients and doubao), and a line
+  transcribed after a later-stored one is marked `content.transcribedLate` —
+  on the stored row and the `CALL_TRANSCRIPT` stream payload — so a reviewer
+  reads the later line as the reaction it was. `seq` stays in receipt order;
+  `offsetMs` remains the arrival offset. `make e2e-transcriptlag` plays the
+  production shape on the mock provider (a transcription completed 500 ms
+  after the tool call it caused) and runs in CI.
 - **A machine that answers a campaign call records no lead** (#409). On a call
   the platform placed to a customer, each final transcript of the callee's
   words is now checked against a built-in Chinese and English list of what a
