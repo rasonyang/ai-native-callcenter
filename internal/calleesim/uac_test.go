@@ -278,8 +278,10 @@ func remoteRTP(t *testing.T, r uacResponse) *net.UDPAddr {
 }
 
 // sendDownlink plays the caller's audio: silent frames for lead, then a tone
-// for toneFor. It returns when the last frame is sent or ctx ends.
-func (u *testUAC) sendDownlink(ctx context.Context, remote *net.UDPAddr, lead, toneFor time.Duration) {
+// for toneFor. It returns the number of frames sent when the last frame is
+// sent or ctx ends — under load the pacing lags, so a receiver-side check
+// measures against what was sent, not what the durations asked for.
+func (u *testUAC) sendDownlink(ctx context.Context, remote *net.UDPAddr, lead, toneFor time.Duration) int {
 	tone := newToneSource(media.LawMu, 440)
 	silence := media.SilenceFrame(media.LawMu)
 	packet := make([]byte, 12+media.FrameSamples)
@@ -292,7 +294,7 @@ func (u *testUAC) sendDownlink(ctx context.Context, remote *net.UDPAddr, lead, t
 	for now := range ticker.C {
 		elapsed := now.Sub(start)
 		if elapsed >= lead+toneFor || ctx.Err() != nil {
-			return
+			return int(seq) - 1000
 		}
 		frame := silence
 		if elapsed >= lead {
@@ -306,6 +308,7 @@ func (u *testUAC) sendDownlink(ctx context.Context, remote *net.UDPAddr, lead, t
 		seq++
 		ts += media.FrameSamples
 	}
+	return int(seq) - 1000
 }
 
 func eventually(t *testing.T, what string, cond func() bool) {
