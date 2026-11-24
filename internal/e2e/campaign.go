@@ -251,7 +251,10 @@ func CheckScenarioCoversCases(s *calleesim.Scenario, regions []Region, cases []C
 			if b.Final() != wantFinal {
 				problems = append(problems, fmt.Sprintf("%s: the scenario answers %d, want %d", label, b.Final(), wantFinal))
 			}
-			if len(b.Provisionals) != 1 || b.Provisionals[0].Status != cs.Provisional || b.Provisionals[0].EarlyMedia != cs.EarlyMedia {
+			switch {
+			case cs.Provisional == 0 && len(b.Provisionals) != 0:
+				problems = append(problems, fmt.Sprintf("%s: the scenario sends provisionals %+v, want none", label, b.Provisionals))
+			case cs.Provisional != 0 && (len(b.Provisionals) != 1 || b.Provisionals[0].Status != cs.Provisional || b.Provisionals[0].EarlyMedia != cs.EarlyMedia):
 				problems = append(problems, fmt.Sprintf("%s: the scenario's provisionals are %+v, want one %d (early media %v)", label, b.Provisionals, cs.Provisional, cs.EarlyMedia))
 			}
 		}
@@ -603,7 +606,8 @@ func (d *driver) provision(ctx context.Context, r Region, usedDIDs map[string]bo
 	}
 	outcomes := []api.CampaignRetryOutcome{
 		api.CampaignRetryOutcomeNOANSWER, api.CampaignRetryOutcomeBUSY, api.CampaignRetryOutcomeREJECTED,
-		api.CampaignRetryOutcomeUNKNOWN, api.CampaignRetryOutcomeTRANSIENT, api.CampaignRetryOutcomeORIGINATEFAILED,
+		api.CampaignRetryOutcomeUNKNOWN, api.CampaignRetryOutcomeTRANSIENT, api.CampaignRetryOutcomeLINEREJECTED,
+		api.CampaignRetryOutcomeORIGINATEFAILED,
 	}
 	cc := r.CountryCode
 	if err := d.c.do(ctx, http.MethodPost, "/campaigns", api.CampaignWrite{

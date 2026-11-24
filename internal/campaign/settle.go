@@ -103,8 +103,8 @@ type Settlement struct {
 //     system_failures at maxSystemRetries for a system one) ends it as
 //     EXHAUSTED;
 //   - otherwise it stays ACTIVE, due at finishedAt plus the outcome's
-//     interval (the transient backoff for TRANSIENT and ORIGINATE_FAILED,
-//     counted by system_failures) and moved into the schedule. RetryAt keeps
+//     interval (the transient backoff for TRANSIENT, LINE_REJECTED and
+//     ORIGINATE_FAILED, counted by system_failures) and moved into the schedule. RetryAt keeps
 //     the time before the move.
 func Settle(p RetryPolicy, c Counters, o Outcome, lead LeadIntent, finishedAt time.Time, s Schedule) Settlement {
 	switch {

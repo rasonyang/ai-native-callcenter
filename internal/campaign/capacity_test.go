@@ -76,8 +76,11 @@ func TestDoesRingTable(t *testing.T) {
 	rang := map[Outcome]bool{
 		OutcomeAnswered: true, OutcomeBotFailed: true, OutcomeOverflow: true,
 		OutcomeNoAnswer: true, OutcomeBusy: true, OutcomeRejected: true,
-		OutcomeUnknown: false, OutcomeTransient: false, OutcomeOriginateFailed: false,
+		OutcomeUnknown: false, OutcomeTransient: false, OutcomeLineRejected: false, OutcomeOriginateFailed: false,
 		OutcomeInvalidNumber: false, OutcomeDNCSkipped: false,
+	}
+	if len(rang) != len(AllOutcomes()) {
+		t.Errorf("the table has %d outcomes and there are %d", len(rang), len(AllOutcomes()))
 	}
 	for o, want := range rang {
 		if DoesRing(o) != want {
@@ -137,7 +140,7 @@ func TestCapacityStatsWindowsSlide(t *testing.T) {
 
 func TestCapacityStatsIgnoresWhatSaysNothing(t *testing.T) {
 	s := NewCapacityStats(0.01, 0.03)
-	for _, o := range []Outcome{OutcomeUnknown, OutcomeTransient, OutcomeOriginateFailed, OutcomeInvalidNumber, OutcomeDNCSkipped} {
+	for _, o := range []Outcome{OutcomeUnknown, OutcomeTransient, OutcomeLineRejected, OutcomeOriginateFailed, OutcomeInvalidNumber, OutcomeDNCSkipped} {
 		for i := 0; i < 100; i++ {
 			s.Observe(o)
 		}

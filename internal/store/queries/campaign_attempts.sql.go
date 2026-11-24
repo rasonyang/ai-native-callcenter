@@ -188,7 +188,7 @@ const expireLeadJudgement = `-- name: ExpireLeadJudgement :one
 UPDATE campaign_attempts
 SET lead_verdict = 'NOT_JUDGED', lead_verdict_reason = NULL
 WHERE call_id = $1 AND lead_verdict = 'PENDING' AND lead_judge_deadline_at <= now()
-RETURNING id, campaign_id, campaign_contact_id, number_e164, call_id, leg_id, originate_job_id, state, outcome, hangup_cause, talk_sec, is_touched, lead_intent, lead_notes, started_at, finished_at, is_test_number, declared_lead_intent, lead_verdict, lead_verdict_reason, lead_judge_deadline_at
+RETURNING id, campaign_id, campaign_contact_id, number_e164, call_id, leg_id, originate_job_id, state, outcome, hangup_cause, talk_sec, is_touched, lead_intent, lead_notes, started_at, finished_at, is_test_number, declared_lead_intent, lead_verdict, lead_verdict_reason, lead_judge_deadline_at, sip_status
 `
 
 // A judgement whose deadline passed with no verdict: the lead the flow
@@ -218,6 +218,7 @@ func (q *Queries) ExpireLeadJudgement(ctx context.Context, callID uuid.UUID) (Ca
 		&i.LeadVerdict,
 		&i.LeadVerdictReason,
 		&i.LeadJudgeDeadlineAt,
+		&i.SIPStatus,
 	)
 	return i, err
 }
@@ -253,7 +254,7 @@ func (q *Queries) ExpiredLeadJudgements(ctx context.Context, rowLimit int32) ([]
 const finishCampaignAttempt = `-- name: FinishCampaignAttempt :exec
 UPDATE campaign_attempts
 SET state = 'FINISHED', outcome = $2, hangup_cause = $3, talk_sec = $4,
-    is_touched = $5, finished_at = $6
+    is_touched = $5, finished_at = $6, sip_status = $7::int
 WHERE id = $1
 `
 
@@ -264,8 +265,11 @@ type FinishCampaignAttemptParams struct {
 	TalkSec     *int32             `json:"talkSec"`
 	IsTouched   bool               `json:"isTouched"`
 	FinishedAt  pgtype.Timestamptz `json:"finishedAt"`
+	SIPStatus   *int32             `json:"sipStatus"`
 }
 
+// sip_status is the far end's final SIP status the CDR's tech carried; NULL
+// for none, and for an ending with no CDR.
 func (q *Queries) FinishCampaignAttempt(ctx context.Context, arg FinishCampaignAttemptParams) error {
 	_, err := q.db.Exec(ctx, finishCampaignAttempt,
 		arg.ID,
@@ -274,12 +278,13 @@ func (q *Queries) FinishCampaignAttempt(ctx context.Context, arg FinishCampaignA
 		arg.TalkSec,
 		arg.IsTouched,
 		arg.FinishedAt,
+		arg.SIPStatus,
 	)
 	return err
 }
 
 const getAttemptByCall = `-- name: GetAttemptByCall :one
-SELECT id, campaign_id, campaign_contact_id, number_e164, call_id, leg_id, originate_job_id, state, outcome, hangup_cause, talk_sec, is_touched, lead_intent, lead_notes, started_at, finished_at, is_test_number, declared_lead_intent, lead_verdict, lead_verdict_reason, lead_judge_deadline_at FROM campaign_attempts WHERE call_id = $1
+SELECT id, campaign_id, campaign_contact_id, number_e164, call_id, leg_id, originate_job_id, state, outcome, hangup_cause, talk_sec, is_touched, lead_intent, lead_notes, started_at, finished_at, is_test_number, declared_lead_intent, lead_verdict, lead_verdict_reason, lead_judge_deadline_at, sip_status FROM campaign_attempts WHERE call_id = $1
 `
 
 func (q *Queries) GetAttemptByCall(ctx context.Context, callID uuid.UUID) (CampaignAttempt, error) {
@@ -307,6 +312,7 @@ func (q *Queries) GetAttemptByCall(ctx context.Context, callID uuid.UUID) (Campa
 		&i.LeadVerdict,
 		&i.LeadVerdictReason,
 		&i.LeadJudgeDeadlineAt,
+		&i.SIPStatus,
 	)
 	return i, err
 }
@@ -346,7 +352,7 @@ INSERT INTO campaign_attempts (id, campaign_id, campaign_contact_id, number_e164
                                call_id, leg_id, started_at, is_test_number)
 VALUES ($1, $2, $3, $4, $5, $6, $7,
         EXISTS (SELECT 1 FROM test_numbers t WHERE t.number_e164 = $4))
-RETURNING id, campaign_id, campaign_contact_id, number_e164, call_id, leg_id, originate_job_id, state, outcome, hangup_cause, talk_sec, is_touched, lead_intent, lead_notes, started_at, finished_at, is_test_number, declared_lead_intent, lead_verdict, lead_verdict_reason, lead_judge_deadline_at
+RETURNING id, campaign_id, campaign_contact_id, number_e164, call_id, leg_id, originate_job_id, state, outcome, hangup_cause, talk_sec, is_touched, lead_intent, lead_notes, started_at, finished_at, is_test_number, declared_lead_intent, lead_verdict, lead_verdict_reason, lead_judge_deadline_at, sip_status
 `
 
 type InsertCampaignAttemptParams struct {
@@ -394,12 +400,13 @@ func (q *Queries) InsertCampaignAttempt(ctx context.Context, arg InsertCampaignA
 		&i.LeadVerdict,
 		&i.LeadVerdictReason,
 		&i.LeadJudgeDeadlineAt,
+		&i.SIPStatus,
 	)
 	return i, err
 }
 
 const lockAttemptByCall = `-- name: LockAttemptByCall :one
-SELECT id, campaign_id, campaign_contact_id, number_e164, call_id, leg_id, originate_job_id, state, outcome, hangup_cause, talk_sec, is_touched, lead_intent, lead_notes, started_at, finished_at, is_test_number, declared_lead_intent, lead_verdict, lead_verdict_reason, lead_judge_deadline_at FROM campaign_attempts WHERE call_id = $1 FOR UPDATE
+SELECT id, campaign_id, campaign_contact_id, number_e164, call_id, leg_id, originate_job_id, state, outcome, hangup_cause, talk_sec, is_touched, lead_intent, lead_notes, started_at, finished_at, is_test_number, declared_lead_intent, lead_verdict, lead_verdict_reason, lead_judge_deadline_at, sip_status FROM campaign_attempts WHERE call_id = $1 FOR UPDATE
 `
 
 // The finish routine's lock. A CDR and a standalone finish for one call
@@ -429,6 +436,7 @@ func (q *Queries) LockAttemptByCall(ctx context.Context, callID uuid.UUID) (Camp
 		&i.LeadVerdict,
 		&i.LeadVerdictReason,
 		&i.LeadJudgeDeadlineAt,
+		&i.SIPStatus,
 	)
 	return i, err
 }
@@ -491,7 +499,7 @@ UPDATE campaign_attempts
 SET declared_lead_intent = lead_intent, lead_verdict = 'PENDING',
     lead_judge_deadline_at = now() + $2::int * interval '1 second'
 WHERE id = $1 AND declared_lead_intent IS NULL AND lead_intent IN ('HIGH', 'MEDIUM')
-RETURNING id, campaign_id, campaign_contact_id, number_e164, call_id, leg_id, originate_job_id, state, outcome, hangup_cause, talk_sec, is_touched, lead_intent, lead_notes, started_at, finished_at, is_test_number, declared_lead_intent, lead_verdict, lead_verdict_reason, lead_judge_deadline_at
+RETURNING id, campaign_id, campaign_contact_id, number_e164, call_id, leg_id, originate_job_id, state, outcome, hangup_cause, talk_sec, is_touched, lead_intent, lead_notes, started_at, finished_at, is_test_number, declared_lead_intent, lead_verdict, lead_verdict_reason, lead_judge_deadline_at, sip_status
 `
 
 type OweLeadJudgementParams struct {
@@ -528,6 +536,7 @@ func (q *Queries) OweLeadJudgement(ctx context.Context, arg OweLeadJudgementPara
 		&i.LeadVerdict,
 		&i.LeadVerdictReason,
 		&i.LeadJudgeDeadlineAt,
+		&i.SIPStatus,
 	)
 	return i, err
 }
@@ -718,7 +727,7 @@ UPDATE campaign_attempts
 SET lead_verdict = $2, lead_verdict_reason = $3,
     lead_intent = $4
 WHERE id = $1 AND lead_verdict = 'PENDING' AND lead_judge_deadline_at > now()
-RETURNING id, campaign_id, campaign_contact_id, number_e164, call_id, leg_id, originate_job_id, state, outcome, hangup_cause, talk_sec, is_touched, lead_intent, lead_notes, started_at, finished_at, is_test_number, declared_lead_intent, lead_verdict, lead_verdict_reason, lead_judge_deadline_at
+RETURNING id, campaign_id, campaign_contact_id, number_e164, call_id, leg_id, originate_job_id, state, outcome, hangup_cause, talk_sec, is_touched, lead_intent, lead_notes, started_at, finished_at, is_test_number, declared_lead_intent, lead_verdict, lead_verdict_reason, lead_judge_deadline_at, sip_status
 `
 
 type SettleLeadVerdictParams struct {
@@ -761,6 +770,7 @@ func (q *Queries) SettleLeadVerdict(ctx context.Context, arg SettleLeadVerdictPa
 		&i.LeadVerdict,
 		&i.LeadVerdictReason,
 		&i.LeadJudgeDeadlineAt,
+		&i.SIPStatus,
 	)
 	return i, err
 }

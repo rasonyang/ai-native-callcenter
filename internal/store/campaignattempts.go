@@ -312,6 +312,7 @@ func endingFromCDR(cdr CDR) campaign.Ending {
 	return campaign.Ending{
 		Outcome:     campaign.Classify(end),
 		HangupCause: cdr.HangupCause,
+		SIPStatus:   end.SIPStatus,
 		TalkSec:     cdr.BotSec + cdr.TalkSec,
 		EndedAt:     cdr.EndedAt,
 	}
@@ -356,8 +357,10 @@ func (f attemptFinisher) apply(ctx context.Context, q *queries.Queries, att quer
 		return nil, fmt.Errorf("campaign: %q is not an outcome", e.Outcome)
 	}
 	isRevision := att.State == string(campaign.AttemptFinished)
+	sipStatus := sipStatusOrNil(e.SIPStatus)
 	if isRevision && att.Outcome != nil && campaign.Outcome(*att.Outcome) == e.Outcome &&
-		deref(att.HangupCause) == e.HangupCause && int(derefInt(att.TalkSec)) == e.TalkSec {
+		deref(att.HangupCause) == e.HangupCause && int(derefInt(att.TalkSec)) == e.TalkSec &&
+		derefInt(att.SIPStatus) == derefInt(sipStatus) {
 		return nil, nil
 	}
 	endedAt := e.EndedAt
@@ -389,6 +392,7 @@ func (f attemptFinisher) apply(ctx context.Context, q *queries.Queries, att quer
 	if err := q.FinishCampaignAttempt(ctx, queries.FinishCampaignAttemptParams{
 		ID: att.ID, Outcome: textPtr(string(e.Outcome)), HangupCause: cause, TalkSec: &talk,
 		IsTouched: campaign.IsTouched(e.Outcome), FinishedAt: pgtype.Timestamptz{Time: endedAt, Valid: true},
+		SIPStatus: sipStatus,
 	}); err != nil {
 		return nil, fmt.Errorf("finish attempt: %w", err)
 	}
@@ -406,6 +410,9 @@ func (f attemptFinisher) apply(ctx context.Context, q *queries.Queries, att quer
 		CampaignID: att.CampaignID, ContactID: att.CampaignContactID, AttemptID: att.ID,
 		CallID: att.CallID, Outcome: e.Outcome, IsRevision: isRevision,
 		ContactStatus: campaign.ContactStatus(contact.Status), NextAttemptAt: timeOrNil(contact.NextAttemptAt),
+	}
+	if isRevision {
+		done.PreviousOutcome = campaign.Outcome(deref(att.Outcome))
 	}
 	if isLatest != nil && !*isLatest {
 		done.NextAttemptAt = timeOrNil(contact.NextAttemptAt)
@@ -494,7 +501,8 @@ func attemptOf(r queries.CampaignAttempt) campaign.Attempt {
 		ID: r.ID, CampaignID: r.CampaignID, ContactID: r.CampaignContactID, Number: r.NumberE164,
 		CallID: r.CallID, LegID: r.LegID, OriginateJobID: deref(r.OriginateJobID),
 		State: campaign.AttemptState(r.State), Outcome: campaign.Outcome(deref(r.Outcome)),
-		HangupCause: deref(r.HangupCause), TalkSec: int(derefInt(r.TalkSec)), IsTouched: r.IsTouched, IsTestNumber: r.IsTestNumber,
+		HangupCause: deref(r.HangupCause), SIPStatus: int(derefInt(r.SIPStatus)),
+		TalkSec: int(derefInt(r.TalkSec)), IsTouched: r.IsTouched, IsTestNumber: r.IsTestNumber,
 		LeadIntent: campaign.LeadIntent(deref(r.LeadIntent)), LeadNotes: deref(r.LeadNotes),
 		DeclaredLeadIntent: campaign.LeadIntent(deref(r.DeclaredLeadIntent)),
 		LeadVerdict:        campaign.LeadVerdict(deref(r.LeadVerdict)),
@@ -508,6 +516,17 @@ func textPtr(s string) *string {
 		return nil
 	}
 	return &s
+}
+
+// sipStatusOrNil is the attempt's sip_status for a status: NULL for none, and
+// for a number that is no SIP final or provisional status (the column's CHECK
+// holds 100 to 699).
+func sipStatusOrNil(status int) *int32 {
+	if status < 100 || status > 699 {
+		return nil
+	}
+	n := int32(status)
+	return &n
 }
 
 func derefInt(n *int32) int32 {

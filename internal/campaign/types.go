@@ -76,7 +76,10 @@ func (s ContactStatus) IsValid() bool {
 	return false
 }
 
-// Outcome is how an attempt ended (design 10 section 7.2).
+// Outcome is how an attempt ended (design 10 section 7.2). LINE_REJECTED is
+// the line refusing the call before it reached a phone (a CALL_REJECTED whose
+// final SIP status is not the callee's 603, such as a carrier's 402): a system
+// failure, paid for as TRANSIENT, where REJECTED is the callee declining.
 type Outcome string
 
 const (
@@ -88,6 +91,7 @@ const (
 	OutcomeRejected        Outcome = "REJECTED"
 	OutcomeUnknown         Outcome = "UNKNOWN"
 	OutcomeTransient       Outcome = "TRANSIENT"
+	OutcomeLineRejected    Outcome = "LINE_REJECTED"
 	OutcomeOriginateFailed Outcome = "ORIGINATE_FAILED"
 	OutcomeInvalidNumber   Outcome = "INVALID_NUMBER"
 	OutcomeDNCSkipped      Outcome = "DNC_SKIPPED"

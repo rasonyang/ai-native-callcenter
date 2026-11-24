@@ -1061,6 +1061,7 @@
       "REJECTED": "Rejected",
       "UNKNOWN": "Unknown",
       "TRANSIENT": "Network error",
+      "LINE_REJECTED": "Line rejected",
       "ORIGINATE_FAILED": "Could not place",
       "INVALID_NUMBER": "Invalid number",
       "DNC_SKIPPED": "Skipped (do not call)"
@@ -1070,6 +1071,7 @@
     },
     "startedAt": "Started",
     "hangupCause": "Hangup cause",
+    "hangupCauseWithStatus": "{{cause}} · {{status}}",
     "talkTime": "Talk time",
     "call": "Call",
     "openCall": "Open call",
@@ -1147,7 +1149,7 @@
       "backoffBase": "Network error: first wait (seconds)",
       "backoffFactor": "Network error: growth factor",
       "backoffCap": "Network error: longest wait (seconds)",
-      "backoffHint": "Network errors and failed placements wait base times factor for each failure so far, up to the longest wait.",
+      "backoffHint": "Network errors, line rejections and failed placements wait base times factor for each failure so far, up to the longest wait.",
       "lockedHint": "Locked while the campaign is running or paused. Only maximum concurrent calls, calling window and retry policy can change.",
       "finishedHint": "A finished campaign cannot be changed.",
       "saved": "Saved."

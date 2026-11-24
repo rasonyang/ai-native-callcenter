@@ -1057,6 +1057,7 @@
       "REJECTED": "被拒接",
       "UNKNOWN": "未知",
       "TRANSIENT": "网络错误",
+      "LINE_REJECTED": "线路拒绝",
       "ORIGINATE_FAILED": "无法发起呼叫",
       "INVALID_NUMBER": "号码无效",
       "DNC_SKIPPED": "已跳过（免打扰）"
@@ -1066,6 +1067,7 @@
     },
     "startedAt": "开始时间",
     "hangupCause": "挂断原因",
+    "hangupCauseWithStatus": "{{cause}} · {{status}}",
     "talkTime": "通话时长",
     "call": "通话",
     "openCall": "查看通话",
@@ -1143,7 +1145,7 @@
       "backoffBase": "网络错误：首次等待（秒）",
       "backoffFactor": "网络错误：增长倍数",
       "backoffCap": "网络错误：最长等待（秒）",
-      "backoffHint": "网络错误和发起失败每失败一次，等待时间按倍数增长，直到最长等待。",
+      "backoffHint": "网络错误、线路拒绝和发起失败每失败一次，等待时间按倍数增长，直到最长等待。",
       "lockedHint": "活动运行或暂停期间不能修改。只有最大并发呼叫数、拨打时段和重试策略可以修改。",
       "finishedHint": "已结束的活动不能修改。",
       "saved": "已保存。"

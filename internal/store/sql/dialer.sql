@@ -82,10 +82,10 @@ WHERE c.id = v.id AND c.status = 'ACTIVE'
 -- How many times each number was dialled in its local day, for the daily dial
 -- cap: the numbers and the start of each one's day (its contact's zone) come as
 -- two parallel arrays. A dial is a campaign attempt in flight or whose outcome
--- spent a budget (uncounted_outcomes lists the ones that did not: a DNC skip, a
--- bad number), from any campaign, plus an ad-hoc outbound call (a CDR with no
--- campaign) whose canonical callee is the number. A number on the list of test
--- numbers has no row: it is never capped.
+-- counts (uncounted_outcomes lists the ones that do not: a DNC skip, a bad
+-- number, a line's refusal), from any campaign, plus an ad-hoc outbound call
+-- (a CDR with no campaign) whose canonical callee is the number. A number on
+-- the list of test numbers has no row: it is never capped.
 -- name: DialsTodayByNumber :many
 SELECT v.number_e164::text AS number_e164, v.day_start::timestamptz AS day_start,
        ((SELECT count(*) FROM campaign_attempts a

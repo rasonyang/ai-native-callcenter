@@ -4,14 +4,21 @@ package campaign
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"maps"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
+	"go.opentelemetry.io/otel"
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
+	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 )
 
 // One row of the table of design 10 section 7.2 per case: the cause, and what
@@ -108,6 +115,156 @@ func TestAFarEnds487AfterRingingIsNoAnswer(t *testing.T) {
 				t.Errorf("Classify = %s, want %s", got, tt.want)
 			}
 		})
+	}
+}
+
+// CALL_REJECTED is the switch's word for a callee's 603 Decline and for the
+// line's own refusals (402, 401/407, 403, 608). Only the 603 is the customer;
+// every other status is the line, whether or not the leg rang. No status
+// leaves nothing to tell, so it keeps the table's REJECTED.
+func TestACallRejectedIsTheLineUnlessItIsADeclineOrHasNoStatus(t *testing.T) {
+	tests := []struct {
+		name string
+		end  CallEnd
+		want Outcome
+	}{
+		{"402 before any ring progress", CallEnd{HangupCause: CauseCallRejected, SIPStatus: 402, EndedBy: "PEER"}, OutcomeLineRejected},
+		{"402 after ring progress", CallEnd{HangupCause: CauseCallRejected, SIPStatus: 402, HasRingProgress: true, EndedBy: "PEER"}, OutcomeLineRejected},
+		{"403 before any ring progress", CallEnd{HangupCause: CauseCallRejected, SIPStatus: 403}, OutcomeLineRejected},
+		{"403 after ring progress", CallEnd{HangupCause: CauseCallRejected, SIPStatus: 403, HasRingProgress: true}, OutcomeLineRejected},
+		{"401", CallEnd{HangupCause: CauseCallRejected, SIPStatus: 401}, OutcomeLineRejected},
+		{"407", CallEnd{HangupCause: CauseCallRejected, SIPStatus: 407}, OutcomeLineRejected},
+		{"608", CallEnd{HangupCause: CauseCallRejected, SIPStatus: 608, HasRingProgress: true}, OutcomeLineRejected},
+		{"603 before any ring progress", CallEnd{HangupCause: CauseCallRejected, SIPStatus: 603, EndedBy: "PEER"}, OutcomeRejected},
+		{"603 after ring progress", CallEnd{HangupCause: CauseCallRejected, SIPStatus: 603, HasRingProgress: true, EndedBy: "PEER"}, OutcomeRejected},
+		{"no status, before any ring progress", CallEnd{HangupCause: CauseCallRejected}, OutcomeRejected},
+		{"no status, after ring progress", CallEnd{HangupCause: CauseCallRejected, HasRingProgress: true}, OutcomeRejected},
+		// A placement failure carries no status; with the cause alone it is
+		// the callee's refusal, as before.
+		{"a placement failure", CallEnd{HangupCause: CauseCallRejected, IsPlacementFailure: true}, OutcomeRejected},
+		{"answered, whatever the status", CallEnd{HangupCause: CauseCallRejected, IsAnswered: true, SIPStatus: 402}, OutcomeAnswered},
+		// The status says nothing under another cause.
+		{"a 402 under another cause is that cause's", CallEnd{HangupCause: "USER_BUSY", SIPStatus: 402}, OutcomeBusy},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := Classify(tt.end); got != tt.want {
+				t.Errorf("Classify = %s, want %s", got, tt.want)
+			}
+		})
+	}
+}
+
+// A line refusal spends what a TRANSIENT spends: the system-retry budget on
+// the transient backoff, never maxAttempts, and it is not a touch of the
+// number. A 603 stays the customer's outcome on its 24 h interval.
+func TestALineRefusalIsPaidForAsASystemFailure(t *testing.T) {
+	line := Classify(CallEnd{HangupCause: CauseCallRejected, SIPStatus: 402})
+	if ClassOf(line) != ClassSystem || IsTouched(line) {
+		t.Errorf("%s: class %d, touched %v; want a system failure that touches nothing", line, ClassOf(line), IsTouched(line))
+	}
+	declined := Classify(CallEnd{HangupCause: CauseCallRejected, SIPStatus: 603, HasRingProgress: true})
+	if ClassOf(declined) != ClassReached || !IsTouched(declined) {
+		t.Errorf("%s: class %d, touched %v; want the customer reached", declined, ClassOf(declined), IsTouched(declined))
+	}
+	p := DefaultRetryPolicy()
+	if !slices.Contains(p.RetryOutcomes, OutcomeLineRejected) {
+		t.Errorf("the default policy does not retry %s: %v", OutcomeLineRejected, p.RetryOutcomes)
+	}
+	if _, ok := p.IntervalSec[OutcomeLineRejected]; ok {
+		t.Errorf("%s has an interval; it follows the transient backoff", OutcomeLineRejected)
+	}
+	end := time.Date(2026, 6, 1, 10, 0, 0, 0, time.UTC)
+	got := Settle(p, Counters{}.Add(line), line, "", end, Schedule{})
+	if got.Status != ContactActive || got.NextAttemptAt == nil || !got.NextAttemptAt.Equal(end.Add(p.TransientBackoff.Wait(1))) {
+		t.Errorf("after one refusal: %+v, want ACTIVE at the end + the first backoff (%s)", got, p.TransientBackoff.Wait(1))
+	}
+	if c := (Counters{}).Add(line); c.Attempts != 0 || c.SystemFailures != 1 {
+		t.Errorf("a refusal spent %+v, want one system failure and no attempt", c)
+	}
+	spent := Counters{Attempts: 0, SystemFailures: p.MaxSystemRetries}
+	if got := Settle(p, spent, line, "", end, Schedule{}); got.Status != ContactExhausted || got.Reason != SettleBudgetSpent {
+		t.Errorf("at maxSystemRetries: %+v, want EXHAUSTED by the budget", got)
+	}
+	got = Settle(p, Counters{}.Add(declined), declined, "", end, Schedule{})
+	if got.NextAttemptAt == nil || !got.NextAttemptAt.Equal(end.Add(24*time.Hour)) {
+		t.Errorf("after a 603: %+v, want ACTIVE at the end + 24 h", got)
+	}
+}
+
+// The global meter provider takes its delegate once, so every run of the test
+// below reads the same reader and compares counts before and after.
+var (
+	metricReader    = sdkmetric.NewManualReader()
+	setMetricReader sync.Once
+)
+
+// lineRejectedCounts reads aicc_campaign_line_rejected_total by sip_status.
+func lineRejectedCounts(t *testing.T) map[string]int64 {
+	t.Helper()
+	setMetricReader.Do(func() {
+		otel.SetMeterProvider(sdkmetric.NewMeterProvider(sdkmetric.WithReader(metricReader)))
+	})
+	var rm metricdata.ResourceMetrics
+	if err := metricReader.Collect(context.Background(), &rm); err != nil {
+		t.Fatal(err)
+	}
+	out := map[string]int64{}
+	for _, sm := range rm.ScopeMetrics {
+		for _, m := range sm.Metrics {
+			if m.Name != "aicc_campaign_line_rejected_total" {
+				continue
+			}
+			for _, dp := range m.Data.(metricdata.Sum[int64]).DataPoints {
+				v, _ := dp.Attributes.Value("sip_status")
+				out[v.AsString()] += dp.Value
+			}
+		}
+	}
+	return out
+}
+
+// The daily dial cap counts every outcome that spends a budget but a line's
+// refusal, which certainly never reached a phone; a TRANSIENT still counts.
+func TestWhichOutcomesCountTowardsTheDailyCap(t *testing.T) {
+	for _, o := range AllOutcomes() {
+		want := ClassOf(o) != ClassNone && o != OutcomeLineRejected
+		if got := CountsTowardsDailyCap(o); got != want {
+			t.Errorf("CountsTowardsDailyCap(%s) = %v, want %v", o, got, want)
+		}
+	}
+	for o, want := range map[Outcome]bool{
+		OutcomeLineRejected: false, OutcomeTransient: true, OutcomeOriginateFailed: true,
+		OutcomeRejected: true, OutcomeDNCSkipped: false, OutcomeInvalidNumber: false,
+	} {
+		if got := CountsTowardsDailyCap(o); got != want {
+			t.Errorf("CountsTowardsDailyCap(%s) = %v, want %v", o, got, want)
+		}
+	}
+}
+
+// Every line refusal is counted by its status as it is classified, so a burst
+// shows while it happens; a decline and a refusal with no status are not.
+func TestALineRefusalIsCountedByStatus(t *testing.T) {
+	before := lineRejectedCounts(t)
+	for _, e := range []CallEnd{
+		{HangupCause: CauseCallRejected, SIPStatus: 402},
+		{HangupCause: CauseCallRejected, SIPStatus: 402, HasRingProgress: true},
+		{HangupCause: CauseCallRejected, SIPStatus: 403},
+		{HangupCause: CauseCallRejected, SIPStatus: 603},
+		{HangupCause: CauseCallRejected},
+	} {
+		Classify(e)
+	}
+	after := lineRejectedCounts(t)
+	got := map[string]int64{}
+	for k, v := range after {
+		if d := v - before[k]; d != 0 {
+			got[k] = d
+		}
+	}
+	if want := map[string]int64{"402": 2, "403": 1}; !maps.Equal(got, want) {
+		t.Errorf("aicc_campaign_line_rejected_total gained %v, want %v", got, want)
 	}
 }
 
@@ -278,8 +435,11 @@ func TestWhichBudgetEachOutcomePays(t *testing.T) {
 		OutcomeAnswered: ClassReached, OutcomeBotFailed: ClassReached, OutcomeOverflow: ClassReached,
 		OutcomeNoAnswer: ClassReached, OutcomeBusy: ClassReached, OutcomeRejected: ClassReached,
 		OutcomeUnknown:   ClassReached,
-		OutcomeTransient: ClassSystem, OutcomeOriginateFailed: ClassSystem,
+		OutcomeTransient: ClassSystem, OutcomeLineRejected: ClassSystem, OutcomeOriginateFailed: ClassSystem,
 		OutcomeInvalidNumber: ClassNone, OutcomeDNCSkipped: ClassNone,
+	}
+	if len(want) != len(AllOutcomes()) {
+		t.Errorf("the test covers %d outcomes and there are %d", len(want), len(AllOutcomes()))
 	}
 	for o, class := range want {
 		if got := ClassOf(o); got != class {

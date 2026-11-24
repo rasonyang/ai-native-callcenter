@@ -217,10 +217,10 @@ func (d *DialerStore) RearmHeld(ctx context.Context, now time.Time) error {
 }
 
 // DialsToday counts, for each (number, day start) pair, the dials of the number
-// since the day start up to now: the campaign attempts in flight or that spent
-// a budget, from any campaign, and the ad-hoc outbound calls in the ledger. The
-// result is parallel to the input. A number on the list of test numbers is
-// never capped, so it counts as zero.
+// since the day start up to now: the campaign attempts in flight or whose
+// outcome counts (campaign.CountsTowardsDailyCap), from any campaign, and the
+// ad-hoc outbound calls in the ledger. The result is parallel to the input. A
+// number on the list of test numbers is never capped, so it counts as zero.
 func (d *DialerStore) DialsToday(ctx context.Context, numbers []string, dayStarts []time.Time, now time.Time) ([]int, error) {
 	if len(numbers) != len(dayStarts) {
 		return nil, fmt.Errorf("dials today: %d numbers and %d day starts", len(numbers), len(dayStarts))
@@ -234,7 +234,7 @@ func (d *DialerStore) DialsToday(ctx context.Context, numbers []string, dayStart
 	}
 	var uncounted []string
 	for _, o := range campaign.AllOutcomes() {
-		if campaign.ClassOf(o) == campaign.ClassNone {
+		if !campaign.CountsTowardsDailyCap(o) {
 			uncounted = append(uncounted, string(o))
 		}
 	}

@@ -293,7 +293,7 @@ func TestContactsInDifferentZonesAreRescheduledIntoTheirOwnWindows(t *testing.T)
 func TestSettlementInvariantsOverRandomHistories(t *testing.T) {
 	outcomes := []Outcome{
 		OutcomeAnswered, OutcomeBotFailed, OutcomeOverflow, OutcomeNoAnswer, OutcomeBusy, OutcomeRejected,
-		OutcomeUnknown, OutcomeTransient, OutcomeOriginateFailed, OutcomeInvalidNumber, OutcomeDNCSkipped,
+		OutcomeUnknown, OutcomeTransient, OutcomeLineRejected, OutcomeOriginateFailed, OutcomeInvalidNumber, OutcomeDNCSkipped,
 	}
 	rng := rand.New(rand.NewPCG(20261012, 7))
 	s := settleWindow(t)

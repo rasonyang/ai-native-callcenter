@@ -21,8 +21,8 @@ func TestScenarioFileCoversEveryCampaignCase(t *testing.T) {
 		if err := CheckScenarioCoversCases(s, Regions, AllCases, form); err != nil {
 			t.Fatal(err)
 		}
-		if len(Regions) != 2 || len(DefaultCases) != 13 || len(AllCases) != 16 {
-			t.Fatalf("%d regions, %d unanswered and %d cases in all, want 2, 13 and 16", len(Regions), len(DefaultCases), len(AllCases))
+		if len(Regions) != 2 || len(DefaultCases) != 14 || len(AllCases) != 17 {
+			t.Fatalf("%d regions, %d unanswered and %d cases in all, want 2, 14 and 17", len(Regions), len(DefaultCases), len(AllCases))
 		}
 	})
 }
@@ -225,6 +225,111 @@ func TestC11RefusesA487ThatAnsweredOurCancel(t *testing.T) {
 				}
 			}
 			if got := len(own) == 0; got != tc.pass {
+				t.Errorf("passed = %v, want %v: %v", got, tc.pass, col.failures)
+			}
+		})
+	}
+}
+
+// C12 is the line refusing the call: a 402 before any ring, under the same
+// cause as C05's 603. The case expects LINE_REJECTED, a system outcome the
+// e2e policy retries, and the CDR and the attempt to carry the 402; the
+// design's rule reads the status, not the ring.
+func TestC12IsALineRefusalBesideC05(t *testing.T) {
+	c05, c12 := caseByID(AllCases, "C05"), caseByID(AllCases, "C12")
+	if c12.Outcome != "LINE_REJECTED" || c12.Cause != causeCallRejected || c12.SIPStatus != 402 || c12.Provisional != 0 {
+		t.Fatalf("C12 = %+v", c12)
+	}
+	if c05.Cause != c12.Cause || c05.Tech == nil || c05.Tech.SIPStatus != 603 || c12.Tech == nil || c12.Tech.SIPStatus != 402 {
+		t.Fatalf("C05 and C12 must share the cause and assert their statuses: %+v %+v", c05.Tech, c12.Tech)
+	}
+	if d := designOutcomes[c12.Outcome]; d.Budget != BudgetSystem || d.TerminalStatus != "" {
+		t.Errorf("LINE_REJECTED in the design table = %+v, want a retried system outcome", d)
+	}
+	if d := designOutcomes[c05.Outcome]; d.Budget != BudgetAttempts {
+		t.Errorf("REJECTED in the design table = %+v, want maxAttempts", d)
+	}
+	for _, tc := range []struct {
+		name  string
+		final int
+		rang  bool
+		want  string
+	}{
+		{"402 before any ring", 402, false, "LINE_REJECTED"},
+		{"402 after a 180", 402, true, "LINE_REJECTED"},
+		{"403", 403, false, "LINE_REJECTED"},
+		{"603 after a 180", 603, true, "REJECTED"},
+		{"603 before any ring", 603, false, "REJECTED"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			d := &calleesim.DialogRecord{Final: &calleesim.FinalRecord{Status: tc.final}}
+			if tc.rang {
+				d.Provisionals = []calleesim.ProvisionalRecord{{Status: 180}}
+			}
+			if got, _, ok := expectedOutcome(causeCallRejected, d); !ok || got != tc.want {
+				t.Errorf("expectedOutcome = %s (%v), want %s", got, ok, tc.want)
+			}
+		})
+	}
+	if _, _, ok := expectedOutcome(causeCallRejected, nil); ok {
+		t.Error("a CALL_REJECTED with no dialog to read was given an outcome")
+	}
+}
+
+// A case whose callee sends no provisional is held to that: a dialog that
+// rang first fails it, and the attempt's own sipStatus is checked against the
+// case's.
+func TestC12AssessesAFinalWithNoRingAndTheAttemptsStatus(t *testing.T) {
+	cs := caseByID(AllCases, "C12")
+	t0 := time.Date(2026, 11, 24, 9, 0, 0, 0, time.UTC)
+	rv := RegionView{}
+	rv.DID.Number = "95000001"
+	for _, tc := range []struct {
+		name  string
+		provs []calleesim.ProvisionalRecord
+		pass  bool
+	}{
+		{"no provisional", nil, true},
+		{"a 180 first", []calleesim.ProvisionalRecord{{Status: 180}}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			d := calleesim.DialogRecord{
+				InviteAt:      t0,
+				InviteHeaders: map[string]string{"from": "<sip:95000001@10.0.0.11>"},
+				Provisionals:  tc.provs,
+				Final:         &calleesim.FinalRecord{Status: 402},
+			}
+			var col Checks
+			var ar AttemptResult
+			assessDialog(&col, "", rv, cs, api.CampaignAttempt{StartedAt: t0}, &d, nil, &ar)
+			var ring []string
+			for _, f := range col.failures {
+				if strings.Contains(f, "no 180 or 183") {
+					ring = append(ring, f)
+				}
+			}
+			if got := len(ring) == 0; got != tc.pass {
+				t.Errorf("passed = %v, want %v: %v", got, tc.pass, col.failures)
+			}
+		})
+	}
+	status := func(n int) *int { return &n }
+	for _, tc := range []struct {
+		name string
+		want int
+		got  *int
+		pass bool
+	}{
+		{"the case's status", 402, status(402), true},
+		{"another status", 402, status(603), false},
+		{"absent", 402, nil, false},
+		{"none expected and none carried", 0, nil, true},
+		{"none expected and one carried", 0, status(487), false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var col Checks
+			assessAttemptStatus(&col, "", tc.want, tc.got)
+			if got := len(col.failures) == 0; got != tc.pass {
 				t.Errorf("passed = %v, want %v: %v", got, tc.pass, col.failures)
 			}
 		})

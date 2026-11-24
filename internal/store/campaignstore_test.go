@@ -111,7 +111,7 @@ func TestACampaignRoundTripsThroughTheStore(t *testing.T) {
 		t.Errorf("calling window = %+v", got.CallingWindow)
 	}
 	if got.RetryPolicy.MaxAttempts != 3 || got.RetryPolicy.IntervalSec[campaign.OutcomeBusy] != 1800 ||
-		got.RetryPolicy.TransientBackoff.CapSec != 14400 || len(got.RetryPolicy.RetryOutcomes) != 6 {
+		got.RetryPolicy.TransientBackoff.CapSec != 14400 || len(got.RetryPolicy.RetryOutcomes) != 7 {
 		t.Errorf("retry policy = %+v", got.RetryPolicy)
 	}
 

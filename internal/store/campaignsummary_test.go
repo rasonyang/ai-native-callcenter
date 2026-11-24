@@ -175,8 +175,8 @@ func pick[T any](r *rand.Rand, choices []T, weights []int) T {
 var (
 	reachedRetries = []campaign.Outcome{campaign.OutcomeNoAnswer, campaign.OutcomeBusy, campaign.OutcomeRejected, campaign.OutcomeUnknown}
 	reachedWeights = []int{60, 27, 10, 3}
-	systemRetries  = []campaign.Outcome{campaign.OutcomeTransient, campaign.OutcomeOriginateFailed}
-	systemWeights  = []int{65, 35}
+	systemRetries  = []campaign.Outcome{campaign.OutcomeTransient, campaign.OutcomeLineRejected, campaign.OutcomeOriginateFailed}
+	systemWeights  = []int{55, 10, 35}
 )
 
 // retries are the attempts that came to nothing before a contact's last: rings
@@ -205,8 +205,9 @@ var outcomeCause = map[campaign.Outcome]string{
 	campaign.OutcomeAnswered: "NORMAL_CLEARING", campaign.OutcomeBotFailed: "BOT_START_FAILED",
 	campaign.OutcomeOverflow: "OVERFLOW", campaign.OutcomeNoAnswer: "NO_ANSWER", campaign.OutcomeBusy: "USER_BUSY",
 	campaign.OutcomeRejected: "CALL_REJECTED", campaign.OutcomeUnknown: "CHANNEL_VANISHED",
-	campaign.OutcomeTransient: "NORMAL_TEMPORARY_FAILURE", campaign.OutcomeOriginateFailed: "GATEWAY_DOWN",
-	campaign.OutcomeInvalidNumber: "UNALLOCATED_NUMBER", campaign.OutcomeDNCSkipped: "NUMBER_ON_DNC",
+	campaign.OutcomeTransient: "NORMAL_TEMPORARY_FAILURE", campaign.OutcomeLineRejected: "CALL_REJECTED",
+	campaign.OutcomeOriginateFailed: "GATEWAY_DOWN", campaign.OutcomeInvalidNumber: "UNALLOCATED_NUMBER",
+	campaign.OutcomeDNCSkipped: "NUMBER_ON_DNC",
 }
 
 // leadNotes are what the bot writes for each intent: synthetic sentences.
@@ -237,8 +238,12 @@ func (s *summarySeed) attempt(t *testing.T, w *summaryTally, ct seedContact, out
 	if campaign.IsAnsweredOutcome(out) {
 		talk = 20 + s.rng.IntN(280)
 	}
+	status := 0
+	if out == campaign.OutcomeLineRejected {
+		status = 402 // the line out of credit
+	}
 	if _, err := s.attempts.Finish(ctx, a.CallID, campaign.Ending{
-		Outcome: out, HangupCause: outcomeCause[out], TalkSec: talk, EndedAt: at.Add(40 * time.Second),
+		Outcome: out, HangupCause: outcomeCause[out], SIPStatus: status, TalkSec: talk, EndedAt: at.Add(40 * time.Second),
 	}); err != nil {
 		t.Fatalf("finish %s %s: %v", ct.number, out, err)
 	}

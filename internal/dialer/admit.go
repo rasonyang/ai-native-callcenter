@@ -694,11 +694,22 @@ func obsInFlight(isTalking bool, delta int64) {
 }
 
 // onFinished is an attempt's outcome having been written and committed.
+//
+// A revision is the same attempt again, so it is neither counted nor sampled a
+// second time. It is judged by the breakers only when it turns the attempt
+// into a system failure from something else: the first finish was judged as
+// that something else, or not at all, and the run of failures the trunk
+// breaker reads now holds one more. That is the job's -ERR CALL_REJECTED
+// recorded REJECTED before the channel's own record revised it to
+// LINE_REJECTED (design 10 section 7.4).
 func (d *Dialer) onFinished(ctx context.Context, f campaign.Finished) {
 	fl := d.drop(f.CallID)
 	d.isDirty = true
 	d.touch(f.CampaignID)
 	if f.IsRevision {
+		if campaign.ClassOf(f.Outcome) == campaign.ClassSystem && campaign.ClassOf(f.PreviousOutcome) != campaign.ClassSystem {
+			d.judgeBreakers(ctx, f)
+		}
 		return
 	}
 	obs.RecordCampaignAttempt(string(f.Outcome))

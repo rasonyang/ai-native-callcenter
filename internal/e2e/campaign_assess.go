@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -638,6 +639,7 @@ func assessAttempt(rv RegionView, cs Case, i int, a api.CampaignAttempt, key, ex
 			col.That(cdr.AnsweredAt == nil && cdr.BotSec == 0, pre+"the CDR records no answer and no bot time (answered %v, botSec %d)", cdr.AnsweredAt != nil, cdr.BotSec)
 			if cs.Tech != nil {
 				assessTech(&col, pre, *cs.Tech, cdr.Tech)
+				assessAttemptStatus(&col, pre, cs.Tech.SIPStatus, a.SIPStatus)
 			}
 		}
 		col.That(dlg != nil, "%sthe simulator recorded the attempt's INVITE", pre)
@@ -664,19 +666,40 @@ func assessTech(col *Checks, pre string, want TechExpectation, tech *map[string]
 	col.That(hasStatus && int(status) == want.SIPStatus, pre+"the CDR's tech.sipStatus is %d (%s)", want.SIPStatus, techText(tech, "sipStatus"))
 }
 
+// assessAttemptStatus checks the attempt's own sipStatus, which the console
+// shows beside the hangup cause: the CDR's status, or none when it has none.
+func assessAttemptStatus(col *Checks, pre string, want int, got *int) {
+	if want == 0 {
+		col.That(got == nil, pre+"the attempt carries no sipStatus (%s)", intText(got))
+		return
+	}
+	col.That(got != nil && *got == want, pre+"the attempt's sipStatus is %d (%s)", want, intText(got))
+}
+
+func intText(n *int) string {
+	if n == nil {
+		return "absent"
+	}
+	return strconv.Itoa(*n)
+}
+
 func assessDialog(col *Checks, pre string, rv RegionView, cs Case, a api.CampaignAttempt, d *calleesim.DialogRecord, next *time.Time, ar *AttemptResult) {
 	from := sipUser(d.InviteHeaders["from"])
 	col.That(from == rv.DID.Number, pre+"the INVITE came from the campaign's caller id %s (%s)", rv.DID.Number, from)
 	inWindow, desc := inviteWindow(d, a, next)
 	col.That(inWindow, "%s%s", pre, desc)
 
-	sent := false
-	for _, p := range d.Provisionals {
-		if p.Status == cs.Provisional && p.HasEarlyMedia == cs.EarlyMedia {
-			sent = true
+	if cs.Provisional == 0 {
+		col.That(len(d.Provisionals) == 0, pre+"the callee sent no 180 or 183 before its final response (%d)", len(d.Provisionals))
+	} else {
+		sent := false
+		for _, p := range d.Provisionals {
+			if p.Status == cs.Provisional && p.HasEarlyMedia == cs.EarlyMedia {
+				sent = true
+			}
 		}
+		col.That(sent, pre+"the callee sent %d (early media %v)", cs.Provisional, cs.EarlyMedia)
 	}
-	col.That(sent, pre+"the callee sent %d (early media %v)", cs.Provisional, cs.EarlyMedia)
 	final := 0
 	if d.Final != nil {
 		final = d.Final.Status

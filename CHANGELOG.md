@@ -16,6 +16,22 @@ carries the one-line installer's files.
   webhook delivery of a call with a `HIGH` or `MEDIUM` lead to arrive up to
   35 seconds after the call ends. Set `AICC_LEAD_JUDGE_ENABLED=false` to keep
   leads as the flow records them.
+- Migration 00052 runs at startup (#702). It adds
+  `campaign_attempts.sip_status` (NULL for every existing attempt; nothing is
+  backfilled) and widens the outcome CHECKs of attempts and contacts to the
+  new `LINE_REJECTED`; no attempt or contact is rewritten, so contacts already
+  recorded `REJECTED` stay so. Every campaign whose retry policy retries
+  `TRANSIENT` is given `LINE_REJECTED` beside it in `retryOutcomes`, so a
+  running campaign does not end a contact `EXHAUSTED` on the line's first
+  refusal; a policy that does not retry `TRANSIENT` is left as it was. The
+  rollback rewrites `LINE_REJECTED` attempts and contacts to `TRANSIENT`, the
+  old outcome with the same budget, and takes the value out of the policies.
+- API contract (#702): additive only. `CampaignOutcome` and
+  `CampaignRetryOutcome` gain `LINE_REJECTED`; a client that switches over
+  those enums must handle it. The two outcome breakdowns of the outcome
+  summary list twelve outcomes instead of eleven. `CampaignAttempt` gains
+  `sipStatus`. `make api-breaking BASE=main` reports no breaking change for
+  this, only 13 `response-property-enum-value-added` warnings from that value.
 
 ### Added
 
@@ -50,6 +66,29 @@ carries the one-line installer's files.
 
 ### Fixed
 
+- **A carrier that refuses campaign calls is a line fault, not callees
+  declining** (#702). The switch reports a carrier's own refusal of an INVITE
+  (402 Payment Required for an account out of credit, 401 or 407 for the
+  line's authentication, 403 Forbidden, 608 Rejected) with the same hangup
+  cause as a callee's 603 Decline, `CALL_REJECTED`, so such an attempt was
+  recorded `REJECTED`: it spent `maxAttempts`, waited 24 hours like a person
+  who said no, and never paused the campaign, and a line that refused every
+  call used up the whole list in minutes. It is now `LINE_REJECTED`, read from
+  the final SIP status whether or not the leg rang: it spends
+  `maxSystemRetries` on the transient backoff, never `maxAttempts`, does not
+  hold the number from other campaigns, does not count towards the daily dial
+  cap (`AICC_OUTBOUND_MAX_DIALS_PER_NUMBER_PER_DAY`; a `TRANSIENT` still does),
+  and is a system failure for the trunk breaker, so `AICC_TRUNK_BREAKER_COUNT`
+  refusals in a row pause the campaign `PAUSED / TRUNK_FAILURE`. A 603, or a `CALL_REJECTED` with no status, stays
+  `REJECTED` on its 24-hour interval. The default retry policy retries
+  `LINE_REJECTED`. In the console it reads "Line rejected" (「线路拒绝」), has a
+  row of its own in the outcome summary, apart from "Rejected" and after
+  "Network error", and is in the outcome filter and among the outcomes a retry
+  policy can choose. Each attempt carries the far end's final status (`sipStatus`), which
+  the attempts table shows after the hangup cause (`CALL_REJECTED · 402`; a
+  603 shows its status too). The new counter
+  `aicc_campaign_line_rejected_total{sip_status}` counts the refusals by
+  status.
 - **A machine that answers a campaign call records no lead** (#409). On a call
   the platform placed to a customer, each final transcript of the callee's
   words is now checked against a built-in Chinese and English list of what a

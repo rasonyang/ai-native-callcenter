@@ -5,8 +5,10 @@ package campaign
 import "errors"
 
 // TrunkBreakerTrips reports whether the campaign's most recent n finished
-// attempts all ended TRANSIENT or ORIGINATE_FAILED (design 10 section 7.4): a
-// trunk outage otherwise spends the whole list's system retries in minutes.
+// attempts all ended with a system outcome, TRANSIENT, LINE_REJECTED or
+// ORIGINATE_FAILED (design 10 section 7.4): a trunk outage, or a line that
+// refuses every call, otherwise spends the whole list's system retries in
+// minutes.
 // recent is newest first; fewer than n attempts never trip it, nor does one
 // that breaks the run. n is AICC_TRUNK_BREAKER_COUNT.
 func TrunkBreakerTrips(recent []Outcome, n int) bool {

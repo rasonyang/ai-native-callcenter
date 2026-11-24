@@ -94,7 +94,8 @@ type Case struct {
 	// SIPStatus is the final response the simulator sends; zero for a callee
 	// that rings until it is cancelled.
 	SIPStatus int
-	// Provisional is the 1xx the callee sends: 180, or 183 with EarlyMedia.
+	// Provisional is the 1xx the callee sends: 180, or 183 with EarlyMedia;
+	// zero for a final response before any (C12).
 	Provisional int
 	EarlyMedia  bool
 	// IsOnDNC puts the number on the do-not-call list before the campaign
@@ -119,7 +120,8 @@ type Case struct {
 	// RingTimeoutTolerance (C07). Other ringing cases report the time only.
 	HasRingTimeoutBound bool
 	// Tech, when set, is what the CDR's tech must say about the dialled leg
-	// on every attempt of the case (C07, C11).
+	// on every attempt of the case (C05, C07, C11, C12), and its SIPStatus is
+	// what the attempt must carry as its sipStatus.
 	Tech *TechExpectation
 
 	// Steps, when set, lists the case's attempts one by one: what the callee
@@ -235,14 +237,23 @@ const (
 	listedSkipCause   = "NUMBER_ON_DNC"
 )
 
-// DefaultCases are C03, C05, C06, C07, C11, C08, C09, C10 and P1 to P5
-// (issues #245, #496 and #613). C11 sits beside C07, its control: the same
-// ringing callee, ended by the far end's own 487 instead of our ring timeout.
+// DefaultCases are C03, C05, C12, C06, C07, C11, C08, C09, C10 and P1 to P5
+// (issues #245, #496, #613 and #702). C11 sits beside C07, its control: the
+// same ringing callee, ended by the far end's own 487 instead of our ring
+// timeout. C12 sits beside C05: the same hangup cause, CALL_REJECTED, from the
+// line refusing the call before any ring instead of a callee's 603, which the
+// final status tells apart.
 var DefaultCases = []Case{
 	{ID: "C03", Kind: KindScenario, Suffix: "03", Callee: "180, then 486 Busy Here", Provisional: 180, SIPStatus: 486,
 		Outcome: "BUSY", Cause: "USER_BUSY"},
 	{ID: "C05", Kind: KindScenario, Suffix: "05", Callee: "180, then 603 Decline", Provisional: 180, SIPStatus: 603,
-		Outcome: "REJECTED", Cause: "CALL_REJECTED"},
+		Outcome: "REJECTED", Cause: causeCallRejected,
+		Tech: &TechExpectation{EndedBy: techEndedByPeer, SIPStatus: 603}},
+	{ID: "C12", Kind: KindScenario, Suffix: "17",
+		Callee:    "402 Payment Required at 50 ms, before any 180 (the line refusing the call)",
+		SIPStatus: 402,
+		Outcome:   "LINE_REJECTED", Cause: causeCallRejected,
+		Tech: &TechExpectation{EndedBy: techEndedByPeer, SIPStatus: 402}},
 	{ID: "C06", Kind: KindScenario, Suffix: "06", Callee: "180, then 404 Not Found", Provisional: 180, SIPStatus: 404,
 		Outcome: "INVALID_NUMBER", Cause: "UNALLOCATED_NUMBER"},
 	{ID: "C07", Kind: KindScenario, Suffix: "07", Callee: "180, never answered", Provisional: 180,
@@ -322,6 +333,7 @@ var designOutcomes = map[string]designOutcome{
 	"REJECTED":         {Budget: BudgetAttempts},
 	"UNKNOWN":          {Budget: BudgetAttempts},
 	"TRANSIENT":        {Budget: BudgetSystem},
+	"LINE_REJECTED":    {Budget: BudgetSystem},
 	"ORIGINATE_FAILED": {Budget: BudgetSystem},
 	"INVALID_NUMBER":   {Budget: BudgetNone, TerminalStatus: "INVALID_NUMBER"},
 	"DNC_SKIPPED":      {Budget: BudgetNone, TerminalStatus: "DNC"},
@@ -332,13 +344,13 @@ var designOutcomes = map[string]designOutcome{
 // NO_ANSWER. A probe whose cause is listed must come out with the listed
 // outcome; a cause the design does not list is reported as a finding.
 //
-// RECOVERY_ON_TIMER_EXPIRE is not in the map: what it comes to depends on
-// more than the cause (issue #576). expectedOutcome holds that rule.
+// RECOVERY_ON_TIMER_EXPIRE, ORIGINATOR_CANCEL and CALL_REJECTED are not in
+// the map: what they come to depends on more than the cause (issues #576,
+// #613 and #702). expectedOutcome holds those rules.
 var designCauseOutcomes = map[string]string{
 	"NO_ANSWER":                 "NO_ANSWER",
 	"NO_USER_RESPONSE":          "NO_ANSWER",
 	"USER_BUSY":                 "BUSY",
-	"CALL_REJECTED":             "REJECTED",
 	"NORMAL_TEMPORARY_FAILURE":  "TRANSIENT",
 	"NETWORK_OUT_OF_ORDER":      "TRANSIENT",
 	"SWITCH_CONGESTION":         "TRANSIENT",
@@ -358,13 +370,29 @@ const causeRingTimer = "RECOVERY_ON_TIMER_EXPIRE"
 // the caller (C11). Our own ring timeout is NO_ANSWER.
 const causeFarEndTerminated = "ORIGINATOR_CANCEL"
 
-// expectedOutcome is the outcome design 10 section 7.2 (and issues #576 and
-// #613) gives an unanswered attempt that ended with cause. It reads the dialog
-// for the two causes that need it: the far end's 408, or its own 487, ends a
-// call that rang (180 or 183 first) as NO_ANSWER, which spends maxAttempts,
-// and one that never rang as TRANSIENT. The second result names the rule, for
-// the check's text; ok is false when the design does not say.
+// causeCallRejected is the hangup cause the switch reports for a callee's 603
+// Decline (C05) and for the line's own refusals, 401, 402, 403, 407 and 608
+// (C12).
+const causeCallRejected = "CALL_REJECTED"
+
+// expectedOutcome is the outcome design 10 section 7.2 (and issues #576, #613
+// and #702) gives an unanswered attempt that ended with cause. It reads the
+// dialog for the three causes that need it: the far end's 408, or its own
+// 487, ends a call that rang (180 or 183 first) as NO_ANSWER, which spends
+// maxAttempts, and one that never rang as TRANSIENT; a CALL_REJECTED is
+// REJECTED for the callee's 603 and LINE_REJECTED for any other final status,
+// rung or not. The second result names the rule, for the check's text; ok is
+// false when the design does not say.
 func expectedOutcome(cause string, d *calleesim.DialogRecord) (want, rule string, ok bool) {
+	if cause == causeCallRejected {
+		if d == nil || d.Final == nil {
+			return "", "", false
+		}
+		if d.Final.Status == 603 {
+			return "REJECTED", "a CALL_REJECTED that is the callee's 603", true
+		}
+		return "LINE_REJECTED", "a CALL_REJECTED with a status other than 603 (the line refused it)", true
+	}
 	if cause == causeFarEndTerminated {
 		if d == nil || d.Final == nil {
 			return "", "", false
@@ -408,7 +436,12 @@ var sipIntent = map[int]string{
 	480: "NO_ANSWER (the callee's side reports the user not reachable now)",
 	484: "INVALID_NUMBER (the number is malformed)",
 	486: "BUSY",
+	401: "LINE_REJECTED (the line's authentication failed; reported as CALL_REJECTED, #702)",
+	402: "LINE_REJECTED (the line's account is out of credit; reported as CALL_REJECTED, #702)",
+	403: "LINE_REJECTED (the carrier refused the call; reported as CALL_REJECTED, #702)",
+	407: "LINE_REJECTED (the line's authentication failed; reported as CALL_REJECTED, #702)",
 	487: "NO_ANSWER when the far end sends it by itself after the leg rang (180/183), TRANSIENT when it never rang (#613)",
 	503: "TRANSIENT (the network is unavailable)",
-	603: "REJECTED",
+	603: "REJECTED (the callee declined)",
+	608: "LINE_REJECTED (an intermediary refused the call; reported as CALL_REJECTED, #702)",
 }

@@ -191,7 +191,7 @@ func TestACampaignRunsItsLifecycleThroughTheAPI(t *testing.T) {
 		t.Errorf("created = %+v", c)
 	}
 	rp := c.RetryPolicy
-	if rp.MaxAttempts != 3 || rp.MaxSystemRetries != 5 || len(rp.RetryOutcomes) != 6 ||
+	if rp.MaxAttempts != 3 || rp.MaxSystemRetries != 5 || len(rp.RetryOutcomes) != 7 ||
 		rp.IntervalSec["NO_ANSWER"] != 7200 || rp.IntervalSec["BUSY"] != 1800 ||
 		rp.IntervalSec["REJECTED"] != 86400 || rp.IntervalSec["UNKNOWN"] != 86400 ||
 		rp.TransientBackoff.BaseSec != 300 || rp.TransientBackoff.Factor != 3 || rp.TransientBackoff.CapSec != 14400 {

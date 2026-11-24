@@ -4,6 +4,7 @@ package obs
 
 import (
 	"context"
+	"strconv"
 	"sync"
 	"time"
 
@@ -76,6 +77,7 @@ var (
 	recordingSpoolUnbooked  metric.Int64Gauge
 
 	campaignUnmappedCause metric.Int64Counter
+	campaignLineRejected  metric.Int64Counter
 	campaignAttempts      metric.Int64Counter
 	campaignLeadVerdicts  metric.Int64Counter
 	dialerInFlight        metric.Int64UpDownCounter
@@ -357,6 +359,12 @@ func init() {
 		metric.WithDescription("Campaign attempts that ended with a hangup cause the "+
 			"outcome table has no row for. Each was treated as TRANSIENT (retried within "+
 			"maxSystemRetries); a rising count means the table needs a row."))
+	campaignLineRejected, _ = meter.Int64Counter("aicc_campaign_line_rejected_total",
+		metric.WithDescription("Campaign attempts the line refused before they reached a "+
+			"phone (outcome LINE_REJECTED: hangup cause CALL_REJECTED with a final SIP "+
+			"status other than the callee's 603 Decline), by that status (sip_status: 402 "+
+			"for a line out of credit, 401 or 407 for its authentication, 403, 608). A "+
+			"burst of one status is the line refusing every call, not callees declining."))
 	campaignAttempts, _ = meter.Int64Counter("aicc_campaign_attempts_total",
 		metric.WithDescription("Campaign attempts that finished, by outcome. A revision of "+
 			"an attempt that was already finished is not counted again."))
@@ -1092,6 +1100,21 @@ func RecordCampaignUnmappedCause(cause string) {
 	}
 	campaignUnmappedCause.Add(context.Background(), 1,
 		metric.WithAttributes(attribute.String("cause", string(label))))
+}
+
+// RecordCampaignLineRejected counts an attempt the line refused, by its final
+// SIP status. A status is a label from a bounded set: one outside 100 to 699
+// is OTHER, so a malformed value cannot mint series.
+func RecordCampaignLineRejected(sipStatus int) {
+	if campaignLineRejected == nil {
+		return
+	}
+	label := "OTHER"
+	if sipStatus >= 100 && sipStatus <= 699 {
+		label = strconv.Itoa(sipStatus)
+	}
+	campaignLineRejected.Add(context.Background(), 1,
+		metric.WithAttributes(attribute.String("sip_status", label)))
 }
 
 // The stages of the time to the first word of an AI outbound call, the label

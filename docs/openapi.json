@@ -11733,11 +11733,12 @@
           "REJECTED",
           "UNKNOWN",
           "TRANSIENT",
+          "LINE_REJECTED",
           "ORIGINATE_FAILED",
           "INVALID_NUMBER",
           "DNC_SKIPPED"
         ],
-        "description": "How an attempt ended (design 10 section 7.2). A contact's lastOutcome is the latest attempt's."
+        "description": "How an attempt ended (design 10 section 7.2). A contact's lastOutcome is the latest attempt's. A call the switch reports as CALL_REJECTED is told apart by its final SIP status (sipStatus on the attempt): REJECTED is the callee declining, a 603 Decline or a refusal with no status, and spends maxAttempts; LINE_REJECTED is the line refusing the call before it reached a phone, any other status (402 Payment Required, 401 or 407 for the line's authentication, 403 Forbidden, 608 Rejected), a system failure that spends maxSystemRetries on transientBackoff like TRANSIENT, does not hold the number from other campaigns, is no dial of the number for the daily dial cap (it never reached a phone), and counts towards pausing the campaign as TRUNK_FAILURE."
       },
       "CampaignRetryOutcome": {
         "type": "string",
@@ -11747,6 +11748,7 @@
           "REJECTED",
           "UNKNOWN",
           "TRANSIENT",
+          "LINE_REJECTED",
           "ORIGINATE_FAILED"
         ],
         "description": "The outcomes a campaign may choose to dial again. An answered number is never dialled again, and neither is an invalid or do-not-call one, so those outcomes are not choices."
@@ -11840,7 +11842,7 @@
       },
       "CampaignBackoff": {
         "type": "object",
-        "description": "Spacing of the retries of a failure that never reached the customer (TRANSIENT, ORIGINATE_FAILED): the first retry comes baseSec after the failure, each next one factor times later, never more than capSec.",
+        "description": "Spacing of the retries of a failure that never reached the customer (TRANSIENT, LINE_REJECTED, ORIGINATE_FAILED): the first retry comes baseSec after the failure, each next one factor times later, never more than capSec.",
         "properties": {
           "baseSec": {
             "type": "integer",
@@ -11893,7 +11895,7 @@
       },
       "CampaignIntervalSec": {
         "type": "object",
-        "description": "Seconds to wait after an outcome that reached the customer before dialling again: NO_ANSWER, BUSY, REJECTED and UNKNOWN, each from 60 to 2592000. Defaults: 7200, 1800, 86400, 86400. TRANSIENT and ORIGINATE_FAILED follow transientBackoff instead.",
+        "description": "Seconds to wait after an outcome that reached the customer before dialling again: NO_ANSWER, BUSY, REJECTED and UNKNOWN, each from 60 to 2592000. Defaults: 7200, 1800, 86400, 86400. TRANSIENT, LINE_REJECTED and ORIGINATE_FAILED follow transientBackoff instead.",
         "additionalProperties": {
           "type": "integer",
           "minimum": 60,
@@ -12534,6 +12536,12 @@
           "hangupCause": {
             "type": "string"
           },
+          "sipStatus": {
+            "type": "integer",
+            "minimum": 100,
+            "maximum": 699,
+            "description": "The final SIP status the far end ended the call with, such as 402 or 603: the CDR's tech.sipStatus, kept on the attempt. Present only when the switch reported one; a ring this platform cancelled at its ring timeout and a placement failure have none."
+          },
           "talkSec": {
             "type": "integer",
             "minimum": 0,
@@ -12618,8 +12626,8 @@
           },
           "attemptsByOutcome": {
             "type": "array",
-            "minItems": 11,
-            "maxItems": 11,
+            "minItems": 12,
+            "maxItems": 12,
             "items": {
               "$ref": "#/components/schemas/CampaignOutcomeCount"
             },
@@ -12627,8 +12635,8 @@
           },
           "contactsByLastOutcome": {
             "type": "array",
-            "minItems": 11,
-            "maxItems": 11,
+            "minItems": 12,
+            "maxItems": 12,
             "items": {
               "$ref": "#/components/schemas/CampaignOutcomeCount"
             },

@@ -1,3 +1,6 @@
+import {
+  Outlet, RouterProvider, createMemoryHistory, createRootRoute, createRoute, createRouter,
+} from '@tanstack/react-router'
 import { screen, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -27,6 +30,9 @@ const attempt = (n: number, over: Partial<CampaignAttempt>): CampaignAttempt => 
 
 afterEach(() => vi.unstubAllGlobals())
 
+/** The table row that shows this number. */
+const row = async (number: string) => (await screen.findByText(number)).closest('tr') as HTMLElement
+
 // A skipped number has no call page, so its rows draw no router link.
 describe('the attempts list', () => {
   it('marks a call to a test number and no other', async () => {
@@ -41,5 +47,48 @@ describe('the attempts list', () => {
     const other = screen.getByText('+8613800000002').closest('tr') as HTMLElement
     expect(within(mine).getByText(i18n.t('campaign.testNumber'))).toBeTruthy()
     expect(within(other).queryByText(i18n.t('campaign.testNumber'))).toBeNull()
+  })
+})
+
+// A line's refusal and a callee's 603 share the cause CALL_REJECTED: the
+// outcome names which it was, and the status follows the cause, for the 603
+// too. A row the switch gave no status shows the cause alone.
+describe('the hangup cause of an attempt', () => {
+  it('carries the SIP status beside the cause when there is one', async () => {
+    installBackend({
+      handle: ({ path, method }) =>
+        method === 'GET' && path.startsWith(`/campaigns/${CAMPAIGN_ID}/attempts`)
+          ? {
+              items: [
+                attempt(1, { outcome: 'LINE_REJECTED', hangupCause: 'CALL_REJECTED', sipStatus: 402, isTouched: false }),
+                attempt(2, { outcome: 'REJECTED', hangupCause: 'CALL_REJECTED', sipStatus: 603 }),
+                attempt(3, { outcome: 'REJECTED', hangupCause: 'CALL_REJECTED' }),
+              ],
+              total: 3,
+            }
+          : undefined,
+    })
+    // These rows link to their call records, and a link needs a router that
+    // knows the target.
+    vi.stubGlobal('scrollTo', () => {})
+    const root = createRootRoute({ component: Outlet })
+    const tree = root.addChildren([
+      createRoute({
+        getParentRoute: () => root, path: '/attempts',
+        component: () => <AttemptsTab campaign={campaign} view={{ page: 0 }} onView={() => {}} />,
+      }),
+      createRoute({ getParentRoute: () => root, path: '/admin/cdr/$callId', component: () => null }),
+    ])
+    const router = createRouter({ routeTree: tree, history: createMemoryHistory({ initialEntries: ['/attempts'] }) })
+    renderWithProviders(<RouterProvider router={router as unknown as Parameters<typeof RouterProvider>[0]['router']} />)
+    const refused = await row('+8613800000001')
+    expect(within(refused).getByText('Line rejected')).toBeTruthy()
+    expect(within(refused).getByText('CALL_REJECTED · 402')).toBeTruthy()
+    const declined = await row('+8613800000002')
+    expect(within(declined).getByText(i18n.t('campaign.outcomes.REJECTED'))).toBeTruthy()
+    expect(within(declined).getByText('CALL_REJECTED · 603')).toBeTruthy()
+    const bare = await row('+8613800000003')
+    expect(within(bare).getByText('CALL_REJECTED')).toBeTruthy()
+    expect(within(bare).queryByText(/·/)).toBeNull()
   })
 })

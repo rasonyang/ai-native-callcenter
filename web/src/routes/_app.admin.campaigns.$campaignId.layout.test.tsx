@@ -107,6 +107,7 @@ function attempts(overrides: Partial<CampaignAttempt> = {}): CampaignAttempt[] {
     attempt(3, { outcome: 'ORIGINATE_FAILED', hangupCause: 'USER_NOT_REGISTERED', ...overrides }),
     attempt(4, { state: 'DIALING', outcome: undefined, hangupCause: undefined, talkSec: undefined, finishedAt: undefined, ...overrides }),
     attempt(5, { outcome: 'DNC_SKIPPED', ...overrides }),
+    attempt(6, { outcome: 'LINE_REJECTED', hangupCause: 'CALL_REJECTED', sipStatus: 402, talkSec: 0, isTouched: false, ...overrides }),
   ]
 }
 
@@ -115,11 +116,11 @@ function outcomeSummary(count: (i: number) => number): CampaignOutcomeSummary {
   return {
     campaignId: CAMPAIGN_ID,
     attemptsByOutcome: CAMPAIGN_OUTCOMES.map((outcome, i) => ({ outcome, count: count(i) })),
-    contactsByLastOutcome: CAMPAIGN_OUTCOMES.map((outcome, i) => ({ outcome, count: count(i + 11) })),
-    contactsByLeadIntent: LEAD_INTENTS.map((leadIntent, i) => ({ leadIntent, count: count(i + 22) })),
-    optOuts: { saidInConversation: count(27), alreadyListed: count(28) },
+    contactsByLastOutcome: CAMPAIGN_OUTCOMES.map((outcome, i) => ({ outcome, count: count(i + 12) })),
+    contactsByLeadIntent: LEAD_INTENTS.map((leadIntent, i) => ({ leadIntent, count: count(i + 24) })),
+    optOuts: { saidInConversation: count(29), alreadyListed: count(30) },
     callbacksByStatus: (['OPEN', 'CLAIMED', 'DONE', 'DISMISSED'] as const).map((status, i) => ({
-      status, count: count(i + 29),
+      status, count: count(i + 31),
     })),
   }
 }
@@ -320,7 +321,8 @@ describe('campaign detail, attempts tab', () => {
   // One column at a time, the other keeps its ordinary value.
   for (const [column, put] of [
     ['number', (v: string) => ({ number: v })],
-    ['hangup cause', (v: string) => ({ hangupCause: v })],
+    // The SIP status follows the cause, so an unbreakable cause carries one.
+    ['hangup cause', (v: string) => ({ hangupCause: v, sipStatus: 402 })],
   ] as const) {
     layoutTest(`campaigns/$campaignId attempts (unbreakable ${column})`, async (ctx) => {
       const { user } = render({
@@ -456,12 +458,12 @@ describe('campaign detail, outcomes tab', () => {
   })
 
   // The largest count the contract's integer carries, in every row: the
-  // column totals are eleven of them, an eleven-digit number.
+  // column totals are twelve of them, an eleven-digit number.
   layoutTest('campaigns/$campaignId outcomes (largest counts)', async (ctx) => {
     const { user } = render({ summary: outcomeSummary(() => 2147483647) })
     await drawn()
     await openTab(user, 'campaign.tabs.outcomes')
-    await screen.findAllByText('23622320117')
+    await screen.findAllByText('25769803764')
     await expectLayout(ctx)
   })
 })

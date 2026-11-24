@@ -67,7 +67,7 @@ const SETTINGS: CampaignSettings = {
     retryPolicy: {
       maxAttempts: 3,
       maxSystemRetries: 5,
-      retryOutcomes: ['NO_ANSWER', 'BUSY', 'REJECTED', 'UNKNOWN', 'TRANSIENT', 'ORIGINATE_FAILED'],
+      retryOutcomes: ['NO_ANSWER', 'BUSY', 'REJECTED', 'UNKNOWN', 'TRANSIENT', 'LINE_REJECTED', 'ORIGINATE_FAILED'],
       intervalSec: { NO_ANSWER: 7200, BUSY: 1800, REJECTED: 86400, UNKNOWN: 86400 },
       transientBackoff: { baseSec: 300, factor: 3, capSec: 14400 },
     },
@@ -103,6 +103,21 @@ describe('the campaign form', () => {
     for (const label of ['Name', 'Number to dial from', 'Time zone', 'Maximum concurrent calls', 'Ring timeout (seconds)']) {
       expect(screen.getByLabelText(label)).toBeEnabled()
     }
+  })
+
+  it('offers a line refusal among the outcomes a policy retries, beside the network error', async () => {
+    const user = userEvent.setup()
+    let sent: CampaignForm | undefined
+    const policy = { ...campaignFixture().retryPolicy, retryOutcomes: ['TRANSIENT' as const] }
+    renderWithProviders(<FormHarness campaign={campaignFixture({ retryPolicy: policy })} onSubmit={(f) => { sent = f }} />)
+    const line = screen.getByRole('checkbox', { name: 'Line rejected' })
+    expect(line).not.toBeChecked()
+    expect(screen.getByRole('checkbox', { name: 'Network error' })).toBeChecked()
+    const labels = screen.getAllByRole('checkbox').map((box) => box.closest('label')?.textContent ?? '')
+    expect(labels.indexOf('Line rejected')).toBe(labels.indexOf('Network error') + 1)
+    await user.click(line)
+    await user.click(screen.getByRole('button', { name: 'Save' }))
+    expect(sent?.retryOutcomes).toEqual(['TRANSIENT', 'LINE_REJECTED'])
   })
 
   it('locks what the API locks while running, and says why', () => {

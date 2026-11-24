@@ -26,6 +26,7 @@
     "+12025550114": [{"provisionals": [{"status": 180, "atMs": 100}], "finalStatus": 484, "finalAfterMs": 300}],
     "+12025550115": [{"provisionals": [{"status": 180, "atMs": 100}], "finalStatus": 410, "finalAfterMs": 300}],
     "+12025550116": [{"provisionals": [{"status": 180, "atMs": 100}], "finalStatus": 487, "finalAfterMs": 2000}],
+    "+12025550117": [{"finalStatus": 402, "finalAfterMs": 50}],
     "+8613988886601": [{"provisionals": [{"status": 180, "atMs": 100}], "finalAfterMs": 2000, "uplink": {"kind": "TONE"}}],
     "+8613988886602": [{"finalAfterMs": 300, "byeAfterMs": 1000}],
     "+8613988886604": [
@@ -44,6 +45,7 @@
     "+8613988886614": [{"provisionals": [{"status": 180, "atMs": 100}], "finalStatus": 484, "finalAfterMs": 300}],
     "+8613988886615": [{"provisionals": [{"status": 180, "atMs": 100}], "finalStatus": 410, "finalAfterMs": 300}],
     "+8613988886616": [{"provisionals": [{"status": 180, "atMs": 100}], "finalStatus": 487, "finalAfterMs": 2000}],
+    "+8613988886617": [{"finalStatus": 402, "finalAfterMs": 50}],
     "+12025550121": [{"provisionals": [{"status": 180, "atMs": 100}], "finalAfterMs": 5000, "byeAfterMs": 6000}],
     "+12025550122": [{"provisionals": [{"status": 180, "atMs": 100}], "finalAfterMs": 5000, "byeAfterMs": 6000}],
     "+12025550123": [{"provisionals": [{"status": 180, "atMs": 100}], "finalAfterMs": 5000, "byeAfterMs": 6000}],
