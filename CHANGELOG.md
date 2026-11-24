@@ -50,6 +50,16 @@ carries the one-line installer's files.
 
 ### Fixed
 
+- **An adopted handed-over AI call keeps its number and type** (#533). After a
+  restart, a handed-over AI outbound call replayed from its channel dump was
+  classified and numbered from the channel's destination — which the transfer
+  had rewritten to the queue's extension, and which can even read inbound for
+  a leg parked in a queue — so the ledger wrote the extension as the customer
+  and the call as INBOUND. The AI leg now carries `aicc_call_type=OUTBOUND`
+  from the moment it is placed, and adoption takes the dialled number from
+  `aicc_placed_to` (or `aicc_destination` on a click-to-dial trunk leg, which
+  the dialplan now exports like the DID) before trusting the channel's
+  direction or destination.
 - **A machine that answers a campaign call records no lead** (#409). On a call
   the platform placed to a customer, each final transcript of the callee's
   words is now checked against a built-in Chinese and English list of what a

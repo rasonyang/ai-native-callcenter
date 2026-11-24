@@ -62,6 +62,12 @@ func TestANonCanonicalStoredLanguageStillPlacesItsCalls(t *testing.T) {
 		if got := sw.lastOriginate().vars["aicc_language"]; got != language {
 			t.Errorf("language %q rode the leg as %q", language, got)
 		}
+		// The call's type rides the leg too: a restart that replays the
+		// channel after a hand-over cannot guess it from a destination that
+		// now names the queue (#533).
+		if got := sw.lastOriginate().vars["aicc_call_type"]; got != "OUTBOUND" {
+			t.Errorf("aicc_call_type = %q on the AI leg, want OUTBOUND", got)
+		}
 	}
 }
 

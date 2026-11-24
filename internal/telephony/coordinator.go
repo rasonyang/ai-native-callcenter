@@ -1843,6 +1843,12 @@ func callTypeOf(ev SwitchEvent) events.CallType {
 	case events.CallTypeInbound, events.CallTypeOutbound, events.CallTypeInternal:
 		return events.CallType(ev.CallTypeHint)
 	}
+	// A leg this platform placed to a customer is an outbound call however
+	// the channel's direction and context read after a transfer — an adopted
+	// leg whose stamp predates aicc_call_type still says who placed it.
+	if ev.PlacedBy == PlacedByDialAI {
+		return events.CallTypeOutbound
+	}
 	// A channel the switch created inbound came from outside; one it created
 	// outbound is a call we or the dialplan placed.
 	if ev.Direction == DirectionInbound {
@@ -1888,11 +1894,30 @@ func otherNumber(ev SwitchEvent) string {
 }
 
 func legNumber(ev SwitchEvent) string {
+	// A leg this platform placed to a customer carries the dialled number
+	// with it, and that outranks what the channel's destination says after a
+	// hand-over: a transferred leg's Caller-Destination-Number is the queue's
+	// extension, and a restart's replayed create cannot trust the direction
+	// either (an adopted transfer can read inbound). On the trunk leg of a
+	// click-to-dial the same fact travels as aicc_destination, stamped on the
+	// agent's leg and exported; the agent's own leg carries it and is told
+	// apart by aicc_extension, and a leg delivered to an agent names its
+	// extension in dialed_user before either of those.
+	if ev.PlacedBy == PlacedByDialAI && ev.PlacedTo != "" {
+		return ev.PlacedTo
+	}
+	if ev.Direction != DirectionInbound {
+		if dialed := ev.Raw.Variable("dialed_user"); dialed != "" {
+			return dialed
+		}
+	}
+	if ev.Raw.Variable("aicc_extension") == "" && ev.Raw.Variable("aicc_did") != "" {
+		if dest := ev.Raw.Variable("aicc_destination"); dest != "" {
+			return dest
+		}
+	}
 	if ev.Direction == DirectionInbound {
 		return ev.ANI
-	}
-	if dialed := ev.Raw.Variable("dialed_user"); dialed != "" {
-		return dialed
 	}
 	if ev.DestinationNumber != "" {
 		return ev.DestinationNumber

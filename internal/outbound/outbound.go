@@ -22,6 +22,7 @@ import (
 
 	"github.com/rasonyang/ai-native-callcenter/internal/catalog"
 	"github.com/rasonyang/ai-native-callcenter/internal/config"
+	"github.com/rasonyang/ai-native-callcenter/internal/events"
 	"github.com/rasonyang/ai-native-callcenter/internal/obs"
 	"github.com/rasonyang/ai-native-callcenter/internal/phonenum"
 	"github.com/rasonyang/ai-native-callcenter/internal/recording"
@@ -1011,6 +1012,11 @@ func (s *Service) PlaceAI(ctx context.Context, req AIDialRequest) (Placement, er
 		// the bot when the customer answers (adopt.go).
 		telephony.VarPlacedBy: telephony.PlacedByDialAI,
 		telephony.VarPlacedTo: req.To,
+		// What this call is, on the leg like the DID: after a hand-over the
+		// channel's own direction and destination read as the queue's, so a
+		// restart replaying the leg would otherwise classify it inbound and
+		// write the call's numbers backwards (#533).
+		"aicc_call_type": string(events.CallTypeOutbound),
 		// The number this call goes out from, on the leg from the moment it
 		// exists rather than only on the bridge to the bot. A call nobody
 		// answers never reaches that bridge, so its row had neither the number

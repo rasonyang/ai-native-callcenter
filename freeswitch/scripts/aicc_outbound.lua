@@ -76,6 +76,15 @@ else
   session:setVariable("export_vars", with_exported(session:getVariable("export_vars"), "aicc_did"))
 end
 
+-- The dialled number and the call's type reach the trunk leg the same way the
+-- DID does: after a hand-over the leg's own destination reads as the queue's
+-- extension, and a restart replaying the channel would guess both wrong. The
+-- originate stamped both on the agent's leg; exporting is what puts them on
+-- the leg it is about to bridge. A leg that carries neither (a handset dial)
+-- exports nothing new, which is the harmless case.
+session:setVariable("export_vars", with_exported(session:getVariable("export_vars"), "aicc_destination"))
+session:setVariable("export_vars", with_exported(session:getVariable("export_vars"), "aicc_call_type"))
+
 -- A transfer into this path from a call already being recorded keeps that file
 -- going: recording_follow_transfer rides the leg, and a second record_session
 -- on the same channel would fight it for the same key.
