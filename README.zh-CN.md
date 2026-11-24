@@ -32,6 +32,44 @@ curl -fsSL https://github.com/rasonyang/ai-native-callcenter/releases/latest/dow
 
 详见 [deploy/one-line-installer.md](deploy/one-line-installer.md)。
 
+## API
+
+API 就是产品，[`docs/openapi.json`](docs/openapi.json) 是它的契约：Web 界面
+只是它的一个普通消费者，特权不比你的集成多——一把按 scope 签发的 API key，
+能达到会话 cookie 能达到的一切。
+
+渲染后的契约见 [API 参考](https://rasonyang.dev/aicc/api/)；每个部署也在
+`GET /api/v1/openapi.json` 提供自己的一份。事件流见
+[事件指南](docs/events.md)；已结束通话以契约中声明的 `cdrDelivery`
+webhook 投递给订阅的端点。
+
+对着 `make stack-up`（API 在 `http://localhost:8080`，已播种
+`admin`/`aicc@123`）：
+
+```sh
+# 1. 先登录，再签发一把 scoped key——secret 只返回这一次
+curl -c jar -H 'Content-Type: application/json' -d '{"username":"admin","password":"aicc@123"}' localhost:8080/api/v1/auth/login
+curl -b jar -H 'Content-Type: application/json' -H 'X-AICC-Csrf: 1' -d '{"name":"demo","scopes":["calls:create","calls:create:ai","calls:read:all","history:read:all","config:write"]}' localhost:8080/api/v1/api-keys
+# → {"id":"019a1f00-…","keyPrefix":"…","secret":"…"} —— 令 KEY=<secret>
+
+# 2. 用主号码的流程发起一通外呼（被叫是注册为 2125550101 的话机——
+#    见 deploy/README.md）
+curl -H "Authorization: Bearer $KEY" -H 'Content-Type: application/json' -d '{"kind":"AI_OUTBOUND","did":"8005550199","to":"2125550101"}' localhost:8080/api/v1/calls
+# → {"callId":"019a3c2e-…"} —— 令 CALL=<callId>
+
+# 3. 跟随有序事件流
+curl -N -H "Authorization: Bearer $KEY" localhost:8080/api/v1/events
+# → id:/event:/data: 帧——PARTY_DIALING … PARTY_RELEASED … CALL_CDR
+
+# 4. 读取通话留下的记录
+curl -H "Authorization: Bearer $KEY" localhost:8080/api/v1/cdrs/$CALL
+# → {"cdr":{…},"transcript":[…],"recordings":[…]}
+
+# 5. 订阅一个端点，每通结束的通话都把它的 CDR POST 过去
+curl -H "Authorization: Bearer $KEY" -H 'Content-Type: application/json' -d '{"name":"cdr-feed","url":"https://example.com/cdr","isEnabled":true}' localhost:8080/api/v1/webhook-subscriptions
+# → {"subscriptionId":"019a1f00-…","hasAuthToken":false}
+```
+
 ## 它做什么
 
 **用模型应答，而不是按键菜单。** AI 分支是应用内部的一个 SIP 端点：FreeSWITCH 把

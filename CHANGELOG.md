@@ -15,6 +15,11 @@ carries the one-line installer's files.
 
 ### Fixed
 
+- Docs: `README.md` and `README.zh-CN.md` gain an **API** section between
+  **Try it** and **What it does**: `docs/openapi.json` as the contract, the
+  API reference, the events guide and the `cdrDelivery` webhook, and a
+  five-command `curl` quickstart against `make stack-up` (#432).
+
 - **A machine that answers a campaign call records no lead** (#409). On a call
   the platform placed to a customer, each final transcript of the callee's
   words is now checked against a built-in Chinese and English list of what a
