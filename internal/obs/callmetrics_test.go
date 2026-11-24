@@ -395,6 +395,20 @@ func TestAMachineAnsweredCallIsCountedByCategoryAndProvider(t *testing.T) {
 	}
 }
 
+func TestALeadVerdictIsCountedByVerdict(t *testing.T) {
+	reader := useTestReader()
+	before := sumByLabels(t, reader, "aicc_campaign_lead_verdicts_total", "verdict")
+	RecordLeadVerdict("CONFIRMED")
+	RecordLeadVerdict("NOT_JUDGED")
+	RecordLeadVerdict("NOT_JUDGED")
+	after := sumByLabels(t, reader, "aicc_campaign_lead_verdicts_total", "verdict")
+	for key, want := range map[string]int64{"CONFIRMED": 1, "NOT_JUDGED": 2, "REFUSED": 0} {
+		if got := after[key] - before[key]; got != want {
+			t.Errorf("%s gained %d, want %d (before %v, after %v)", key, got, want, before, after)
+		}
+	}
+}
+
 // sumByLabels reads one counter or gauge: its value per combination of the
 // named labels, joined with "/".
 func sumByLabels(t *testing.T, reader sdkmetric.Reader, name string, labels ...string) map[string]int64 {

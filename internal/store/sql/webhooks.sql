@@ -41,12 +41,16 @@ SELECT subscription_id, filter FROM webhook_subscriptions WHERE is_enabled;
 --
 -- ON CONFLICT DO NOTHING guards the one race that matters — two CDR writes
 -- landing at once would otherwise both compute revision 2.
+--
+-- next_attempt_at is when the delivery is first due; NULL is now. A campaign
+-- call whose lead is being judged is held until the judgement's bound
+-- (design 10 section 11.1).
 -- name: EnqueueWebhookDelivery :one
-INSERT INTO webhook_deliveries (delivery_id, subscription_id, call_id, revision, payload)
+INSERT INTO webhook_deliveries (delivery_id, subscription_id, call_id, revision, payload, next_attempt_at)
 VALUES ($1, $2, $3,
         coalesce((SELECT max(revision) + 1 FROM webhook_deliveries
                   WHERE subscription_id = $2 AND call_id = $3), 1),
-        $4)
+        $4, coalesce(sqlc.narg('next_attempt_at')::timestamptz, now()))
 ON CONFLICT (subscription_id, call_id, revision) DO NOTHING
 RETURNING *;
 
@@ -65,9 +69,13 @@ RETURNING *;
 -- replaced first is skipped by the claim's FOR UPDATE SKIP LOCKED until this
 -- transaction commits. An unattempted row already has attempt_count 0, no
 -- error and no status code, so only the payload and the due time change.
+--
+-- The due time is now unless next_attempt_at says otherwise: a fuller CDR of a
+-- call whose lead is still being judged keeps the hold, and the verdict that
+-- ends it replaces the payload with nothing given, which releases it.
 -- name: ReplacePendingWebhookDelivery :one
 UPDATE webhook_deliveries
-SET payload = $3, next_attempt_at = now()
+SET payload = $3, next_attempt_at = coalesce(sqlc.narg('next_attempt_at')::timestamptz, now())
 WHERE subscription_id = $1 AND call_id = $2 AND status = 'PENDING' AND attempt_count = 0
 RETURNING *;
 

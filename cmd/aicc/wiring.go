@@ -24,6 +24,7 @@ import (
 	"github.com/rasonyang/ai-native-callcenter/internal/events"
 	"github.com/rasonyang/ai-native-callcenter/internal/flow"
 	"github.com/rasonyang/ai-native-callcenter/internal/httpapi"
+	"github.com/rasonyang/ai-native-callcenter/internal/leadjudge"
 	"github.com/rasonyang/ai-native-callcenter/internal/obs"
 	"github.com/rasonyang/ai-native-callcenter/internal/phonenum"
 	"github.com/rasonyang/ai-native-callcenter/internal/provider"
@@ -908,6 +909,48 @@ func wrapUpDrafter(cfg config.Config, st wrapupdraft.Store, pub wrapupdraft.Publ
 		BudgetChars: cfg.TextLLMContextChars,
 		Settle:      wrapupdraft.DefaultSettle,
 	}, log)
+}
+
+// leadJudge builds the judge of campaign leads (design 10 section 11.1). It
+// always returns a service: one with no text model only settles, at their
+// deadline, judgements an earlier run left owed, so a lead never stays PENDING
+// and its callback is still filed. Its IsJudging is what the store's switch
+// follows, and it is true only when every part is there: the feature on, the
+// text model configured with a key, and the caller's words in the bot phase's
+// transcript (the conversation session transcribes them unless
+// AICC_PROVIDER_TRANSCRIBE_MODEL is "off"; with no callee line every lead
+// would be judged NO_EVIDENCE and dropped). Live transcription of the human
+// phase is not needed: a judged call never reached a person.
+func leadJudge(cfg config.Config, st leadjudge.Store, getenv func(string) string, log *slog.Logger) *leadjudge.Service {
+	judgeCfg := leadjudge.Config{Timeout: cfg.TextLLMTimeout, BudgetChars: cfg.TextLLMContextChars}
+	off := func(reason string) *leadjudge.Service {
+		if reason != "" {
+			log.Info("campaign leads are not judged: " + reason)
+		}
+		return leadjudge.New(st, nil, judgeCfg, log)
+	}
+	switch {
+	case !cfg.IsLeadJudgeEnabled:
+		return off("AICC_LEAD_JUDGE_ENABLED is false")
+	case cfg.TextLLMEndpoint == "" || cfg.TextLLMModel == "":
+		return off("")
+	case strings.EqualFold(cfg.ProviderTranscribeModel, "off"):
+		return off("the caller's words are not transcribed (AICC_PROVIDER_TRANSCRIBE_MODEL=off)")
+	}
+	key := getenv("TEXT_LLM_API_KEY")
+	if key == "" {
+		log.Error("campaign leads are not judged: TEXT_LLM_API_KEY is not set", "endpoint", cfg.TextLLMEndpoint)
+		return off("")
+	}
+	llm, err := textllm.New(textllm.Config{
+		Endpoint: cfg.TextLLMEndpoint, Model: cfg.TextLLMModel, APIKey: key,
+	}, nil)
+	if err != nil {
+		log.Error("campaign leads are not judged", "error", err)
+		return off("")
+	}
+	log.Info("campaign leads are judged", "model", cfg.TextLLMModel)
+	return leadjudge.New(st, llm, judgeCfg, log)
 }
 
 // removedSettings are AICC_* variables an earlier release read and this one

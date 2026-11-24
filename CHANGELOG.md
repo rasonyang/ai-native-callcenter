@@ -7,6 +7,41 @@ carries the one-line installer's files.
 
 ## Unreleased
 
+### Upgrade notes
+
+- **A deployment with a text model configured now judges campaign leads**
+  (#661). `AICC_LEAD_JUDGE_ENABLED` is new and defaults to `true`; it takes
+  effect only where `AICC_TEXT_LLM_ENDPOINT`, `AICC_TEXT_LLM_MODEL` and
+  `TEXT_LLM_API_KEY` are set. Expect fewer `HIGH` leads and callbacks, and the
+  webhook delivery of a call with a `HIGH` or `MEDIUM` lead to arrive up to
+  35 seconds after the call ends. Set `AICC_LEAD_JUDGE_ENABLED=false` to keep
+  leads as the flow records them.
+
+### Added
+
+- **A text model reads a finished campaign call and decides its lead** (#661).
+  After a campaign call the bot handled alone ends with a `HIGH` or `MEDIUM`
+  lead, the platform's text model (`AICC_TEXT_LLM_*`, not the voice provider)
+  reads the callee's and the bot's words of the transcript, never a tool call,
+  and gives a verdict with a one-sentence reason in the call's language:
+  `CONFIRMED` keeps the lead, `UNDECIDED` lowers `HIGH` to `MEDIUM`,
+  `REFUSED`, `MACHINE` and `NO_EVIDENCE` leave no lead (`NONE`), and
+  `NOT_JUDGED` (no usable verdict within 30 seconds) keeps it. A call with no
+  words from the callee is `NO_EVIDENCE` without asking the model. The callback
+  a `HIGH` lead files waits for the verdict and is filed only if the lead is
+  still `HIGH`. The call's webhook delivery is held for the verdict, at most
+  35 seconds, and already carries `leadVerdict: NOT_JUDGED` with the declared
+  lead, so it is correct if no verdict comes; a verdict in time replaces it and
+  releases it at once. Every other call, a call with no lead or one that was
+  never answered included, is delivered at once as before. The contract adds
+  `CampaignLeadVerdict`, and `declaredLeadIntent`, `leadVerdict` and
+  `leadVerdictReason` on `CampaignAttempt` and the CDR, which also carries the
+  campaign call's `leadIntent` now. The judge needs the caller's words in the
+  transcript, so it is off with `AICC_PROVIDER_TRANSCRIBE_MODEL=off`. The new
+  counter `aicc_campaign_lead_verdicts_total{verdict}` counts the verdicts
+  written. `docs/flow-authoring.md` section 2.7.1 says what this means for a
+  flow's opening and `notes`.
+
 ### Changed
 
 - Newer `golang.org/x/net` (v0.62.0) and `github.com/klauspost/compress`

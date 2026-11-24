@@ -106,20 +106,21 @@ func (q *Queries) EnabledWebhookSubscriptions(ctx context.Context) ([]EnabledWeb
 }
 
 const enqueueWebhookDelivery = `-- name: EnqueueWebhookDelivery :one
-INSERT INTO webhook_deliveries (delivery_id, subscription_id, call_id, revision, payload)
+INSERT INTO webhook_deliveries (delivery_id, subscription_id, call_id, revision, payload, next_attempt_at)
 VALUES ($1, $2, $3,
         coalesce((SELECT max(revision) + 1 FROM webhook_deliveries
                   WHERE subscription_id = $2 AND call_id = $3), 1),
-        $4)
+        $4, coalesce($5::timestamptz, now()))
 ON CONFLICT (subscription_id, call_id, revision) DO NOTHING
 RETURNING delivery_id, subscription_id, call_id, revision, payload, status, attempt_count, next_attempt_at, last_status_code, last_error, created_at, delivered_at
 `
 
 type EnqueueWebhookDeliveryParams struct {
-	DeliveryID     uuid.UUID `json:"deliveryId"`
-	SubscriptionID uuid.UUID `json:"subscriptionId"`
-	CallID         uuid.UUID `json:"callId"`
-	Payload        []byte    `json:"payload"`
+	DeliveryID     uuid.UUID          `json:"deliveryId"`
+	SubscriptionID uuid.UUID          `json:"subscriptionId"`
+	CallID         uuid.UUID          `json:"callId"`
+	Payload        []byte             `json:"payload"`
+	NextAttemptAt  pgtype.Timestamptz `json:"nextAttemptAt"`
 }
 
 // EnqueueWebhookDelivery writes one delivery. The revision is computed from
@@ -128,12 +129,17 @@ type EnqueueWebhookDeliveryParams struct {
 //
 // ON CONFLICT DO NOTHING guards the one race that matters — two CDR writes
 // landing at once would otherwise both compute revision 2.
+//
+// next_attempt_at is when the delivery is first due; NULL is now. A campaign
+// call whose lead is being judged is held until the judgement's bound
+// (design 10 section 11.1).
 func (q *Queries) EnqueueWebhookDelivery(ctx context.Context, arg EnqueueWebhookDeliveryParams) (WebhookDelivery, error) {
 	row := q.db.QueryRow(ctx, enqueueWebhookDelivery,
 		arg.DeliveryID,
 		arg.SubscriptionID,
 		arg.CallID,
 		arg.Payload,
+		arg.NextAttemptAt,
 	)
 	var i WebhookDelivery
 	err := row.Scan(
@@ -346,15 +352,16 @@ func (q *Queries) MarkWebhookFailed(ctx context.Context, arg MarkWebhookFailedPa
 
 const replacePendingWebhookDelivery = `-- name: ReplacePendingWebhookDelivery :one
 UPDATE webhook_deliveries
-SET payload = $3, next_attempt_at = now()
+SET payload = $3, next_attempt_at = coalesce($4::timestamptz, now())
 WHERE subscription_id = $1 AND call_id = $2 AND status = 'PENDING' AND attempt_count = 0
 RETURNING delivery_id, subscription_id, call_id, revision, payload, status, attempt_count, next_attempt_at, last_status_code, last_error, created_at, delivered_at
 `
 
 type ReplacePendingWebhookDeliveryParams struct {
-	SubscriptionID uuid.UUID `json:"subscriptionId"`
-	CallID         uuid.UUID `json:"callId"`
-	Payload        []byte    `json:"payload"`
+	SubscriptionID uuid.UUID          `json:"subscriptionId"`
+	CallID         uuid.UUID          `json:"callId"`
+	Payload        []byte             `json:"payload"`
+	NextAttemptAt  pgtype.Timestamptz `json:"nextAttemptAt"`
 }
 
 // ReplacePendingWebhookDelivery is the ordinary case for a corrected CDR: the
@@ -372,8 +379,17 @@ type ReplacePendingWebhookDeliveryParams struct {
 // replaced first is skipped by the claim's FOR UPDATE SKIP LOCKED until this
 // transaction commits. An unattempted row already has attempt_count 0, no
 // error and no status code, so only the payload and the due time change.
+//
+// The due time is now unless next_attempt_at says otherwise: a fuller CDR of a
+// call whose lead is still being judged keeps the hold, and the verdict that
+// ends it replaces the payload with nothing given, which releases it.
 func (q *Queries) ReplacePendingWebhookDelivery(ctx context.Context, arg ReplacePendingWebhookDeliveryParams) (WebhookDelivery, error) {
-	row := q.db.QueryRow(ctx, replacePendingWebhookDelivery, arg.SubscriptionID, arg.CallID, arg.Payload)
+	row := q.db.QueryRow(ctx, replacePendingWebhookDelivery,
+		arg.SubscriptionID,
+		arg.CallID,
+		arg.Payload,
+		arg.NextAttemptAt,
+	)
 	var i WebhookDelivery
 	err := row.Scan(
 		&i.DeliveryID,

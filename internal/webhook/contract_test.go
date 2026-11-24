@@ -15,6 +15,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/rasonyang/ai-native-callcenter/docs"
+	"github.com/rasonyang/ai-native-callcenter/internal/campaign"
 	"github.com/rasonyang/ai-native-callcenter/internal/store"
 )
 
@@ -63,6 +64,7 @@ func TestTheDeliveryOnTheWireMatchesTheContract(t *testing.T) {
 	defer srv.Close()
 
 	flowID, queueID, agentID := uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7())
+	campaignID := uuid.Must(uuid.NewV7())
 	started := time.Date(2026, 11, 2, 9, 0, 0, 0, time.UTC)
 	cdr := store.CDR{
 		CallID: uuid.Must(uuid.NewV7()), StartedAt: started,
@@ -76,6 +78,9 @@ func TestTheDeliveryOnTheWireMatchesTheContract(t *testing.T) {
 		HasRecording: true,
 		UserData:     map[string]any{"botReason": "SESSION_LIMIT"},
 		Legs:         []store.Leg{{Kind: "BOT", Label: "bot", DurationSec: 30}},
+		// A campaign call's judged lead rides on the CDR too.
+		CampaignID: &campaignID, LeadIntent: campaign.LeadMedium, DeclaredLeadIntent: campaign.LeadHigh,
+		LeadVerdict: campaign.VerdictUndecided, LeadVerdictReason: "The callee asked the price and did not decide.",
 	}
 	payload, err := json.Marshal(cdr)
 	if err != nil {

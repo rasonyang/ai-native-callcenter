@@ -77,6 +77,7 @@ var (
 
 	campaignUnmappedCause metric.Int64Counter
 	campaignAttempts      metric.Int64Counter
+	campaignLeadVerdicts  metric.Int64Counter
 	dialerInFlight        metric.Int64UpDownCounter
 	dialerBlocked         metric.Int64Counter
 	didOutboundInUse      metric.Int64UpDownCounter
@@ -359,6 +360,13 @@ func init() {
 	campaignAttempts, _ = meter.Int64Counter("aicc_campaign_attempts_total",
 		metric.WithDescription("Campaign attempts that finished, by outcome. A revision of "+
 			"an attempt that was already finished is not counted again."))
+	campaignLeadVerdicts, _ = meter.Int64Counter("aicc_campaign_lead_verdicts_total",
+		metric.WithDescription("Campaign leads the text model judged after the call ended, by "+
+			"verdict (CampaignLeadVerdict): CONFIRMED, UNDECIDED, REFUSED, MACHINE, "+
+			"NO_EVIDENCE (also decided without a request when the callee said nothing), and "+
+			"NOT_JUDGED (no usable verdict in time; the declared lead stands). Counted once "+
+			"per call, when the verdict is written; a verdict that came too late and was "+
+			"discarded is not counted, the NOT_JUDGED that replaces it is."))
 	dialerInFlight, _ = meter.Int64UpDownCounter("aicc_dialer_in_flight",
 		metric.WithDescription("Campaign calls in flight, by kind: RINGING until the "+
 			"customer answers, TALKING from the answer to the end of the call."))
@@ -1035,6 +1043,14 @@ func RecordCampaignAttempt(outcome string) {
 	if campaignAttempts != nil {
 		campaignAttempts.Add(context.Background(), 1,
 			metric.WithAttributes(attribute.String("outcome", outcome)))
+	}
+}
+
+// RecordLeadVerdict counts one campaign lead's verdict as written.
+func RecordLeadVerdict(verdict string) {
+	if campaignLeadVerdicts != nil {
+		campaignLeadVerdicts.Add(context.Background(), 1,
+			metric.WithAttributes(attribute.String("verdict", verdict)))
 	}
 }
 

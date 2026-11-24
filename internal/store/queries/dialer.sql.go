@@ -431,7 +431,7 @@ func (q *Queries) HeldByFrequency(ctx context.Context, arg HeldByFrequencyParams
 }
 
 const listCampaignAttempts = `-- name: ListCampaignAttempts :many
-SELECT id, campaign_id, campaign_contact_id, number_e164, call_id, leg_id, originate_job_id, state, outcome, hangup_cause, talk_sec, is_touched, lead_intent, lead_notes, started_at, finished_at, is_test_number FROM campaign_attempts
+SELECT id, campaign_id, campaign_contact_id, number_e164, call_id, leg_id, originate_job_id, state, outcome, hangup_cause, talk_sec, is_touched, lead_intent, lead_notes, started_at, finished_at, is_test_number, declared_lead_intent, lead_verdict, lead_verdict_reason, lead_judge_deadline_at FROM campaign_attempts
 WHERE campaign_id = $1
   AND ($2::uuid IS NULL OR campaign_contact_id = $2::uuid)
   AND ($3::text = '' OR outcome = $3)
@@ -489,6 +489,10 @@ func (q *Queries) ListCampaignAttempts(ctx context.Context, arg ListCampaignAtte
 			&i.StartedAt,
 			&i.FinishedAt,
 			&i.IsTestNumber,
+			&i.DeclaredLeadIntent,
+			&i.LeadVerdict,
+			&i.LeadVerdictReason,
+			&i.LeadJudgeDeadlineAt,
 		); err != nil {
 			return nil, err
 		}
@@ -501,7 +505,7 @@ func (q *Queries) ListCampaignAttempts(ctx context.Context, arg ListCampaignAtte
 }
 
 const listDialingAttempts = `-- name: ListDialingAttempts :many
-SELECT a.id, a.campaign_id, a.campaign_contact_id, a.number_e164, a.call_id, a.leg_id, a.originate_job_id, a.state, a.outcome, a.hangup_cause, a.talk_sec, a.is_touched, a.lead_intent, a.lead_notes, a.started_at, a.finished_at, a.is_test_number, c.ring_timeout_sec
+SELECT a.id, a.campaign_id, a.campaign_contact_id, a.number_e164, a.call_id, a.leg_id, a.originate_job_id, a.state, a.outcome, a.hangup_cause, a.talk_sec, a.is_touched, a.lead_intent, a.lead_notes, a.started_at, a.finished_at, a.is_test_number, a.declared_lead_intent, a.lead_verdict, a.lead_verdict_reason, a.lead_judge_deadline_at, c.ring_timeout_sec
 FROM campaign_attempts a
 JOIN campaigns c ON c.id = a.campaign_id
 WHERE a.state = 'DIALING'
@@ -542,6 +546,10 @@ func (q *Queries) ListDialingAttempts(ctx context.Context) ([]ListDialingAttempt
 			&i.CampaignAttempt.StartedAt,
 			&i.CampaignAttempt.FinishedAt,
 			&i.CampaignAttempt.IsTestNumber,
+			&i.CampaignAttempt.DeclaredLeadIntent,
+			&i.CampaignAttempt.LeadVerdict,
+			&i.CampaignAttempt.LeadVerdictReason,
+			&i.CampaignAttempt.LeadJudgeDeadlineAt,
 			&i.RingTimeoutSec,
 		); err != nil {
 			return nil, err

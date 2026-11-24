@@ -445,6 +445,53 @@ func TestTheWrapUpDraftIsInertUnlessEverythingItNeedsIsConfigured(t *testing.T) 
 	}
 }
 
+// The lead judge judges only when every part of it is there: the feature on,
+// the text model configured with a key, and the caller's words transcribed by
+// the conversation session. Live transcription of the human phase is not one
+// of them. Anything less still builds a service, which only settles deadlines.
+func TestTheLeadJudgeJudgesOnlyWhenEverythingItNeedsIsConfigured(t *testing.T) {
+	on := config.Config{
+		TextLLMEndpoint: "https://llm.example/v1", TextLLMModel: "m",
+		TextLLMTimeout: time.Second, TextLLMContextChars: 8000,
+		IsLeadJudgeEnabled: true,
+	}
+	withKey := func(k string) string {
+		if k == "TEXT_LLM_API_KEY" {
+			return "secret"
+		}
+		return ""
+	}
+	noKey := func(string) string { return "" }
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	cases := []struct {
+		name   string
+		mutate func(c *config.Config)
+		getenv func(string) string
+		want   bool
+	}{
+		{"everything configured", func(*config.Config) {}, withKey, true},
+		{"live transcription off is not needed", func(c *config.Config) { c.IsTranscriptionEnabled = false }, withKey, true},
+		{"a caller transcription model named", func(c *config.Config) { c.ProviderTranscribeModel = "gummy" }, withKey, true},
+		{"no endpoint", func(c *config.Config) { c.TextLLMEndpoint = "" }, withKey, false},
+		{"no model", func(c *config.Config) { c.TextLLMModel = "" }, withKey, false},
+		{"no key", func(*config.Config) {}, noKey, false},
+		{"switched off", func(c *config.Config) { c.IsLeadJudgeEnabled = false }, withKey, false},
+		{"caller transcription off", func(c *config.Config) { c.ProviderTranscribeModel = "OFF" }, withKey, false},
+	}
+	for _, c := range cases {
+		cfg := on
+		c.mutate(&cfg)
+		got := leadJudge(cfg, nil, c.getenv, log)
+		if got == nil {
+			t.Fatalf("%s: no service; one that settles deadlines is always built", c.name)
+		}
+		if got.IsJudging() != c.want {
+			t.Errorf("%s: judging = %v, want %v", c.name, got.IsJudging(), c.want)
+		}
+	}
+}
+
 func TestARemovedSettingStillSetIsWarnedAboutOnce(t *testing.T) {
 	var buf bytes.Buffer
 	prev := slog.Default()

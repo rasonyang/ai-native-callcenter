@@ -33,10 +33,14 @@ type attemptFinisher struct {
 	// zero Range means none.
 	outer dayrange.Range
 	now   func() time.Time
+	// isLeadJudgeOn is Store.IsLeadJudgeEnabled: a CDR that finishes a
+	// bot-only campaign call with a HIGH or MEDIUM lead marks its judgement
+	// owed.
+	isLeadJudgeOn bool
 }
 
 func (s *Store) finisher() attemptFinisher {
-	return attemptFinisher{outer: s.OutboundHours, now: time.Now}
+	return attemptFinisher{outer: s.OutboundHours, now: time.Now, isLeadJudgeOn: s.IsLeadJudgeEnabled}
 }
 
 // AttemptStore keeps the attempts of campaigns: the write-ahead row, the
@@ -231,7 +235,51 @@ func (f attemptFinisher) fromCDR(ctx context.Context, q *queries.Queries, cdr CD
 	if err != nil {
 		return nil, fmt.Errorf("lock attempt: %w", err)
 	}
-	return f.apply(ctx, q, att, endingFromCDR(cdr))
+	// The judgement of the lead becomes owed before the finish routine runs, so
+	// the routine already sees it PENDING and leaves a HIGH lead's callback to
+	// the verdict (leadSideEffects).
+	isOwed := false
+	if f.isLeadJudgeOn && att.DeclaredLeadIntent == nil &&
+		campaign.IsLeadJudged(campaign.LeadIntent(deref(att.LeadIntent))) && isJudgedCall(cdr) {
+		owed, err := q.OweLeadJudgement(ctx, queries.OweLeadJudgementParams{
+			ID: att.ID, DeadlineSec: int32(campaign.LeadJudgeDeadline / time.Second),
+		})
+		if err != nil {
+			return nil, fmt.Errorf("owe the lead's judgement: %w", err)
+		}
+		att, isOwed = owed, true
+	}
+	done, err := f.apply(ctx, q, att, endingFromCDR(cdr))
+	if done != nil {
+		done.IsLeadJudgementOwed = isOwed
+	}
+	return done, err
+}
+
+// isJudgedCall reports whether a CDR is of a call whose lead a text model
+// reads (design 10 section 11.1): answered, more than a placement failure, and
+// handled by the bot alone. A call that reached a queue or an agent, or on
+// which an agent talked, was handed to a person and is not judged.
+func isJudgedCall(cdr CDR) bool {
+	if isPlacement, _ := cdr.Tech["isPlacementFailure"].(bool); isPlacement {
+		return false
+	}
+	if cdr.AnsweredAt.IsZero() && cdr.Status != CDRStatusAnswered {
+		return false
+	}
+	if cdr.QueueID != nil || cdr.PrimaryAgentID != nil || len(cdr.AgentIDs) > 0 || cdr.TalkSec > 0 {
+		return false
+	}
+	hasBot := cdr.BotSec > 0
+	for _, leg := range cdr.Legs {
+		switch leg.Kind {
+		case "QUEUE", "AGENT":
+			return false
+		case "BOT":
+			hasBot = true
+		}
+	}
+	return hasBot
 }
 
 // endingFromCDR reads how a campaign call went off the ledger row.
@@ -409,7 +457,15 @@ func (f attemptFinisher) apply(ctx context.Context, q *queries.Queries, att quer
 // leadSideEffects applies what the call concluded: a DO_NOT_CALL goes on the
 // list, a HIGH lead files one callback. Both are idempotent, because a revised
 // CDR runs the routine again for the same attempt.
+//
+// While a text model is still to judge the lead (PENDING) a HIGH lead files
+// nothing: the callback waits for the verdict, and is filed then only if the
+// lead it leaves is still HIGH (settleJudgedLead), NOT_JUDGED at the deadline
+// included.
 func leadSideEffects(ctx context.Context, q *queries.Queries, att queries.CampaignAttempt, cam campaign.Campaign, lead campaign.LeadIntent) error {
+	if lead == campaign.LeadHigh && campaign.LeadVerdict(deref(att.LeadVerdict)) == campaign.VerdictPending {
+		return nil
+	}
 	switch lead {
 	case campaign.LeadDoNotCall:
 		callID := att.CallID
@@ -440,7 +496,10 @@ func attemptOf(r queries.CampaignAttempt) campaign.Attempt {
 		State: campaign.AttemptState(r.State), Outcome: campaign.Outcome(deref(r.Outcome)),
 		HangupCause: deref(r.HangupCause), TalkSec: int(derefInt(r.TalkSec)), IsTouched: r.IsTouched, IsTestNumber: r.IsTestNumber,
 		LeadIntent: campaign.LeadIntent(deref(r.LeadIntent)), LeadNotes: deref(r.LeadNotes),
-		StartedAt: r.StartedAt.Time, FinishedAt: timeOrNil(r.FinishedAt),
+		DeclaredLeadIntent: campaign.LeadIntent(deref(r.DeclaredLeadIntent)),
+		LeadVerdict:        campaign.LeadVerdict(deref(r.LeadVerdict)),
+		LeadVerdictReason:  deref(r.LeadVerdictReason),
+		StartedAt:          r.StartedAt.Time, FinishedAt: timeOrNil(r.FinishedAt),
 	}
 }
 

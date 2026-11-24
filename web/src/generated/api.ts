@@ -1934,6 +1934,8 @@ export interface webhooks {
          *     **Concurrency.** At most 4 deliveries are in flight to one subscription at a time, and deliveries are not ordered, so a later revision can arrive before an earlier one.
          *
          *     **Revisions: the last `revision` wins per `callId`.** The first delivery of a call to a subscription is revision 1. If the call's record is later written again (a fuller CDR replacing the first), the receiver is told again. Only a delivery that has never been attempted is replaced in place, so its first attempt already carries the corrected record. Once any attempt has been made (in flight, waiting to retry, delivered or failed), a correction is a new delivery with a new `deliveryId` and the next `revision`; the earlier delivery is not recalled and keeps its own retries. One `deliveryId` always carries one body. A receiver keeps, per `callId`, the delivery with the highest `revision`, and ignores one with a lower `revision` than it already holds whatever order they arrive in. `X-AICC-Webhook-Id` is the deduplication key for a retry of the same delivery, so a receiver that skips a `deliveryId` it has already stored never discards a correction.
+         *
+         *     **A campaign lead waits for its verdict.** On a deployment with a text model configured, a campaign call the bot handled alone that recorded a HIGH or MEDIUM lead is judged after it ends (CampaignLeadVerdict), and its delivery waits for the verdict so the receiver is told the final lead once. The delivery is queued when the call's record is written and held for at most 35 seconds, already carrying `leadVerdict` NOT_JUDGED and the declared lead in `leadIntent` and `declaredLeadIntent`. A verdict that lands within 30 seconds replaces that payload in place and releases it at once, with the lead the verdict left; with no verdict the held payload goes out by itself when the hold ends, and a verdict later than that is discarded, so the record and what the receiver was sent agree. Every other call (no lead, LOW, NONE or DO_NOT_CALL, never answered, handed to an agent, or not a campaign's) is delivered at once, as is every call on a deployment with no text model.
          */
         post: operations["cdrDelivery"];
         delete?: never;
@@ -2784,6 +2786,14 @@ export interface components {
              * @description The campaign this call was placed for. Absent for every other call. Set when the call's record is written (and again when a fuller record replaces it), from the campaign attempt that carries the call's id.
              */
             campaignId?: string;
+            /** @description The lead this campaign call recorded, read from its campaign attempt (CampaignAttempt.leadIntent): after the verdict when the lead was judged. Absent on a call that is no campaign's and on one that recorded no lead. */
+            leadIntent?: components["schemas"]["CampaignLeadIntent"];
+            /** @description The lead the flow recorded, before the verdict. Present only when leadVerdict is. */
+            declaredLeadIntent?: components["schemas"]["CampaignLeadIntent"];
+            /** @description The text model's verdict on the declared lead (CampaignAttempt.leadVerdict). Absent on a call whose lead was not judged. A webhook delivery never carries PENDING: one queued while the verdict is awaited carries NOT_JUDGED and the declared lead, and is replaced by the verdict when it lands in time (webhooks.cdrDelivery). */
+            leadVerdict?: components["schemas"]["CampaignLeadVerdict"];
+            /** @description The verdict's reason, one sentence in the call's language. Absent on PENDING and NOT_JUDGED, and when the model gave none. */
+            leadVerdictReason?: string;
         };
         /** @description One agent's after-call work for one call. The platform opens it when the call ends — a default disposition, an empty note — and the agent confirms it; isConfirmed is what separates a record somebody looked at from one nobody has. The label is captured at filing time so the record survives later edits to the vocabulary. */
         WrapUp: {
@@ -3584,6 +3594,19 @@ export interface components {
          * @enum {string}
          */
         CampaignLeadIntent: "HIGH" | "MEDIUM" | "LOW" | "NONE" | "DO_NOT_CALL";
+        /**
+         * @description What the platform's text model said, after a campaign call ended, about the lead the flow recorded. Only a call the bot handled alone that recorded a HIGH or MEDIUM lead is judged, and only on a deployment with a text model configured; every other call has no verdict. The model reads the callee's and the bot's words of the transcript, never a tool call, and the lead the flow declared.
+         *
+         *     - PENDING: the call has ended and the verdict is awaited, for at most 30 seconds.
+         *     - CONFIRMED: a callee line states acceptance of the offer in plain words. The declared lead stands.
+         *     - UNDECIDED: a person talked about the offer and neither accepted nor refused it, or accepted in words whose meaning has to be inferred, conditionally, jokingly, or with a bare yes to a line that presents the offer and asks for the decision at once. HIGH becomes MEDIUM; MEDIUM stays.
+         *     - REFUSED: the callee declined, put it off, or agreed and took it back. The lead becomes NONE.
+         *     - MACHINE: a voicemail prompt, a call assistant, an IVR or a carrier announcement answered. The lead becomes NONE.
+         *     - NO_EVIDENCE: no callee words bear on the offer: none at all, only greetings or acknowledgements, noise, or fragments in another language. The lead becomes NONE.
+         *     - NOT_JUDGED: no verdict was reached in time (the model failed, answered something unusable, or took longer than the 30 seconds). The declared lead stands.
+         * @enum {string}
+         */
+        CampaignLeadVerdict: "PENDING" | "CONFIRMED" | "UNDECIDED" | "REFUSED" | "MACHINE" | "NO_EVIDENCE" | "NOT_JUDGED";
         /** @enum {string} */
         Weekday: "MON" | "TUE" | "WED" | "THU" | "FRI" | "SAT" | "SUN";
         /** @description A wall-clock range [start, end) in the contact's local time. A range whose end is before its start crosses midnight and belongs to the day it starts on (22:00-02:00 on MON runs until 02:00 on TUE). "24:00" is accepted as an end. */
@@ -3885,8 +3908,15 @@ export interface components {
             isTouched: boolean;
             /** @description True when the number was on the list of test numbers at the moment the attempt was placed. History: taking the number off the list later does not change it. */
             isTestNumber: boolean;
+            /** @description The lead the call recorded. On a call whose lead was judged (leadVerdict) it is the lead the verdict left; declaredLeadIntent keeps the one the flow recorded. */
             leadIntent?: components["schemas"]["CampaignLeadIntent"];
             leadNotes?: string;
+            /** @description The lead the flow recorded, as it was before the verdict. Present only when leadVerdict is. */
+            declaredLeadIntent?: components["schemas"]["CampaignLeadIntent"];
+            /** @description The text model's verdict on the declared lead. Absent on an attempt whose lead was not judged. */
+            leadVerdict?: components["schemas"]["CampaignLeadVerdict"];
+            /** @description The verdict's reason, one sentence in the call's language. Absent on PENDING and NOT_JUDGED, and when the model gave none. */
+            leadVerdictReason?: string;
             /** Format: date-time */
             startedAt: string;
             /**

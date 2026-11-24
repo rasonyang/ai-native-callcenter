@@ -349,6 +349,39 @@ func (e CampaignLeadIntent) Valid() bool {
 	}
 }
 
+// Defines values for CampaignLeadVerdict.
+const (
+	CampaignLeadVerdictCONFIRMED  CampaignLeadVerdict = "CONFIRMED"
+	CampaignLeadVerdictMACHINE    CampaignLeadVerdict = "MACHINE"
+	CampaignLeadVerdictNOEVIDENCE CampaignLeadVerdict = "NO_EVIDENCE"
+	CampaignLeadVerdictNOTJUDGED  CampaignLeadVerdict = "NOT_JUDGED"
+	CampaignLeadVerdictPENDING    CampaignLeadVerdict = "PENDING"
+	CampaignLeadVerdictREFUSED    CampaignLeadVerdict = "REFUSED"
+	CampaignLeadVerdictUNDECIDED  CampaignLeadVerdict = "UNDECIDED"
+)
+
+// Valid indicates whether the value is a known member of the CampaignLeadVerdict enum.
+func (e CampaignLeadVerdict) Valid() bool {
+	switch e {
+	case CampaignLeadVerdictCONFIRMED:
+		return true
+	case CampaignLeadVerdictMACHINE:
+		return true
+	case CampaignLeadVerdictNOEVIDENCE:
+		return true
+	case CampaignLeadVerdictNOTJUDGED:
+		return true
+	case CampaignLeadVerdictPENDING:
+		return true
+	case CampaignLeadVerdictREFUSED:
+		return true
+	case CampaignLeadVerdictUNDECIDED:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for CampaignOutcome.
 const (
 	CampaignOutcomeANSWERED        CampaignOutcome = "ANSWERED"
@@ -1507,10 +1540,13 @@ type CDR struct {
 	CallType CallType `json:"callType"`
 
 	// CampaignID The campaign this call was placed for. Absent for every other call. Set when the call's record is written (and again when a fuller record replaces it), from the campaign attempt that carries the call's id.
-	CampaignID  *openapi_types.UUID `json:"campaignId,omitempty"`
-	DID         *string             `json:"did,omitempty"`
-	Disposition *string             `json:"disposition,omitempty"`
-	EndedAt     time.Time           `json:"endedAt"`
+	CampaignID *openapi_types.UUID `json:"campaignId,omitempty"`
+
+	// DeclaredLeadIntent The lead the flow recorded, before the verdict. Present only when leadVerdict is.
+	DeclaredLeadIntent *CampaignLeadIntent `json:"declaredLeadIntent,omitempty"`
+	DID                *string             `json:"did,omitempty"`
+	Disposition        *string             `json:"disposition,omitempty"`
+	EndedAt            time.Time           `json:"endedAt"`
 
 	// FlowID The conversation the call was for: the DID's flow. Recorded on every call the bot answered, when it starts the conversation, and on an AI outbound call from the moment it is placed, so one whose bridge to the bot never ran still names it. When the bot answered and never started the conversation, the row takes the DID's flow at the moment it is written. Absent where no flow was resolved for the call: one that never reached a bot number (a person's call out, a caller sent straight to a queue), a number with no flow, a person's call to a bot number the bot never answered, and a row written before this was recorded.
 	FlowID     *openapi_types.UUID `json:"flowId,omitempty"`
@@ -1525,7 +1561,16 @@ type CDR struct {
 	// IsContained True when the bot finished the conversation without a human.
 	IsContained bool    `json:"isContained"`
 	Language    *string `json:"language,omitempty"`
-	Legs        []Leg   `json:"legs"`
+
+	// LeadIntent The lead this campaign call recorded, read from its campaign attempt (CampaignAttempt.leadIntent): after the verdict when the lead was judged. Absent on a call that is no campaign's and on one that recorded no lead.
+	LeadIntent *CampaignLeadIntent `json:"leadIntent,omitempty"`
+
+	// LeadVerdict The text model's verdict on the declared lead (CampaignAttempt.leadVerdict). Absent on a call whose lead was not judged. A webhook delivery never carries PENDING: one queued while the verdict is awaited carries NOT_JUDGED and the declared lead, and is replaced by the verdict when it lands in time (webhooks.cdrDelivery).
+	LeadVerdict *CampaignLeadVerdict `json:"leadVerdict,omitempty"`
+
+	// LeadVerdictReason The verdict's reason, one sentence in the call's language. Absent on PENDING and NOT_JUDGED, and when the model gave none.
+	LeadVerdictReason *string `json:"leadVerdictReason,omitempty"`
+	Legs              []Leg   `json:"legs"`
 
 	// MissedReason Why the caller went unserved, decided from recorded facts rather than a hangup cause, caller's own phase first. Absent when the call was not missed — there is no empty member.
 	//
@@ -1736,6 +1781,9 @@ type CampaignAttempt struct {
 	CampaignID openapi_types.UUID `json:"campaignId"`
 	ContactID  openapi_types.UUID `json:"contactId"`
 
+	// DeclaredLeadIntent The lead the flow recorded, as it was before the verdict. Present only when leadVerdict is.
+	DeclaredLeadIntent *CampaignLeadIntent `json:"declaredLeadIntent,omitempty"`
+
 	// FinishedAt Absent while DIALING.
 	FinishedAt  *time.Time         `json:"finishedAt,omitempty"`
 	HangupCause *string            `json:"hangupCause,omitempty"`
@@ -1747,9 +1795,15 @@ type CampaignAttempt struct {
 	// IsTouched True when the outcome reached the customer, so it counts against maxAttempts and holds the number from other campaigns for the deployment's frequency window.
 	IsTouched bool `json:"isTouched"`
 
-	// LeadIntent What a call concluded about the customer. Absent on a contact no call has recorded a lead for, which is not the same as NONE.
+	// LeadIntent The lead the call recorded. On a call whose lead was judged (leadVerdict) it is the lead the verdict left; declaredLeadIntent keeps the one the flow recorded.
 	LeadIntent *CampaignLeadIntent `json:"leadIntent,omitempty"`
 	LeadNotes  *string             `json:"leadNotes,omitempty"`
+
+	// LeadVerdict The text model's verdict on the declared lead. Absent on an attempt whose lead was not judged.
+	LeadVerdict *CampaignLeadVerdict `json:"leadVerdict,omitempty"`
+
+	// LeadVerdictReason The verdict's reason, one sentence in the call's language. Absent on PENDING and NOT_JUDGED, and when the model gave none.
+	LeadVerdictReason *string `json:"leadVerdictReason,omitempty"`
 
 	// LegID The customer leg's id.
 	LegID openapi_types.UUID `json:"legId"`
@@ -1943,6 +1997,17 @@ type CampaignLeadIntentCount struct {
 	// LeadIntent What a call concluded about the customer. Absent on a contact no call has recorded a lead for, which is not the same as NONE.
 	LeadIntent CampaignLeadIntent `json:"leadIntent"`
 }
+
+// CampaignLeadVerdict What the platform's text model said, after a campaign call ended, about the lead the flow recorded. Only a call the bot handled alone that recorded a HIGH or MEDIUM lead is judged, and only on a deployment with a text model configured; every other call has no verdict. The model reads the callee's and the bot's words of the transcript, never a tool call, and the lead the flow declared.
+//
+// - PENDING: the call has ended and the verdict is awaited, for at most 30 seconds.
+// - CONFIRMED: a callee line states acceptance of the offer in plain words. The declared lead stands.
+// - UNDECIDED: a person talked about the offer and neither accepted nor refused it, or accepted in words whose meaning has to be inferred, conditionally, jokingly, or with a bare yes to a line that presents the offer and asks for the decision at once. HIGH becomes MEDIUM; MEDIUM stays.
+// - REFUSED: the callee declined, put it off, or agreed and took it back. The lead becomes NONE.
+// - MACHINE: a voicemail prompt, a call assistant, an IVR or a carrier announcement answered. The lead becomes NONE.
+// - NO_EVIDENCE: no callee words bear on the offer: none at all, only greetings or acknowledgements, noise, or fragments in another language. The lead becomes NONE.
+// - NOT_JUDGED: no verdict was reached in time (the model failed, answered something unusable, or took longer than the 30 seconds). The declared lead stands.
+type CampaignLeadVerdict string
 
 // CampaignList defines model for CampaignList.
 type CampaignList struct {

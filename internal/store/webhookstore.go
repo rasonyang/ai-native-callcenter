@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/rasonyang/ai-native-callcenter/internal/store/queries"
@@ -345,7 +346,12 @@ func (w *WebhookStore) Sweep(ctx context.Context, deliveredBefore, failedBefore 
 // receiver, so its payload is never touched (#445). That earlier delivery is
 // not retired: it keeps its own retry schedule, and a receiver that follows
 // last-revision-wins discards the lower revision whatever order they arrive.
-func enqueueFor(ctx context.Context, q *queries.Queries, cdr CDR) error {
+//
+// hold, when set, is when what is written is first due: a call whose lead a
+// text model is still judging waits for the verdict, at most until then
+// (design 10 section 11.1). Nil is now, which is also how a verdict releases
+// a held delivery.
+func enqueueFor(ctx context.Context, q *queries.Queries, cdr CDR, hold *time.Time) error {
 	subs, err := q.EnabledWebhookSubscriptions(ctx)
 	if err != nil {
 		return fmt.Errorf("read subscriptions: %w", err)
@@ -356,6 +362,10 @@ func enqueueFor(ctx context.Context, q *queries.Queries, cdr CDR) error {
 	payload, err := json.Marshal(cdr)
 	if err != nil {
 		return fmt.Errorf("encode cdr: %w", err)
+	}
+	var due pgtype.Timestamptz
+	if hold != nil {
+		due = stamp(*hold)
 	}
 
 	for _, sub := range subs {
@@ -375,6 +385,7 @@ func enqueueFor(ctx context.Context, q *queries.Queries, cdr CDR) error {
 			SubscriptionID: sub.SubscriptionID,
 			CallID:         cdr.CallID,
 			Payload:        payload,
+			NextAttemptAt:  due,
 		})
 		if err == nil {
 			_ = replaced
@@ -388,6 +399,7 @@ func enqueueFor(ctx context.Context, q *queries.Queries, cdr CDR) error {
 			SubscriptionID: sub.SubscriptionID,
 			CallID:         cdr.CallID,
 			Payload:        payload,
+			NextAttemptAt:  due,
 		}); err != nil && err != pgx.ErrNoRows {
 			// ErrNoRows is ON CONFLICT DO NOTHING: another writer got there
 			// first with this revision, which is the race the constraint
