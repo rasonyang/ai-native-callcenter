@@ -420,6 +420,7 @@ describe('the contact import', () => {
     const view = renderWithProviders(
       <CampaignImportDialog
         campaignId={CAMPAIGN_ID}
+        campaignName="novanet_leads"
         flowFields={flowFields}
         open
         onOpenChange={() => {}}

@@ -305,6 +305,11 @@ type Realtime struct {
 	deltaStallDeadline time.Duration
 	// responseCreatedDeadline is responseCreatedTimeout, held the same way.
 	responseCreatedDeadline time.Duration
+	// requestDeadline bounds one request's wait for its response.created
+	// (onRequestExpired); zero reads as responseCreatedDeadline. The
+	// caller-turn watch keeps responseCreatedDeadline: a test that answers a
+	// re-ask in its own time can calm only the request side (#540).
+	requestDeadline time.Duration
 	// stallHoldDeadline is stallHoldTimeout, held the same way.
 	stallHoldDeadline time.Duration
 
@@ -715,7 +720,10 @@ func (r *Realtime) claimFloorLocked(request responseRequest) {
 	if r.requestTimer != nil {
 		r.requestTimer.Stop()
 	}
-	deadline := r.responseCreatedDeadline
+	deadline := r.requestDeadline
+	if deadline <= 0 {
+		deadline = r.responseCreatedDeadline
+	}
 	if deadline <= 0 {
 		deadline = responseCreatedTimeout
 	}

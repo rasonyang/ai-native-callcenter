@@ -25,6 +25,12 @@ carries the one-line installer's files.
   can now tell "recording started, object pending" from "never recorded"
   instead of guessing from `hasRecording: false`.
 
+### Changed
+
+- Newer `golang.org/x/net` (v0.62.0) and `github.com/klauspost/compress`
+  (v1.20.2), past three advisories the vuln scan lists at module level; none
+  of them is in code the server calls (#548).
+
 ### Fixed
 
 - **A machine that answers a campaign call records no lead** (#409). On a call
