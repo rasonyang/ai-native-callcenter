@@ -360,12 +360,34 @@ func TestALeadGuardVerdictIsCountedByReasonAndProvider(t *testing.T) {
 	RecordLeadGuard(LeadGuardDeclined, "qwen")
 	RecordLeadGuard(LeadGuardOpeningUnheard, "qwen")
 	RecordLeadGuard(LeadGuardWords, "openai")
+	RecordLeadGuard(LeadGuardMachineWording, "qwen")
 	after := read()
 	for key, want := range map[string]int64{
 		"DECLINED/qwen":        2,
 		"OPENING_UNHEARD/qwen": 1,
 		"WORDS/openai":         1,
+		"MACHINE_WORDING/qwen": 1,
 		"NO_FINAL/qwen":        0,
+	} {
+		if got := after[key] - before[key]; got != want {
+			t.Errorf("%s gained %d, want %d (before %v, after %v)", key, got, want, before, after)
+		}
+	}
+}
+
+func TestAMachineAnsweredCallIsCountedByCategoryAndProvider(t *testing.T) {
+	reader := useTestReader()
+	before := sumByLabels(t, reader, "aicc_bot_machine_answered_calls_total", "category", "provider")
+	RecordMachineAnswered(MachineCallAssistant, "qwen")
+	RecordMachineAnswered(MachineCallAssistant, "qwen")
+	RecordMachineAnswered(MachineVoicemail, "openai")
+	RecordMachineAnswered(MachineCarrierAnnouncement, "qwen")
+	after := sumByLabels(t, reader, "aicc_bot_machine_answered_calls_total", "category", "provider")
+	for key, want := range map[string]int64{
+		"CALL_ASSISTANT/qwen":       2,
+		"VOICEMAIL/openai":          1,
+		"CARRIER_ANNOUNCEMENT/qwen": 1,
+		"VOICEMAIL/qwen":            0,
 	} {
 		if got := after[key] - before[key]; got != want {
 			t.Errorf("%s gained %d, want %d (before %v, after %v)", key, got, want, before, after)

@@ -218,6 +218,14 @@ type Config struct {
 	// reads as the platform default (callerFirstWait, 2000 ms).
 	CallerFirstWait time.Duration
 
+	// IsPlacedToCustomer says the platform placed this call to a customer
+	// (callFacts.isOutboundToCustomer). Only such a call's final caller
+	// transcripts are judged for a machine's wording, and one that carries
+	// some marks the call as answered by a machine (#409,
+	// machine_wording.go): a caller who dials in and asks to leave a message
+	// is a person. The orchestrator sets it.
+	IsPlacedToCustomer bool
+
 	// IsEndingArmed reports whether the call's ending (a transfer or a hangup)
 	// is armed and waiting for its closing line to be heard. The orchestrator
 	// owns that truth (callActions); the session only asks, and never while

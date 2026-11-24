@@ -348,7 +348,7 @@ func (s *Session) watchListening(ctx context.Context) {
 // customer. A flow that also serves an inbound DID keeps the field, and the
 // inbound call ignores it.
 func listensFirst(spec *flow.Spec, facts *callFacts) bool {
-	return spec != nil && facts != nil && spec.Global.IsCallerFirst && facts.isPlacedToCustomer
+	return spec != nil && spec.Global.IsCallerFirst && facts.isOutboundToCustomer()
 }
 
 // callerFirstWaitOf resolves the silent-callee wait of a call that listens

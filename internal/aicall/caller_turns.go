@@ -78,6 +78,10 @@ type callerTurns struct {
 	// final clause, came with no utterance under way: the speech start that
 	// follows within openingCutWindow began over the unheard opening.
 	openingCutAt time.Time
+	// machineCategory is the kind of machine whose wording marked the call
+	// as answered by one (obs.Machine*, machine_wording.go), empty while it is
+	// not marked. Set once and never cleared.
+	machineCategory string
 }
 
 // noteCallerStarted records a caller utterance starting. It is called before
@@ -201,8 +205,11 @@ func (s *Session) noteCallerDeclined(itemID string) {
 // noteCallerFinal records an utterance's final transcript; isDeclined says the
 // session declined it as an acknowledgement. A final that matches no utterance
 // still waiting for one is an utterance of its own, already over; a second
-// final for an utterance that has one changes nothing.
+// final for an utterance that has one changes nothing. Every final is first
+// judged for a machine's wording (#409), so the call is marked before a wait
+// for this final ends.
 func (s *Session) noteCallerFinal(itemID, text string, isDeclined bool) {
+	s.noteMachineWording(text)
 	s.ct.mu.Lock()
 	defer s.ct.mu.Unlock()
 	t := s.ct.byID(itemID)
