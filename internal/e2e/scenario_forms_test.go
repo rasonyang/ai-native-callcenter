@@ -193,6 +193,9 @@ func TestScenarioKeysStayApartInEveryForm(t *testing.T) {
 		for _, cs := range CallerFirstCases {
 			direct[cs.Number] = true
 		}
+		for _, cs := range GreetingCutCases {
+			direct[cs.Number] = true
+		}
 		for key := range s.Numbers {
 			if _, ok := seen[key]; !ok && !direct[key] {
 				if len(key) > 0 {

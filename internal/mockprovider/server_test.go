@@ -51,9 +51,10 @@ func TestTheRealClientCompletesASessionAgainstIt(t *testing.T) {
 		}
 	}
 
-	// 100ms of µ-law at 8 kHz is 800 bytes, and the client decodes base64 on
+	// The session declared linear output ("audio/pcm"), the vendor default of
+	// 24 kHz: 100ms of PCM16 is 4800 bytes, and the client decodes base64 on
 	// the way in, so anything else means the audio path disagrees.
-	if want := 100 * media.RateTelephone / 1000; audio != want {
+	if want := 100 * media.RateProviderOut * 2 / 1000; audio != want {
 		t.Errorf("received %d bytes of audio, want %d", audio, want)
 	}
 }

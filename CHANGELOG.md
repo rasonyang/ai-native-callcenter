@@ -71,6 +71,17 @@ carries the one-line installer's files.
   `aicc_bot_lead_guard_total` has a new reason, `MACHINE_WORDING`.
   `docs/flow-authoring.md` section 4.6 describes how a flow can also report a
   machine itself and end such a call.
+- The end-to-end stack exercises a callee who speaks over the bot's opening
+  (#596): `aicc-mockprovider` gained an opt-in `-vad <file>` mode that detects
+  speech on the uplink by level, cancels the response in progress as a
+  server-VAD provider does, and answers with the file's scripted caller
+  transcript and reply — which may carry a scripted tool call. With the
+  application on the `gateway` profile (a provider that cancels by itself),
+  `make e2e-greeting-cut` places five calls: a bare 「喂？」, a combined
+  「喂，您好」, real words 「不需要，谢谢」, a greeting that cuts the replay, and
+  a silent control, and checks the mock's `/_stats`, the downlink audio runs
+  and the CDR for each. The mode is off without `-vad`; the other e2e targets
+  are unchanged.
 - Docs: `deploy/README.md` names `grok` among the installer's `--provider`
   values, and says the `aicc_bot` gateway reads `Status DOWN` while the AI leg
   is off (an install made with `--provider none`, or `AICC_BOT_ENABLED=false`):

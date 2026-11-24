@@ -136,3 +136,27 @@ func TestOnlyTheTwoExpectedGatewaysAreAccepted(t *testing.T) {
 		t.Error("an empty answer: want a refusal")
 	}
 }
+
+// The greeting-cut run puts the application on the gateway profile, whose
+// server cancels by itself; the mock stands in for it as for openai, with the
+// same placeholder-key rule (#596).
+func TestTheGatewayProfileIsAcceptedWithThePlaceholder(t *testing.T) {
+	err := check(t, func(c map[string]any) {
+		aiccEnv(c)["AICC_PROVIDER"] = "gateway"
+		aiccEnv(c)["REALTIME_API_KEY"] = "not-a-key"
+	})
+	if err != nil {
+		t.Fatalf("refused the gateway profile on the placeholder: %v", err)
+	}
+	if err := check(t, func(c map[string]any) {
+		aiccEnv(c)["AICC_PROVIDER"] = "gateway"
+		aiccEnv(c)["REALTIME_API_KEY"] = "rt-live"
+	}); err == nil {
+		t.Error("a real gateway key: want a refusal")
+	}
+	if err := check(t, func(c map[string]any) {
+		aiccEnv(c)["AICC_PROVIDER"] = "qwen"
+	}); err == nil {
+		t.Error("a profile the mock does not stand in for: want a refusal")
+	}
+}

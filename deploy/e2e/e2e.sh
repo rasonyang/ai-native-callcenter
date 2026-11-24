@@ -11,6 +11,7 @@
 #   deploy/e2e/e2e.sh frequency  the test-number case: two campaigns in a row on a listed number, in an application start with a 24 h frequency window (#578)
 #   deploy/e2e/e2e.sh carrier-timeout  the carrier's 408 case: a campaign of its own (ring 45 s, the default 2 h NO_ANSWER interval) whose callee rings, then answers 408 after 25 s (#576)
 #   deploy/e2e/e2e.sh callerfirst  the caller-first case: AI outbound calls on a flow with global.isCallerFirst to callees that greet at 800 ms, at 2.6 s, never, and late (#594)
+#   deploy/e2e/e2e.sh greeting-cut  the greeting-cut case: callees whose "喂" cuts the bot's opening, on a server-cancels provider profile (#596)
 #   deploy/e2e/e2e.sh down    collect logs, remove containers, volumes, network
 #   deploy/e2e/e2e.sh config  print the resolved compose configuration
 #
@@ -60,6 +61,12 @@ APP_FREQUENCY_WINDOW=""
 # the environment's 0 (off). Only cmd_dailycap sets it.
 APP_DAILY_CAP=""
 
+# APP_PROVIDER is the AICC_PROVIDER the app runs as; empty is the compose
+# default (openai). APP_MOCK_* pick the mock's mode: a scenario file, or a VAD
+# file that makes it hear the uplink — setting a VAD file and emptying the
+# scenario switches modes. Only cmd_greeting_cut changes them.
+APP_PROVIDER=""; APP_MOCK_SCENARIO_FILE="/etc/e2e/provider-scenario.json"; APP_MOCK_VAD_FILE=""
+
 # Compose runs with a scrubbed environment: nothing from the caller's shell
 # (provider keys, AICC_* settings, a stray .env) can reach an interpolation.
 # Only the Docker client's own variables and the harness's are passed.
@@ -77,6 +84,8 @@ compose() {
     E2E_BOT_RTP_PORT_LOW="$APP_BOT_RTP_PORT_LOW" E2E_BOT_RTP_PORT_HIGH="$APP_BOT_RTP_PORT_HIGH" \
     E2E_CAMPAIGN_FREQUENCY_WINDOW="$APP_FREQUENCY_WINDOW" \
     E2E_OUTBOUND_MAX_DIALS_PER_NUMBER_PER_DAY="$APP_DAILY_CAP" \
+    E2E_PROVIDER="$APP_PROVIDER" \
+    E2E_MOCK_SCENARIO_FILE="$APP_MOCK_SCENARIO_FILE" E2E_MOCK_VAD_FILE="$APP_MOCK_VAD_FILE" \
     docker compose -p "$PROJECT" --project-directory "$ROOT/deploy" \
     --env-file "$E2E/e2e.env" -f "$ROOT/deploy/docker-compose.yml" -f "$E2E/docker-compose.yml" "$@"
 }
@@ -445,6 +454,41 @@ cmd_callerfirst() {
   fi
 }
 
+cmd_greeting_cut() {
+  [ -n "$(compose ps -q aicc 2>/dev/null)" ] || { say "the environment is not up; run: make e2e-up"; exit 1; }
+  local id t0=$SECONDS
+  id="greeting-cut-$(date -u +%Y%m%dT%H%M%SZ)"
+  # The application runs as gateway — the profile whose server cancels by
+  # itself — with the mock in VAD mode (no scenario) behind it, so a burst of
+  # the callee's is settled by the provider itself the way qwen's VAD settles
+  # one (#596). The simulator restarts for a fresh record.
+  APP_PROVIDER=gateway
+  APP_MOCK_SCENARIO_FILE=""; APP_MOCK_VAD_FILE="/etc/e2e/provider-vad.json"
+  render
+  compose up -d --no-deps --force-recreate --wait mockprovider aicc >&2
+  compose restart calleesim >&2
+  local rc=0
+  if compose run --rm -T --no-deps --entrypoint /usr/local/bin/aicc-e2e-campaign.test driver \
+      -test.v -test.run '^TestGreetingCut$' -test.timeout 10m \
+      -e2e.api "http://$APP_IP:8080" -e2e.ready "http://$APP_IP:9090/readyz" \
+      -e2e.calleesim "http://$CALLEE_IP:8771" -e2e.mockprovider "http://$MOCK_IP:9099" \
+      -e2e.esl "$FS_IP:18021" -e2e.compose-config /run/e2e/compose.json \
+      -e2e.scenario /etc/e2e/scenario.json \
+      -e2e.flow /etc/e2e/flow.greetingcut.json -e2e.provider-vad /etc/e2e/provider-vad.json \
+      -e2e.username admin -e2e.out "/run/e2e/$id" >&2; then
+    say "greeting-cut case passed in $((SECONDS - t0)) s. Results: $RUN/$id"
+  else
+    rc=$?
+    collect_logs
+    say "greeting-cut case FAILED after $((SECONDS - t0)) s. Report and logs: $RUN"
+  fi
+  # Put the environment back the way every other command expects it: openai
+  # profile, scenario-mode mock.
+  APP_PROVIDER=""; APP_MOCK_SCENARIO_FILE="/etc/e2e/provider-scenario.json"; APP_MOCK_VAD_FILE=""
+  compose up -d --no-deps --force-recreate --wait mockprovider aicc >&2
+  [ "$rc" = 0 ] || exit "$rc"
+}
+
 cmd_down() {
   if [ -n "$(compose ps -aq 2>/dev/null)" ]; then collect_logs; fi
   compose down -v --remove-orphans >&2
@@ -468,7 +512,8 @@ case "${1:-}" in
   dailycap) cmd_dailycap ;;
   carrier-timeout) cmd_carrier_timeout ;;
   callerfirst) cmd_callerfirst ;;
+  greeting-cut) cmd_greeting_cut ;;
   down) cmd_down ;;
   config) build_tools; render; cat "$RUN/compose.json" ;;
-  *) echo "usage: $0 up|smoke|campaign|capacity|frequency|dailycap|carrier-timeout|callerfirst|down|config" >&2; exit 2 ;;
+  *) echo "usage: $0 up|smoke|campaign|capacity|frequency|dailycap|carrier-timeout|callerfirst|greeting-cut|down|config" >&2; exit 2 ;;
 esac

@@ -1,0 +1,31 @@
+{
+  "hangoverMs": 300,
+  "utterances": [
+    {
+      "text": "喂？",
+      "speakSec": 1,
+      "toolName": "set_intent",
+      "toolArgs": {"value": "yes"}
+    },
+    {
+      "text": "喂，您好",
+      "speakSec": 1
+    },
+    {
+      "text": "不需要，谢谢",
+      "speakSec": 0,
+      "toolName": "set_intent",
+      "toolArgs": {"value": "no"}
+    },
+    {
+      "text": "喂",
+      "speakSec": 0.5
+    },
+    {
+      "text": "喂？",
+      "speakSec": 0.5,
+      "toolName": "set_intent",
+      "toolArgs": {"value": "yes"}
+    }
+  ]
+}

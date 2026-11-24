@@ -56,6 +56,10 @@ type Config struct {
 	// Scenario switches the server to scripted sessions (scenario.go). Nil is
 	// the default mode: a turn on a timer, never a tool.
 	Scenario *Scenario
+	// VAD, when set, makes the server hear the uplink (vad.go): a loud frame
+	// cancels the turn in progress, and its end earns a scripted transcript
+	// and reply. Nil leaves the uplink ignored, as before.
+	VAD *VAD
 	// ResponseGrace is how long AWAIT_TOOL_RESULT waits for the
 	// response.create that follows a tool result before continuing without
 	// it. Default DefaultResponseGrace.
@@ -83,6 +87,12 @@ func (c *Config) applyDefaults() {
 	if c.DeltaPace < 0 {
 		c.DeltaPace = 0
 	}
+	// A level-detecting callee can only cut a turn that is still playing, so
+	// the VAD mode plays its audio at realtime pace; the burst mode leaves the
+	// wire-fast deltas alone.
+	if c.VAD != nil && c.DeltaPace == 0 {
+		c.DeltaPace = c.DeltaAudio
+	}
 	if c.Log == nil {
 		c.Log = slog.Default()
 	}
@@ -109,6 +119,13 @@ type Server struct {
 	// resultsWithoutCreate counts awaited results with no response.create
 	// after them inside the grace period.
 	resultsWithoutCreate atomic.Int64
+
+	// VAD mode counters: bursts detected, turns they cancelled, utterances
+	// played back and replies made.
+	vadStarts     atomic.Int64
+	vadCancels    atomic.Int64
+	vadUtterances atomic.Int64
+	vadReplies    atomic.Int64
 
 	// meters are the uplink meters of the most recent sessions, oldest first.
 	metersMu sync.Mutex
@@ -147,6 +164,13 @@ type Stats struct {
 	// ResultsWithoutCreate counts tool results the script continued past
 	// after the grace period, with no response.create following.
 	ResultsWithoutCreate int64 `json:"resultsWithoutCreate"`
+
+	// VAD mode only: bursts detected, turns they cancelled, utterances
+	// committed and replies made.
+	VADStarts     int64 `json:"vadStarts"`
+	VADCancels    int64 `json:"vadCancels"`
+	VADUtterances int64 `json:"vadUtterances"`
+	VADReplies    int64 `json:"vadReplies"`
 
 	// Sessions is what each of the most recent sessions heard of the
 	// application's uplink; served only by GET StatsPath?sessions=1, never by
@@ -192,6 +216,10 @@ func (s *Server) Stats() Stats {
 		Unmatched:     s.unmatched.Load(),
 
 		ResultsWithoutCreate: s.resultsWithoutCreate.Load(),
+		VADStarts:            s.vadStarts.Load(),
+		VADCancels:           s.vadCancels.Load(),
+		VADUtterances:        s.vadUtterances.Load(),
+		VADReplies:           s.vadReplies.Load(),
 	}
 }
 
@@ -238,6 +266,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	sess.meter = newUplinkMeter(seq)
 	s.addMeter(sess.meter)
 	defer sess.meter.close()
+	if s.cfg.VAD != nil {
+		sess.vad = newVADState(sess)
+		defer sess.vad.close()
+	}
 	sess.run()
 }
 
@@ -251,8 +283,10 @@ type session struct {
 
 	mu        sync.Mutex
 	responded int
-	// cancelTurn stops the turn in flight, if any.
-	cancelTurn chan struct{}
+	// cancelTurn stops the turn in flight, if any; cancelIsReply marks the
+	// holder a scripted VAD reply, which a request queues behind.
+	cancelTurn    chan struct{}
+	cancelIsReply bool
 
 	done chan struct{}
 
@@ -261,6 +295,9 @@ type session struct {
 
 	// meter measures the application's uplink.
 	meter *uplinkMeter
+
+	// vad is the session's speech detection, set in VAD mode only.
+	vad *vadState
 }
 
 func newSession(server *Server, conn *websocket.Conn) *session {
@@ -302,8 +339,14 @@ func (s *session) run() {
 		switch event.Type {
 		case "input_audio_buffer.append":
 			s.meter.noteAppend(data)
+			if s.vad != nil {
+				s.vad.noteAppend(data)
+			}
 		case "session.update":
 			s.meter.noteSessionUpdate(data)
+			if s.vad != nil {
+				s.vad.noteSessionUpdate(data)
+			}
 		case "response.create":
 			s.meter.noteResponseCreate()
 		}
@@ -313,6 +356,16 @@ func (s *session) run() {
 		switch event.Type {
 		case "session.update":
 			s.send(map[string]any{"type": "session.updated", "session": map[string]any{"id": "mock"}})
+		case "conversation.item.create":
+			var item struct {
+				Item struct {
+					Type   string `json:"type"`
+					Output string `json:"output"`
+				} `json:"item"`
+			}
+			if json.Unmarshal(data, &item) == nil && item.Item.Type == "function_call_output" {
+				s.meter.noteToolOutput(item.Item.Output)
+			}
 		case "response.create":
 			go s.respond()
 		case "response.cancel":
@@ -344,10 +397,25 @@ func (s *session) converse() {
 func (s *session) respond() {
 	cfg := s.server.cfg
 
-	s.mu.Lock()
-	if s.cancelTurn != nil {
-		s.mu.Unlock() // a turn is already in flight
-		return
+	// A scripted VAD reply holds the floor for the response that answers the
+	// burst — the provider's own next turn, which precedes anything the
+	// application asks for next (the retold opening queues behind it).
+	// Another respond() in flight still drops this request as before.
+	for {
+		s.mu.Lock()
+		if s.cancelTurn == nil {
+			break
+		}
+		isReply := s.cancelIsReply
+		s.mu.Unlock()
+		if !isReply {
+			return // a turn is already in flight
+		}
+		select {
+		case <-s.done:
+			return
+		case <-time.After(20 * time.Millisecond):
+		}
 	}
 	cancel := make(chan struct{})
 	s.cancelTurn = cancel
@@ -381,10 +449,11 @@ func (s *session) respond() {
 	if !s.wait(cfg.FirstAudio, cancel) {
 		s.server.cut.Add(1)
 		s.log.Warn("mockprovider: turn cut before any audio", "response", id)
+		s.doneCancelled(cancel, id)
 		return
 	}
 
-	frame := deltaFrame(cfg.DeltaAudio)
+	frame := s.turnFrame(cfg.DeltaAudio)
 	encoded := base64.StdEncoding.EncodeToString(frame)
 	deltas := int(cfg.TurnAudio / cfg.DeltaAudio)
 	if deltas < 1 {
@@ -401,6 +470,7 @@ func (s *session) respond() {
 		s.server.audioSec.Add(cfg.DeltaAudio.Milliseconds())
 		if cfg.DeltaPace > 0 && !s.wait(cfg.DeltaPace, cancel) {
 			s.server.cut.Add(1)
+			s.doneCancelled(cancel, id)
 			return
 		}
 		select {
@@ -442,6 +512,30 @@ func (s *session) stopTurn() {
 	}
 }
 
+// turnFrame is the session's delta frame: the declared output format, the
+// g711 mu-law of a telephone leg when none was declared.
+func (s *session) turnFrame(d time.Duration) []byte {
+	enc, rate := s.meter.outputFormatOf()
+	if enc == "" {
+		return deltaFrame(d)
+	}
+	return deltaFrameFor(enc, rate, d)
+}
+
+// doneCancelled ends a cancelled turn the way a provider settles one: with
+// the response.done that names the cancel. Sent only when the turn was
+// actually cancelled — a wait that ended on the session closing sends nothing.
+func (s *session) doneCancelled(cancel chan struct{}, id string) {
+	select {
+	case <-cancel:
+		s.send(map[string]any{
+			"type":     "response.done",
+			"response": map[string]any{"id": id, "status": "cancelled"},
+		})
+	default:
+	}
+}
+
 // wait sleeps unless the turn is cancelled or the session ends first.
 func (s *session) wait(d time.Duration, cancel chan struct{}) bool {
 	timer := time.NewTimer(d)
@@ -474,21 +568,35 @@ func (s *session) send(payload any) error {
 // or noise. Built once per size and shared.
 var deltaFrames sync.Map // time.Duration -> []byte
 
-func deltaFrame(d time.Duration) []byte {
-	if cached, ok := deltaFrames.Load(d); ok {
+// deltaFrame is the tone a turn's deltas carry, in the encoding and rate the
+// session declared for its output: PCM16 at rate for the linear profiles
+// (the gateway's 24 kHz among them), g711 at 8 kHz for the telephone ones.
+func deltaFrame(d time.Duration) []byte { return deltaFrameFor("mu", media.RateTelephone, d) }
+
+func deltaFrameFor(enc string, rate int, d time.Duration) []byte {
+	key := fmt.Sprintf("%s|%d|%s", enc, rate, d)
+	if cached, ok := deltaFrames.Load(key); ok {
 		return cached.([]byte)
 	}
-	samples := int(d.Seconds() * float64(media.RateTelephone))
+	samples := int(d.Seconds() * float64(rate))
 	pcm := make([]int16, samples)
 	for i := range pcm {
-		pcm[i] = int16(8000 * math.Sin(2*math.Pi*440*float64(i)/float64(media.RateTelephone)))
+		pcm[i] = int16(8000 * math.Sin(2*math.Pi*440*float64(i)/float64(rate)))
 	}
-	converter, err := media.NewConverter(
-		media.PCM16Format(media.RateTelephone), media.G711Format(media.LawMu))
-	if err != nil {
-		panic(err) // both formats are constants; this cannot fail
+	var frame []byte
+	if enc == "pcm16" {
+		frame = media.PCM16ToBytes(nil, pcm)
+	} else {
+		law := media.LawMu
+		if enc == "alaw" {
+			law = media.LawAlaw
+		}
+		converter, err := media.NewConverter(media.PCM16Format(rate), media.G711Format(law))
+		if err != nil {
+			panic(err) // constants; this cannot fail
+		}
+		frame = converter.Convert(make([]byte, 0, samples), media.PCM16ToBytes(nil, pcm))
 	}
-	frame := converter.Convert(make([]byte, 0, samples), media.PCM16ToBytes(nil, pcm))
-	deltaFrames.Store(d, frame)
+	deltaFrames.Store(key, frame)
 	return frame
 }
