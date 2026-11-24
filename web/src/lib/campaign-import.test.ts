@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   buildRecords, guessRoles, mappingProblem, mergeSummaries, rejectedCsv, roleFromValue, roleValue,
   runImport, type ColumnRole, type ImportRecord,
+  templateCsv,
 } from './campaign-import'
 import type { CampaignContactRow, CampaignImportResult } from './campaigns'
 import { parseCsv } from './csv'
@@ -304,5 +305,34 @@ describe('the rejected rows file', () => {
     const out = parseCsv(rejectedCsv(table.header, summary.entries))
     expect(out.header).toEqual(['line', 'code', 'detail', '号码', '姓名'])
     expect(out.rows.map((r) => r.cells)).toEqual([['3', 'NUMBER_INVALID', '', 'bad', 'Li']])
+  })
+})
+
+describe('the template the dialog offers', () => {
+  it('is only the number column when the flow reads no field', () => {
+    const out = parseCsv(templateCsv([], '手机号'))
+    expect(out.header).toEqual(['手机号'])
+    expect(out.rows).toEqual([])
+  })
+
+  it('adds the campaign\'s flow fields after the number column, in order', () => {
+    const out = parseCsv(templateCsv(['customerName', 'orderId'], '手机号'))
+    expect(out.header).toEqual(['手机号', 'customerName', 'orderId'])
+  })
+
+  it('names the number column as the locale does, and leads the file with a BOM', () => {
+    const text = templateCsv([], 'number')
+    expect(text.charCodeAt(0)).toBe(0xfeff)
+    expect(parseCsv(text).header).toEqual(['number'])
+  })
+
+  it('round trips: its header maps without a manual pick, for zh and en', () => {
+    for (const numberHeader of ['手机号', 'number']) {
+      const table = parseCsv(templateCsv(['customerName'], numberHeader) + '13800000001,Li\r\n')
+      expect(guessRoles(table.header, ['customerName'])).toEqual([
+        { kind: 'number' },
+        { kind: 'slot', name: 'customerName' },
+      ])
+    }
   })
 })

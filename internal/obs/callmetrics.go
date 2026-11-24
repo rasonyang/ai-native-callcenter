@@ -59,6 +59,7 @@ var (
 	botClaimCues       metric.Int64Counter
 	botWordlessHangups metric.Int64Counter
 	botLeadGuard       metric.Int64Counter
+	botMachineAnswered metric.Int64Counter
 	botFirstMedia      metric.Int64Histogram
 	botFirstAudio      metric.Int64Histogram
 	botCallerFirstWait metric.Int64Histogram
@@ -236,9 +237,20 @@ func init() {
 			"OPENING_UNHEARD (the caller's words began before they had heard the opening to "+
 			"its final clause), DECLINED (the final transcript was only refusal phrases), "+
 			"NO_FINAL (none within the wait), BLANK_FINAL, NO_CALLER_TURN (the caller had "+
-			"said nothing). Ran: WORDS (any other words), UNCONFIRMED (words not known, let "+
-			"through: a later response on the same caller turn, or an ending under way). Read "+
-			"from the caller's transcript, so a signal rather than proof."))
+			"said nothing), MACHINE_WORDING (the call is marked as answered by a machine, "+
+			"#409; over an ending under way it runs and counts the same). Ran: WORDS (any "+
+			"other words), UNCONFIRMED (words not known, let through: a later response on the "+
+			"same caller turn, or an ending under way). Read from the caller's transcript, so a "+
+			"signal rather than proof."))
+	botMachineAnswered, _ = meter.Int64Counter("aicc_bot_machine_answered_calls_total",
+		metric.WithDescription("AI calls the platform placed to a customer that were marked as "+
+			"answered by a machine, once per call, by category and provider: a final caller "+
+			"transcript carried wording from a built-in list of what a VOICEMAIL prompt, a "+
+			"CALL_ASSISTANT or a CARRIER_ANNOUNCEMENT says and a person answering their own "+
+			"phone does not. The category is the first match's. A marked call records no HIGH "+
+			"or MEDIUM lead (aicc_bot_lead_guard_total, MACHINE_WORDING). Read from the "+
+			"caller's transcript, so a signal rather than proof: a call with no caller "+
+			"transcript, or wording outside the list, is never marked."))
 	botClaimCues, _ = meter.Int64Counter("aicc_bot_claim_cues_total",
 		metric.WithDescription("Cues the platform sent after a bot turn claimed a lookup, "+
 			"transfer or message no tool call backed, by claim, provider, trigger "+
@@ -690,7 +702,29 @@ const (
 	// LeadGuardUnconfirmed: words not known, and the call ran: refused once
 	// already for the same caller turn, or the call's ending is under way.
 	LeadGuardUnconfirmed = "UNCONFIRMED"
+	// LeadGuardMachineWording: the call is marked as answered by a machine
+	// (#409); refused, unless the call's ending is under way.
+	LeadGuardMachineWording = "MACHINE_WORDING"
 )
+
+// The kinds of machine whose wording marks a call as answered by one
+// (RecordMachineAnswered, #409).
+const (
+	MachineVoicemail           = "VOICEMAIL"
+	MachineCallAssistant       = "CALL_ASSISTANT"
+	MachineCarrierAnnouncement = "CARRIER_ANNOUNCEMENT"
+)
+
+// RecordMachineAnswered counts one call marked as answered by a machine
+// (#409), by the kind of machine (Machine*) whose wording marked it. A call
+// counts once, when it is first marked.
+func RecordMachineAnswered(category, provider string) {
+	if botMachineAnswered == nil {
+		return
+	}
+	botMachineAnswered.Add(context.Background(), 1, metric.WithAttributes(
+		attribute.String("category", category), attribute.String("provider", provider)))
+}
 
 // RecordLeadGuard counts one call the lead guard judged (#612), by what it
 // concluded (LeadGuard*). Every judged call counts once, refused or not, so the
