@@ -1471,6 +1471,16 @@ func TestDoctorRecordingSpoolPassesWhenTheSwitchClearsTheSpoolTheAppReads(t *tes
 	}
 }
 
+// The filesystem backend asks the switch to clear files only once retention
+// deletes them; the probe applies then and not before (#536).
+func TestDoctorRecordingSpoolRunsOnTheFilesystemBackendWhenRetentionIsOn(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.withRecordings(h.spool, &fakeRecordings{backend: "FS"})
+	h.deps.cfg.RecordingRetentionDays = 1
+	wantState(t, h.run(), DoctorCheckRecordingSpool, DoctorStatePass)
+}
+
 func TestDoctorRecordingSpoolFailsWithItsCodes(t *testing.T) {
 	t.Parallel()
 	for name, tc := range map[string]struct {

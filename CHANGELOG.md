@@ -50,6 +50,15 @@ carries the one-line installer's files.
 
 ### Fixed
 
+- **Recording retention deletes on the filesystem backend** (#536). The
+  compose stack mounts the recordings volume read-only and the switch's dated
+  directories are 0750, so the retention sweep's delete failed with EROFS (or
+  EACCES on a writable mount) and no row was ever stamped deleted. `Delete`
+  now removes the file itself first — all a same-user deployment needs — and
+  on refusal asks the switch through `aicc_spool.lua release`, which also
+  tidies the empty dated directories. The connect-time spool probe and
+  `aicc doctor`'s `recording_spool` check now apply to the filesystem backend
+  when retention is on.
 - **A machine that answers a campaign call records no lead** (#409). On a call
   the platform placed to a customer, each final transcript of the callee's
   words is now checked against a built-in Chinese and English list of what a
