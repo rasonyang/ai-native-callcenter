@@ -246,3 +246,13 @@ export function rejectedCsv(header: string[], entries: ImportEntry[]): string {
     ...rejected.map((e) => [String(e.line), e.code ?? '', e.detail ?? ''].concat(e.cells)),
   ])
 }
+
+/**
+ * The template the dialog offers for download: the header row only — the
+ * number column as the UI language names it, then the campaign's flow fields
+ * in the order the flow names them. No example row: a forgotten one would be
+ * dialled, and a realistic-looking number may belong to a real subscriber.
+ */
+export function templateCsv(fieldNames: readonly string[], numberHeader: string): string {
+  return toCsv([[numberHeader, ...fieldNames]])
+}

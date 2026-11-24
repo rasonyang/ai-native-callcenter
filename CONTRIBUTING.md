@@ -4,6 +4,44 @@ Build, test and API-contract instructions are in the [README](README.md#building
 The rules below cover the questions that come up in issues and pull requests
 more than once.
 
+## Pull requests
+
+A pull request is reviewed by a person, one at a time, and most changes to call
+behaviour are accepted only after a real call. These rules keep that workable.
+They apply the same way to a pull request written by a coding agent: the
+account that opens it answers for every line and every claim in it.
+
+- **At most three open pull requests per contributor.** Open the next one when
+  one of yours has merged or closed. Reviews come back faster on three than on
+  thirty, and what the first review asks for usually applies to the rest.
+- **One issue per pull request, and nothing else in it.** No second issue
+  because it touches the same file, no commits of another open pull request
+  underneath, no reformatting of a file the change does not need. If two issues
+  cannot be fixed apart, say why in the description.
+- **An undecided issue is not ready for code.** When an issue lists options,
+  or says "decide", "not decided", "measure first" or "design first", the next
+  step is a comment on the issue: the measurement it
+  asks for, or the option you propose and why. Wait for the maintainer's choice
+  there. A pull request that picks the option itself is closed unread, however
+  good the code is. The same holds for a step the issue puts before the code,
+  such as posting numbers or a design note.
+- **Do not close the issue from the pull request.** Write `Part of #123` or
+  `For #123`, never `Fixes`, `Closes` or `Resolves`. An issue closes when its
+  acceptance is met, and that often includes a live call or a run on a real
+  deployment that only the maintainer can make.
+- **"Verified" means a command and its output.** Every claim that something was
+  run names the exact command and pastes the relevant output, or links the CI
+  job that shows it: `go test -race ./internal/x/` with its `ok` line, `make
+  test-stress PKG=… RUN=…` with its summary, `make api-check`, the failing run
+  on `main` that the new test turns green. A test that also passes with the fix
+  removed proves nothing; say how you checked that it fails without the change.
+  Database tests skip unless `AICC_TEST_DATABASE_URL` is set, so "tests pass"
+  from a run without it is not a claim about the store.
+- **Say what was not verified.** If the issue asks for a live call, a run on the
+  development stack, a browser check or a fresh-VM install and you could not do
+  it, write that under its own heading. A pull request that states its gaps is
+  reviewed sooner than one that reads as complete and is not.
+
 ## Integrations live outside the tree
 
 This repository is a call center: telephony, queues, the AI leg, the product

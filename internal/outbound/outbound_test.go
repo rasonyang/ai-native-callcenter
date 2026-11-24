@@ -316,9 +316,16 @@ func answer(s *Service, channelID string) {
 	released(s, channelID)
 }
 
+// waitBound is the backstop every poll-wait in this package shares (#584).
+// Each wait below polls for an event that arrives as soon as the service has
+// done the work, so the bound only decides a genuinely missing event — under
+// stress load on a few busy CPUs the event can take far longer than an idle
+// machine suggests.
+const waitBound = 90 * time.Second
+
 func waitTransfers(t *testing.T, sw *fakeSwitch, want int) {
 	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
+	deadline := time.Now().Add(waitBound)
 	for time.Now().Before(deadline) {
 		if sw.transferCount() >= want {
 			return
@@ -330,7 +337,7 @@ func waitTransfers(t *testing.T, sw *fakeSwitch, want int) {
 
 func waitBridges(t *testing.T, sw *fakeSwitch, want int) {
 	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
+	deadline := time.Now().Add(waitBound)
 	for time.Now().Before(deadline) {
 		if sw.bridgeCount() >= want {
 			return
