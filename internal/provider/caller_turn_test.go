@@ -268,3 +268,34 @@ func TestAnEngineThatAnswersItselfIsNeverAskedToAnswer(t *testing.T) {
 	committed(f, "item-1")
 	f.awaitMessages("response.create", opening+0)
 }
+
+// A completed transcript arrives well after the words were said — after the
+// model may already have reacted to them. The final caller transcript carries
+// when the matching speech_started was seen, so the ledger can stamp the line
+// when it was spoken, not when it was transcribed (#587).
+func TestACompletedCallerTranscriptCarriesWhenTheSpeechStarted(t *testing.T) {
+	f, session := startControlled(t, OpenAIProfile())
+
+	f.send(map[string]any{"type": "input_audio_buffer.speech_started", "item_id": "item-1"})
+	awaitEvent(t, session, EventTypeSpeechStarted)
+	spoke := time.Now().UTC()
+	// The transcript lands well after the speech it transcribes.
+	time.Sleep(20 * time.Millisecond)
+	f.send(map[string]any{"type": "conversation.item.input_audio_transcription.completed",
+		"item_id": "item-1", "transcript": "an objection"})
+	ev := awaitEvent(t, session, EventTypeInputTranscript)
+	if !ev.IsFinal {
+		t.Fatalf("event = %+v, want a final transcript", ev)
+	}
+	if ev.StartedAt.IsZero() || ev.StartedAt.Before(spoke.Add(-time.Second)) || ev.StartedAt.After(time.Now().UTC()) {
+		t.Errorf("StartedAt = %v, want the speech_started time ~%v", ev.StartedAt, spoke)
+	}
+
+	// A completed transcript with no speech_started carries none.
+	f.send(map[string]any{"type": "conversation.item.input_audio_transcription.completed",
+		"item_id": "item-2", "transcript": "no start seen"})
+	ev = awaitEvent(t, session, EventTypeInputTranscript)
+	if !ev.StartedAt.IsZero() {
+		t.Errorf("StartedAt = %v on a transcript that had no speech_started, want zero", ev.StartedAt)
+	}
+}

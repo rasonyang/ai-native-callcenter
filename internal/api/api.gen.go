@@ -3166,9 +3166,15 @@ type SSETranscriptPayload struct {
 	Source TranscriptSource `json:"source"`
 
 	// Speaker Who said a line. CUSTOMER is the person who called, whichever leg carries them; BOT is the AI; HUMAN_AGENT is a logged-in agent answering after a transfer.
-	Speaker     Speaker `json:"speaker"`
-	Text        string  `json:"text"`
-	UtteranceID string  `json:"utteranceId"`
+	Speaker Speaker `json:"speaker"`
+
+	// SpeechStartMs When the caller's words were said, as an offset from the answer like offsetMs. Present only when the provider reported the speech start.
+	SpeechStartMs *int64 `json:"speechStartMs,omitempty"`
+	Text          string `json:"text"`
+
+	// TranscribedLate True when the line was transcribed after a line that already reached the ledger (most often the bot's reaction to it): seq stays in receipt order, so the mark — not the position — says this line was late. Its occurredAt and offsetMs are when the words were said.
+	TranscribedLate *bool  `json:"transcribedLate,omitempty"`
+	UtteranceID     string `json:"utteranceId"`
 }
 
 // SSETranscriptionStatePayload Payload of CALL_TRANSCRIPTION_STATE: whether the agent is seeing everything that is being said, and if not, which side is missing. reason is a stable code, never display text.
@@ -3270,11 +3276,11 @@ type TierRules struct {
 // TranscriptKind defines model for TranscriptKind.
 type TranscriptKind string
 
-// TranscriptLine One thing said or done on a call, in either phase. seq is dense per call and is both the sort key and the backfill cursor.
+// TranscriptLine One thing said or done on a call, in either phase. seq is dense per call and is both the sort key and the backfill cursor. occurredAt and offsetMs are the line's arrival time — a caller's transcription trails its speech, and speechStartMs, when present, is when the caller's words were said.
 type TranscriptLine struct {
 	AgentID *openapi_types.UUID `json:"agentId,omitempty"`
 
-	// Content TEXT carries {text}; TOOL_CALL and TOOL_RESULT carry the tool name and arguments or result.
+	// Content TEXT carries {text}; TOOL_CALL and TOOL_RESULT carry the tool name and arguments or result. A line transcribed after a later-stored one also carries transcribedLate true.
 	Content    map[string]interface{} `json:"content"`
 	Kind       TranscriptKind         `json:"kind"`
 	Language   *string                `json:"language,omitempty"`
@@ -3288,8 +3294,11 @@ type TranscriptLine struct {
 	Source TranscriptSource `json:"source"`
 
 	// Speaker Who said a line. CUSTOMER is the person who called, whichever leg carries them; BOT is the AI; HUMAN_AGENT is a logged-in agent answering after a transfer.
-	Speaker     Speaker `json:"speaker"`
-	UtteranceID *string `json:"utteranceId,omitempty"`
+	Speaker Speaker `json:"speaker"`
+
+	// SpeechStartMs When the caller's words were said, as an offset from the answer like offsetMs, when the provider reported it. offsetMs is the line's arrival offset; a caller line can be transcribed after the bot's reaction to it, in which case speechStartMs is the earlier time.
+	SpeechStartMs *int64  `json:"speechStartMs,omitempty"`
+	UtteranceID   *string `json:"utteranceId,omitempty"`
 }
 
 // TranscriptSource Where a line came from. MODEL is the conversational engine's own transcript of the AI leg; ASR is a separate recognition of streamed audio.

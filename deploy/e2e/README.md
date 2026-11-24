@@ -16,6 +16,7 @@ make e2e-frequency # the list of test numbers: two campaigns in a row on a liste
 make e2e-dailycap  # the daily dial cap: one number dialled to the cap of 3 and no further
 make e2e-carrier-timeout # a carrier that ends an unanswered call with 408: NO_ANSWER, ringSec, the retry interval (own campaign, 2 h interval)
 make e2e-callerfirst # AI outbound calls that listen to the callee's greeting before they open (global.isCallerFirst)
+make e2e-transcriptlag # a caller's transcription completed 500 ms after the tool call it caused: the line keeps its speaking time and is marked (#587)
 make e2e-down      # collect logs, remove containers, volumes and the network
 ```
 

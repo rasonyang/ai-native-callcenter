@@ -141,6 +141,12 @@ type Realtime struct {
 	// instructions.
 	cfg          SessionConfig
 	instructions string
+	// speechStarts remembers when each caller utterance's speech_started was
+	// seen, by item id, so the transcript that completes for it can carry when
+	// the words were actually said rather than when they were transcribed
+	// (#587). Only utterance items enter it, one entry each, removed when the
+	// completed transcript for the item is handled.
+	speechStarts map[string]time.Time
 	// responseItemID identifies the assistant's current audio item, which is
 	// what truncation refers to. It belongs to one response: it is cleared when
 	// the next response is created and once the item has been truncated, so a
@@ -418,6 +424,7 @@ func New(profile Profile, log *slog.Logger, opts ...Option) (*Realtime, error) {
 		deltaStallDeadline:      deltaStallTimeout,
 		responseCreatedDeadline: responseCreatedTimeout,
 		stallHoldDeadline:       stallHoldTimeout,
+		speechStarts:            map[string]time.Time{},
 	}, nil
 }
 
@@ -1770,6 +1777,9 @@ func (r *Realtime) handle(event *wireEvent) {
 		r.disarmTurnWatchLocked()
 		r.hasTurnWords = false
 		r.hasReasked = false
+		if event.ItemID != "" {
+			r.speechStarts[event.ItemID] = time.Now()
+		}
 		r.mu.Unlock()
 		r.emit(Event{Type: EventTypeSpeechStarted, ItemID: event.ItemID})
 
@@ -1903,8 +1913,12 @@ func (r *Realtime) handle(event *wireEvent) {
 		if event.Status != "" && event.Status != "completed" {
 			return
 		}
+		r.mu.Lock()
+		startedAt := r.speechStarts[event.ItemID]
+		delete(r.speechStarts, event.ItemID)
+		r.mu.Unlock()
 		r.emit(Event{Type: EventTypeInputTranscript, Text: event.Transcript, IsFinal: true,
-			ItemID: event.ItemID})
+			ItemID: event.ItemID, StartedAt: startedAt})
 		r.onCallerTranscript(event.Transcript)
 
 	case "ping":

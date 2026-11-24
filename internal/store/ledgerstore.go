@@ -627,18 +627,24 @@ const (
 
 // TranscriptLine is one thing said or done on a call, in either phase.
 type TranscriptLine struct {
-	Seq         int            `json:"seq"`
-	OccurredAt  time.Time      `json:"occurredAt"`
-	Speaker     string         `json:"speaker"`
-	Kind        string         `json:"kind"`
-	Content     map[string]any `json:"content"`
-	PartyID     *uuid.UUID     `json:"partyId,omitempty"`
-	AgentID     *uuid.UUID     `json:"agentId,omitempty"`
-	OffsetMs    int            `json:"offsetMs"`
-	Language    string         `json:"language,omitempty"`
-	Source      string         `json:"source"`
-	Provider    string         `json:"provider,omitempty"`
-	UtteranceID string         `json:"utteranceId,omitempty"`
+	Seq        int            `json:"seq"`
+	OccurredAt time.Time      `json:"occurredAt"`
+	Speaker    string         `json:"speaker"`
+	Kind       string         `json:"kind"`
+	Content    map[string]any `json:"content"`
+	PartyID    *uuid.UUID     `json:"partyId,omitempty"`
+	AgentID    *uuid.UUID     `json:"agentId,omitempty"`
+	OffsetMs   int            `json:"offsetMs"`
+	// SpeechStartMs is when the caller's words were said, as an offset from
+	// the answer like OffsetMs, when the provider reported it. A caller's
+	// transcription trails its speech, so OffsetMs — the arrival offset —
+	// can land after the bot's reaction to the words (#587). Nil for every
+	// line nobody knows a speaking time for.
+	SpeechStartMs *int32 `json:"speechStartMs,omitempty"`
+	Language      string `json:"language,omitempty"`
+	Source        string `json:"source"`
+	Provider      string `json:"provider,omitempty"`
+	UtteranceID   string `json:"utteranceId,omitempty"`
 }
 
 func (l *TranscriptLine) params(callID uuid.UUID) (queries.InsertTranscriptLineParams, error) {
@@ -651,19 +657,20 @@ func (l *TranscriptLine) params(callID uuid.UUID) (queries.InsertTranscriptLineP
 		source = TranscriptSourceModel
 	}
 	return queries.InsertTranscriptLineParams{
-		CallID:      callID,
-		Seq:         int32(l.Seq),
-		OccurredAt:  stamp(l.OccurredAt),
-		Speaker:     l.Speaker,
-		Kind:        l.Kind,
-		Content:     content,
-		PartyID:     l.PartyID,
-		AgentID:     l.AgentID,
-		OffsetMs:    int32(l.OffsetMs),
-		Language:    l.Language,
-		Source:      source,
-		Provider:    l.Provider,
-		UtteranceID: l.UtteranceID,
+		CallID:        callID,
+		Seq:           int32(l.Seq),
+		OccurredAt:    stamp(l.OccurredAt),
+		Speaker:       l.Speaker,
+		Kind:          l.Kind,
+		Content:       content,
+		PartyID:       l.PartyID,
+		AgentID:       l.AgentID,
+		OffsetMs:      int32(l.OffsetMs),
+		SpeechStartMs: l.SpeechStartMs,
+		Language:      l.Language,
+		Source:        source,
+		Provider:      l.Provider,
+		UtteranceID:   l.UtteranceID,
 	}, nil
 }
 
@@ -704,17 +711,18 @@ func transcriptLines(rows []queries.Transcript) []TranscriptLine {
 	out := make([]TranscriptLine, 0, len(rows))
 	for _, row := range rows {
 		line := TranscriptLine{
-			Seq:         int(row.Seq),
-			OccurredAt:  row.OccurredAt.Time,
-			Speaker:     row.Speaker,
-			Kind:        row.Kind,
-			PartyID:     row.PartyID,
-			AgentID:     row.AgentID,
-			OffsetMs:    int(row.OffsetMs),
-			Language:    row.Language,
-			Source:      row.Source,
-			Provider:    row.Provider,
-			UtteranceID: row.UtteranceID,
+			Seq:           int(row.Seq),
+			OccurredAt:    row.OccurredAt.Time,
+			Speaker:       row.Speaker,
+			Kind:          row.Kind,
+			PartyID:       row.PartyID,
+			AgentID:       row.AgentID,
+			OffsetMs:      int(row.OffsetMs),
+			SpeechStartMs: row.SpeechStartMs,
+			Language:      row.Language,
+			Source:        row.Source,
+			Provider:      row.Provider,
+			UtteranceID:   row.UtteranceID,
 		}
 		_ = json.Unmarshal(row.Content, &line.Content)
 		out = append(out, line)

@@ -2823,14 +2823,14 @@ export interface components {
         };
         /** @enum {string} */
         TranscriptKind: "TEXT" | "TOOL_CALL" | "TOOL_RESULT";
-        /** @description One thing said or done on a call, in either phase. seq is dense per call and is both the sort key and the backfill cursor. */
+        /** @description One thing said or done on a call, in either phase. seq is dense per call and is both the sort key and the backfill cursor. occurredAt and offsetMs are the line's arrival time — a caller's transcription trails its speech, and speechStartMs, when present, is when the caller's words were said. */
         TranscriptLine: {
             seq: number;
             /** Format: date-time */
             occurredAt: string;
             speaker: components["schemas"]["Speaker"];
             kind: components["schemas"]["TranscriptKind"];
-            /** @description TEXT carries {text}; TOOL_CALL and TOOL_RESULT carry the tool name and arguments or result. */
+            /** @description TEXT carries {text}; TOOL_CALL and TOOL_RESULT carry the tool name and arguments or result. A line transcribed after a later-stored one also carries transcribedLate true. */
             content: {
                 [key: string]: unknown;
             };
@@ -2840,6 +2840,11 @@ export interface components {
             agentId?: string;
             /** Format: int64 */
             offsetMs: number;
+            /**
+             * Format: int64
+             * @description When the caller's words were said, as an offset from the answer like offsetMs, when the provider reported it. offsetMs is the line's arrival offset; a caller line can be transcribed after the bot's reaction to it, in which case speechStartMs is the earlier time.
+             */
+            speechStartMs?: number;
             language?: string;
             source: components["schemas"]["TranscriptSource"];
             provider?: string;
@@ -3213,8 +3218,15 @@ export interface components {
             text: string;
             /** Format: int64 */
             offsetMs?: number;
+            /**
+             * Format: int64
+             * @description When the caller's words were said, as an offset from the answer like offsetMs. Present only when the provider reported the speech start.
+             */
+            speechStartMs?: number;
             language?: string;
             source: components["schemas"]["TranscriptSource"];
+            /** @description True when the line was transcribed after a line that already reached the ledger (most often the bot's reaction to it): seq stays in receipt order, so the mark — not the position — says this line was late. Its occurredAt and offsetMs are when the words were said. */
+            transcribedLate?: boolean;
         };
         /** @description Payload of CALL_TRANSCRIPTION_STATE: whether the agent is seeing everything that is being said, and if not, which side is missing. reason is a stable code, never display text. */
         SseTranscriptionStatePayload: {

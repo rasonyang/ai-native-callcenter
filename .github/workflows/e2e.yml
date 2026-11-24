@@ -138,6 +138,13 @@ jobs:
         if: ${{ !cancelled() && steps.up.outcome == 'success' }}
         run: make e2e-callerfirst
 
+      # One call whose transcription completes 500 ms after the tool call it
+      # caused (#587): the caller line keeps its speaking time and is marked,
+      # rather than reading as words nobody had said. Under half a minute.
+      - name: Transcript-lag test
+        if: ${{ !cancelled() && steps.up.outcome == 'success' }}
+        run: make e2e-transcriptlag
+
       # The run directory holds the simulator's record, the CDRs, the smoke
       # summary, the campaign report with its failure bundles, the capacity
       # reports and every container's log; a failed up, smoke, campaign or

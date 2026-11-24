@@ -298,6 +298,14 @@ type Event struct {
 	// IsFinal distinguishes a completed transcript from a partial one.
 	IsFinal bool
 
+	// StartedAt is when the caller's speech began, on a final
+	// EventTypeInputTranscript: the time the matching SPEECH_STARTED was
+	// seen. A completed transcript arrives well after the words — after the
+	// model may already have reacted to them — and a line stamped at arrival
+	// can land later than the reaction it caused. Zero where the provider
+	// reports no speech start.
+	StartedAt time.Time
+
 	// ToolCallID, ToolName and ToolArgs describe a function call
 	// (EventTypeToolCall). ToolArgs is a JSON object.
 	ToolCallID string

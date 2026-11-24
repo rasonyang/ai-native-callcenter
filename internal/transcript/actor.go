@@ -18,6 +18,7 @@ package transcript
 import (
 	"context"
 	"log/slog"
+	"maps"
 	"strings"
 	"sync"
 	"time"
@@ -55,6 +56,15 @@ type Line struct {
 	// IsFinal false means a guess that will be contradicted within a second:
 	// it reaches the stream but never the ledger, and never takes a seq.
 	IsFinal bool
+
+	// SpokenAt is when the words were said, when the producer knows: a
+	// caller's utterance is transcribed after it was spoken, and a line
+	// stamped at arrival can land later than the bot's reaction to it (#587).
+	// With it the line carries speechStartMs — the words' time beside
+	// occurredAt and offsetMs, which stay the arrival time. seq stays in
+	// receipt order, so a late-transcribed line is the one
+	// content.transcribedLate marks.
+	SpokenAt time.Time
 }
 
 func (l Line) content() map[string]any {
@@ -90,6 +100,11 @@ type Actor struct {
 
 	// seq is owned by the actor goroutine alone. No lock, by construction.
 	seq int
+
+	// lastOccurredAt is the newest occurredAt stored so far: a line stamped
+	// before it was transcribed after a line that was stored first, and the
+	// reviewer is told. Owned by the actor goroutine, like seq.
+	lastOccurredAt time.Time
 
 	// state is the last transcription state published for this call. Held here
 	// because this is the only thing that publishes one, so a reader asking
@@ -217,7 +232,7 @@ func (a *Actor) handle(line Line) {
 	// stops there: storing it would make the ledger the only record in the
 	// system containing text nobody said.
 	if !line.IsFinal {
-		a.publish(events.TypeCallTranscript, a.payload(line, 0, now, false))
+		a.publish(events.TypeCallTranscript, a.payload(line, 0, now, false, false, nil))
 		return
 	}
 
@@ -232,9 +247,38 @@ func (a *Actor) handle(line Line) {
 
 	a.seq++
 	seq := a.seq
+
+	// occurredAt is when the line arrived. A caller's transcript trails its
+	// speech — and can trail the bot's reaction to it — so an offset computed
+	// here is the arrival offset, not the speaking offset; the speaking time
+	// rides beside it when the producer knows it (#587).
 	offset := 0
 	if !a.answeredAt.IsZero() && now.After(a.answeredAt) {
 		offset = int(now.Sub(a.answeredAt).Milliseconds())
+	}
+	var speechStartMs *int32
+	if !line.SpokenAt.IsZero() && line.SpokenAt.Before(now) && !a.answeredAt.IsZero() {
+		ms := int32(line.SpokenAt.Sub(a.answeredAt).Milliseconds())
+		if ms < 0 {
+			ms = 0
+		}
+		speechStartMs = &ms
+	}
+
+	// A caller line whose speaking time precedes the last line stored was
+	// transcribed after a line that already reached the ledger — the bot's
+	// reaction to it, most often. The reviewer is told, or the later
+	// reaction still reads as an answer to nothing. seq is not reordered for
+	// it: seq is the cursor the backfill resumes from, and a moved row is a
+	// missed line.
+	content := line.content()
+	isLate := !line.SpokenAt.IsZero() && line.SpokenAt.Before(a.lastOccurredAt)
+	if isLate {
+		content = maps.Clone(content)
+		content["transcribedLate"] = true
+	}
+	if now.After(a.lastOccurredAt) {
+		a.lastOccurredAt = now
 	}
 
 	source := line.Source
@@ -242,18 +286,19 @@ func (a *Actor) handle(line Line) {
 		source = store.TranscriptSourceModel
 	}
 	row := store.TranscriptLine{
-		Seq:         seq,
-		OccurredAt:  now,
-		Speaker:     line.Speaker,
-		Kind:        line.Kind,
-		Content:     line.content(),
-		PartyID:     line.PartyID,
-		AgentID:     line.AgentID,
-		OffsetMs:    offset,
-		Language:    line.Language,
-		Source:      source,
-		Provider:    line.Provider,
-		UtteranceID: line.UtteranceID,
+		Seq:           seq,
+		OccurredAt:    now,
+		Speaker:       line.Speaker,
+		Kind:          line.Kind,
+		Content:       content,
+		SpeechStartMs: speechStartMs,
+		PartyID:       line.PartyID,
+		AgentID:       line.AgentID,
+		OffsetMs:      offset,
+		Language:      line.Language,
+		Source:        source,
+		Provider:      line.Provider,
+		UtteranceID:   line.UtteranceID,
 	}
 	if a.store != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -265,10 +310,10 @@ func (a *Actor) handle(line Line) {
 		}
 		cancel()
 	}
-	a.publish(events.TypeCallTranscript, a.payload(line, seq, now, true))
+	a.publish(events.TypeCallTranscript, a.payload(line, seq, now, true, isLate, speechStartMs))
 }
 
-func (a *Actor) payload(line Line, seq int, at time.Time, isFinal bool) map[string]any {
+func (a *Actor) payload(line Line, seq int, at time.Time, isFinal, isLate bool, speechStartMs *int32) map[string]any {
 	source := line.Source
 	if source == "" {
 		source = store.TranscriptSourceModel
@@ -285,6 +330,12 @@ func (a *Actor) payload(line Line, seq int, at time.Time, isFinal bool) map[stri
 		payload["seq"] = seq
 		if !a.answeredAt.IsZero() && at.After(a.answeredAt) {
 			payload["offsetMs"] = int(at.Sub(a.answeredAt).Milliseconds())
+		}
+		if isLate {
+			payload["transcribedLate"] = true
+		}
+		if speechStartMs != nil {
+			payload["speechStartMs"] = int(*speechStartMs)
 		}
 	}
 	if line.AgentID != nil {

@@ -690,9 +690,9 @@ func (o *Orchestrator) drive(ctx context.Context, session *Session,
 					// declined: the caller's words in the transcript, and
 					// nothing else. The flow, the farewell watch and the
 					// dead-air accounting never hear it.
-					recorder.say(store.SpeakerCustomer, event.Text)
+					recorder.sayAt(store.SpeakerCustomer, event.Text, event.SpokenAt)
 				} else if event.IsFinal {
-					recorder.say(store.SpeakerCustomer, event.Text)
+					recorder.sayAt(store.SpeakerCustomer, event.Text, event.SpokenAt)
 					runtime.OnCallerSpoke(event.Text)
 					fw.onCallerSpoke()
 					guard.onCallerWords(event.Text)

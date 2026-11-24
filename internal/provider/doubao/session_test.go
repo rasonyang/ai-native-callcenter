@@ -435,3 +435,32 @@ func TestAnUnmappedEventIsIgnored(t *testing.T) {
 	f.send(map[string]any{"type": "some.event.from.a.later.version"})
 	refuteMoreEvents(t, session)
 }
+
+// On this protocol the transcription's own .started frame is the caller's
+// speech start — it has no speech-detect event. The completed transcript
+// carries that frame's receipt time, so the ledger can stamp the line when
+// the words were spoken, not when they were transcribed (#587).
+func TestACompletedTranscriptCarriesWhenItsStartedArrived(t *testing.T) {
+	f := newFakeDoubao(t, acceptSession)
+	session := startedSession(t, f)
+
+	f.send(transcriptionStarted("item-1"))
+	spoke := time.Now().UTC()
+	awaitEvent(t, session, provider.EventTypeSpeechStarted)
+	time.Sleep(20 * time.Millisecond)
+	f.send(transcriptionCompleted("item-1", "你是谁呀？"))
+	ev := awaitEvent(t, session, provider.EventTypeInputTranscript)
+	if !ev.IsFinal {
+		t.Fatalf("event = %+v, want the final transcript", ev)
+	}
+	if ev.StartedAt.IsZero() || ev.StartedAt.Before(spoke.Add(-time.Second)) || ev.StartedAt.After(time.Now().UTC()) {
+		t.Errorf("StartedAt = %v, want the .started receipt time ~%v", ev.StartedAt, spoke)
+	}
+
+	// A completed transcript with no .started carries none.
+	f.send(transcriptionCompleted("item-2", "no start seen"))
+	ev = awaitEvent(t, session, provider.EventTypeInputTranscript)
+	if !ev.StartedAt.IsZero() {
+		t.Errorf("StartedAt = %v on a transcript that had no .started, want zero", ev.StartedAt)
+	}
+}

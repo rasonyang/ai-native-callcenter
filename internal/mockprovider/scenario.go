@@ -84,6 +84,11 @@ type Step struct {
 	TimeoutSec  float64         `json:"timeoutSec,omitempty"`
 	Text        string          `json:"text,omitempty"`
 	AfterSec    float64         `json:"afterSec,omitempty"`
+	// TranscriptDelaySec, on HEAR, delays the completed transcription behind
+	// the steps that follow the utterance: a real transcriber answers late,
+	// and the application records the caller's line stamped when it arrives
+	// (#587). Zero sends the completion with the speech events, as before.
+	TranscriptDelaySec float64 `json:"transcriptDelaySec,omitempty"`
 }
 
 // LoadScenario reads and validates a scenario file.
@@ -170,6 +175,9 @@ func (script *Script) validate() error {
 			}
 			if step.AfterSec < 0 {
 				return fmt.Errorf("step %d: afterSec must not be negative", i)
+			}
+			if step.TranscriptDelaySec < 0 {
+				return fmt.Errorf("step %d: transcriptDelaySec must not be negative", i)
 			}
 		case OpAwaitToolResult:
 			if !isToolOpen {
@@ -282,7 +290,7 @@ func (s *session) runScript(instructions string) {
 		switch step.Op {
 		case OpHear:
 			heard++
-			if !s.hear(fmt.Sprintf("item_hear_%d", heard), step.Text, secondsOf(step.AfterSec)) {
+			if !s.hear(fmt.Sprintf("item_hear_%d", heard), step.Text, secondsOf(step.AfterSec), secondsOf(step.TranscriptDelaySec)) {
 				return
 			}
 		case OpSpeak:
@@ -330,7 +338,11 @@ type scriptedCall struct{ id, name, args string }
 // hear plays one utterance of the callee's after a pause: what a provider with
 // server-side turn detection and an input transcriber sends for it, in that
 // order. It reports false when the session ended under it.
-func (s *session) hear(itemID, text string, after time.Duration) bool {
+//
+// With transcriptDelay the completed transcription goes out on its own clock,
+// behind the steps the script plays next — the shape a real call has when the
+// transcriber answers after the model already reacted (#587).
+func (s *session) hear(itemID, text string, after, transcriptDelay time.Duration) bool {
 	if after > 0 && !s.wait(after, nil) {
 		return false
 	}
@@ -338,12 +350,26 @@ func (s *session) hear(itemID, text string, after time.Duration) bool {
 		{"type": "input_audio_buffer.speech_started", "item_id": itemID},
 		{"type": "input_audio_buffer.speech_stopped", "item_id": itemID},
 		{"type": "input_audio_buffer.committed", "item_id": itemID},
-		{"type": "conversation.item.input_audio_transcription.completed", "item_id": itemID, "transcript": text},
 	} {
 		if s.send(event) != nil {
 			return false
 		}
 	}
+	completed := map[string]any{
+		"type":    "conversation.item.input_audio_transcription.completed",
+		"item_id": itemID, "transcript": text}
+	if transcriptDelay <= 0 {
+		return s.send(completed) == nil
+	}
+	go func() {
+		timer := time.NewTimer(transcriptDelay)
+		defer timer.Stop()
+		select {
+		case <-timer.C:
+			s.send(completed)
+		case <-s.done:
+		}
+	}()
 	return true
 }
 

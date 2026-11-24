@@ -126,8 +126,9 @@ WHERE started_at >= coalesce(sqlc.narg('from_at')::timestamptz, '-infinity'::tim
 -- duplicated; DO NOTHING is correct because a final is never revised (D3).
 -- name: InsertTranscriptLine :exec
 INSERT INTO transcripts (call_id, seq, occurred_at, speaker, kind, content,
-                         party_id, agent_id, offset_ms, language, source, provider, utterance_id)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+                         party_id, agent_id, offset_ms, language, source, provider, utterance_id,
+                         speech_start_ms)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
 ON CONFLICT DO NOTHING;
 
 -- name: ListTranscripts :many

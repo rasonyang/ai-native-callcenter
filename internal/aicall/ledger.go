@@ -132,10 +132,18 @@ func (r *callRecorder) setTimeline(createdAt, carrierAnsweredAt, ringStartedAt t
 
 // say records one line of conversation.
 func (r *callRecorder) say(speaker, text string) {
+	r.sayAt(speaker, text, time.Time{})
+}
+
+// sayAt records one line of conversation with the time the words were said,
+// when it is known: a caller line's transcript can arrive after the bot's
+// reaction to it, and the line stamped at arrival would read as if the bot
+// had answered words nobody had said yet (#587). Zero is the arrival time.
+func (r *callRecorder) sayAt(speaker, text string, spokenAt time.Time) {
 	if text == "" {
 		return
 	}
-	r.add(speaker, store.TranscriptKindText, text, nil)
+	r.add(speaker, store.TranscriptKindText, text, nil, spokenAt)
 }
 
 // toolCall records the model asking for something.
@@ -146,7 +154,7 @@ func (r *callRecorder) say(speaker, text string) {
 // with the one word that carried its meaning missing.
 func (r *callRecorder) toolCall(name, args string) {
 	r.add(store.SpeakerBot, store.TranscriptKindToolCall, name,
-		map[string]any{"name": name, "args": args})
+		map[string]any{"name": name, "args": args}, time.Time{})
 }
 
 // toolResult records what the tool answered and the phase the call moved to,
@@ -161,23 +169,24 @@ func (r *callRecorder) toolResult(name, output, movedTo string) {
 	if movedTo != "" {
 		content["movedTo"] = movedTo
 	}
-	r.add(store.SpeakerBot, store.TranscriptKindToolResult, name, content)
+	r.add(store.SpeakerBot, store.TranscriptKindToolResult, name, content, time.Time{})
 }
 
 // add hands the line to the call's transcript actor. The bot's transcript is
 // the model's own, not recognition of audio, so every line it writes is a
 // final from a MODEL source.
-func (r *callRecorder) add(speaker, kind, text string, content map[string]any) {
+func (r *callRecorder) add(speaker, kind, text string, content map[string]any, spokenAt time.Time) {
 	if r.transcript == nil {
 		return
 	}
 	r.transcript.Post(transcript.Line{
-		Speaker: speaker,
-		Kind:    kind,
-		Text:    text,
-		Content: content,
-		Source:  store.TranscriptSourceModel,
-		IsFinal: true,
+		Speaker:  speaker,
+		Kind:     kind,
+		Text:     text,
+		Content:  content,
+		Source:   store.TranscriptSourceModel,
+		IsFinal:  true,
+		SpokenAt: spokenAt,
 	})
 }
 

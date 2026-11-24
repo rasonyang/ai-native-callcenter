@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"time"
 
 	"github.com/gorilla/websocket"
 
@@ -81,6 +82,7 @@ func (s *Session) handle(event *wireEvent) {
 	// transcript starting IS the caller starting, and its completion is the
 	// engine deciding they have stopped.
 	case "conversation.item.input_audio_transcription.started":
+		s.speechStartedAt = time.Now()
 		s.emit(provider.Event{Type: provider.EventTypeSpeechStarted})
 
 	case "conversation.item.input_audio_transcription.delta":
@@ -89,8 +91,11 @@ func (s *Session) handle(event *wireEvent) {
 		s.emit(provider.Event{Type: provider.EventTypeInputTranscript, Text: event.Delta})
 
 	case "conversation.item.input_audio_transcription.completed":
+		startedAt := s.speechStartedAt
+		s.speechStartedAt = time.Time{}
 		s.emit(provider.Event{
-			Type: provider.EventTypeInputTranscript, Text: event.Text, IsFinal: true})
+			Type: provider.EventTypeInputTranscript, Text: event.Text, IsFinal: true,
+			StartedAt: startedAt})
 		s.emit(provider.Event{Type: provider.EventTypeSpeechStopped})
 
 	// The model.
