@@ -15,6 +15,21 @@ carries the one-line installer's files.
 
 ### Fixed
 
+- Installer: `--provider` on an install that already names a provider now
+  switches to it instead of warning and keeping the old one: `AICC_PROVIDER`
+  in `.env` is rewritten (`AICC_BOT_ENABLED=false` is removed when the bot
+  comes back on), the new provider's key comes from its environment variable
+  or a prompt as on a first install — under `--yes` a missing key is an error
+  — and the old provider's key stays in `.env` for a switch back. A rerun's
+  `aicc doctor` now also opens a `provider_session` whenever a provider is
+  set (before, only a first install, an upgrade or an address change did), so
+  a switched or hand-edited key is proved on every run, not just found
+  (#241).
+- Docs: `docs/install-verification.md`'s uninstall step matches the
+  installer: `<dir>/backups` survives `--uninstall` only when an upgrade
+  created it, and `--uninstall --purge` needs `--yes` when there is no
+  terminal to confirm at (#241).
+
 - **A machine that answers a campaign call records no lead** (#409). On a call
   the platform placed to a customer, each final transcript of the callee's
   words is now checked against a built-in Chinese and English list of what a

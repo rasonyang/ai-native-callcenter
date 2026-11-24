@@ -273,7 +273,9 @@ Then run the step 1 command again, unchanged.
 
 Pass: the rerun exits 0 with no preflight `FAIL`; the `.env` hash and the
 container IDs are unchanged. `lua-role` is excluded: it is a one-shot
-container that runs again on every `up`.
+container that runs again on every `up`. The rerun's `aicc doctor` shows
+`PASS provider_session`: every installer run opens one session with the
+provider `.env` names, so the key is proved, not just found.
 
 ### 9. The host's address changes
 
@@ -333,14 +335,22 @@ curl -fsSL "$URL" | sudo sh -s -- --uninstall
 Pass: no container of project `aicc` remains
 (`docker ps -a --filter label=com.docker.compose.project=aicc` is empty);
 `docker volume ls --filter label=com.docker.compose.project=aicc` still lists
-the volumes; `<dir>/.env` and `<dir>/backups` still exist.
+the volumes; `<dir>/.env` still exists. `<dir>/backups` exists only on an
+install `--upgrade` ran on — it is created by the backup, so a never-upgraded
+install has none.
 
 ```sh
-curl -fsSL "$URL" | sudo sh -s -- --uninstall --purge
+curl -fsSL "$URL" | sudo sh -s -- --uninstall --purge --yes
 ```
 
-Pass: after confirming, no volume of project `aicc` remains and `<dir>` does
-not exist.
+`--purge` deletes data, so at a terminal it asks
+`Delete the database, the recordings and <dir> for good? [y/N]` and continues
+only on `y`. Without one — the usual `curl … | sudo sh` case over ssh — it
+refuses: `error: Delete the database, the recordings and <dir> for good?: no
+terminal to confirm at; rerun with --yes`. `--yes` answers in its place; run
+it once without `--yes` at a terminal to cover the prompt itself.
+
+Pass: no volume of project `aicc` remains and `<dir>` does not exist.
 
 ### 12. Preflight refusals
 
