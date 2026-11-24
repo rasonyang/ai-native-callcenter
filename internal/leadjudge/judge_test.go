@@ -299,6 +299,41 @@ func TestNoCalleeLineIsNoEvidenceWithoutARequest(t *testing.T) {
 	}
 }
 
+// A callee who made only pickup greetings and acknowledgement sounds is
+// NO_EVIDENCE without asking the model, which read a bare sound after the
+// bot's question as UNDECIDED; an answer word still goes to the model.
+func TestOnlySoundsFromTheCalleeIsNoEvidenceWithoutARequest(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		lang  string
+		lines []store.TranscriptLine
+	}{
+		{"zh", []store.TranscriptLine{bot("您好，我们这个月有半价流量套餐，您需要吗？"), callee("嗯。"), bot("那我帮您办理？"), callee("嗯")}},
+		{"en", []store.TranscriptLine{callee("Hello?"), bot("We have a half-price data plan this month. Would you like it?"), callee("Mm-hmm.")}},
+	} {
+		st := newFakeStore(campaign.LeadHigh, tc.lang, 10*time.Second, tc.lines...)
+		llm := &fakeLLM{replies: []func(context.Context) (string, error){says(`{"verdict":"UNDECIDED"}`)}}
+		judgeOnce(t, newTestService(st, llm), st)
+		verdict, lead, reason := st.state()
+		if verdict != campaign.VerdictNoEvidence || lead != campaign.LeadNone || reason != onlySoundsReason(tc.lang) {
+			t.Errorf("%s: verdict %s lead %s reason %q, want NO_EVIDENCE NONE", tc.lang, verdict, lead, reason)
+		}
+		if n := len(llm.requests()); n != 0 {
+			t.Errorf("%s: %d requests, want none", tc.lang, n)
+		}
+	}
+
+	st := newFakeStore(campaign.LeadHigh, "zh", 10*time.Second, bot("您好，我们这个月有半价流量套餐，您需要吗？"), callee("好"))
+	llm := &fakeLLM{replies: []func(context.Context) (string, error){says(`{"verdict":"UNDECIDED","reason":"只说了好"}`)}}
+	judgeOnce(t, newTestService(st, llm), st)
+	if verdict, lead, _ := st.state(); verdict != campaign.VerdictUndecided || lead != campaign.LeadMedium {
+		t.Errorf("an answer word: verdict %s lead %s, want UNDECIDED MEDIUM from the model", verdict, lead)
+	}
+	if n := len(llm.requests()); n != 1 {
+		t.Errorf("an answer word: %d requests, want 1", n)
+	}
+}
+
 // Tool calls and their results never reach the model, not their arguments,
 // not their output, not even their name.
 func TestToolRowsNeverReachThePrompt(t *testing.T) {
