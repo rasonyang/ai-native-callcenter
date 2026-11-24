@@ -581,6 +581,35 @@ func TestAGoodbyeHangupStillEndsWithTheClosingLineHeard(t *testing.T) {
 	}
 }
 
+// A hangup whose response only announces the ending is let through (#561):
+// the words are not an answer, the call moves to the closing phase, and the
+// closing line says the goodbye the caller hears.
+func TestAHangupThatOnlyAnnouncesTheEndingPasses(t *testing.T) {
+	for _, lang := range []string{"en", "zh"} {
+		t.Run(lang, func(t *testing.T) {
+			h := newGuardHarness(t, provider.OpenAIProfile(), lang, true)
+			announce := map[string]string{
+				"en": "Okay, I'll end the call now.",
+				"zh": "好的，我这就结束通话。",
+			}[lang]
+			h.started()
+			h.delta(announce)
+			h.audio()
+			h.toolCall("fc_h", flow.ToolHangup, goodbyeHangup)
+			h.said(announce)
+			h.ended()
+			h.awaitResults(t, 1)
+			settle()
+			if h.node() != "farewell" {
+				t.Errorf("node = %q, want farewell: the hangup was refused", h.node())
+			}
+			if strings.Contains(h.logs.String(), guardRefusedLog) {
+				t.Error("the guard refused a hangup that only announced the ending")
+			}
+		})
+	}
+}
+
 // The session's own record of a turn's words: deltas as they come, a final
 // only for a turn that sent none, cut at a character boundary past the bound,
 // reset at the next turn, and snapshot at the tool call in wire order.
@@ -652,6 +681,15 @@ func TestWhatCountsAsAnAnswer(t *testing.T) {
 		"诺瓦网络是一家电信公司":                                                                    true,
 		"我们提供宽带、手机和固话服务":                                                                 true,
 		"请问还有什么可以帮您？":                                                                    true,
+		// #561: words that only announce the ending are not an answer, so a
+		// hangup that rides on them is allowed; an answer that ends in the
+		// same words is still an answer and its hangup is still refused.
+		"好的，我这就结束通话。":                                         false,
+		"好的，那我先挂了。":                                           false,
+		"Okay, I'll end the call now.":                        false,
+		"Okay, I'm hanging up now.":                           false,
+		"我们提供宽带和电视服务，现在为您结束通话。":                               true,
+		"We offer broadband and TV, I will end the call now.": true,
 	} {
 		if got := isSubstantiveAnswer(text); got != want {
 			t.Errorf("isSubstantiveAnswer(%q) = %v, want %v (%d half words)", text, got, want, answerHalfWords(text))

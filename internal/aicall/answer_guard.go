@@ -4,6 +4,7 @@ package aicall
 
 import (
 	"log/slog"
+	"regexp"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -235,6 +236,10 @@ func (o *Orchestrator) refusesHangup(event Event, guard *answerGuard, runtime *f
 // isSubstantiveAnswer reports whether a response's words so far are an answer
 // a hangup must not ride on: no goodbye (a turn that ends by asking is no
 // goodbye, as claims.go has it), and at least answerGuardMinHalfWords of them.
+// Words that only announce the ending ("好的，我这就结束通话。", "Okay, I'll end
+// the call now.") are not an answer (#561): they are subtracted before the
+// count, so an answer that ends in "…then I will end the call" still counts as
+// the answer it is.
 func isSubstantiveAnswer(text string) bool {
 	if text == "" {
 		return false
@@ -242,7 +247,24 @@ func isSubstantiveAnswer(text string) bool {
 	if hasFarewell(detectClaims(text)) && !endsInQuestion(text) {
 		return false
 	}
-	return answerHalfWords(text) >= answerGuardMinHalfWords
+	return answerHalfWords(text)-announcementHalfWords(text) >= answerGuardMinHalfWords
+}
+
+// endingAnnouncement is the part of a line that says the call is being ended:
+// "end the call", "hang up", "结束通话", "挂断". It matches the phrase alone —
+// what surrounds it decides whether the line is an announcement or an answer.
+var endingAnnouncement = regexp.MustCompile(`(?i)` +
+	`\b(?:end|disconnect|close|terminate)\s+(?:the\s+|this\s+|our\s+)?(?:call|line|conversation|phone call)\b` +
+	`|\bhang(?:ing)?\s+up\b` +
+	`|结束通话|结束对话|挂断|挂机|先挂了|挂了`)
+
+// announcementHalfWords counts the words of the text that announce the ending.
+func announcementHalfWords(text string) int {
+	n := 0
+	for _, phrase := range endingAnnouncement.FindAllString(text, -1) {
+		n += answerHalfWords(phrase)
+	}
+	return n
 }
 
 // answerHalfWords is how much a text says, in half words: two for each word of
