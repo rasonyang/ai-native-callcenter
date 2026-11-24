@@ -107,7 +107,7 @@ func (f *eslSwitch) waitConn(t *testing.T) net.Conn {
 	select {
 	case c := <-f.conns:
 		return c
-	case <-time.After(5 * time.Second):
+	case <-time.After(waitBound):
 		t.Fatal("the link never connected")
 		return nil
 	}
@@ -178,7 +178,7 @@ func eslService(t *testing.T) eslPlacement {
 	}()
 	select {
 	case <-connects:
-	case <-time.After(5 * time.Second):
+	case <-time.After(waitBound):
 		t.Fatal("the link never came up")
 	}
 	return eslPlacement{s: s, sw: sw, ledger: ledger, link: link, connects: connects}
@@ -241,7 +241,7 @@ func TestAnOriginateWhoseLinkClosesAfterTheWriteIsUnconfirmed(t *testing.T) {
 
 			select {
 			case <-p.connects:
-			case <-time.After(5 * time.Second):
+			case <-time.After(waitBound):
 				t.Fatal("the link did not reconnect")
 			}
 			conn := p.sw.waitConn(t)
