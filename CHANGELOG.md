@@ -50,6 +50,8 @@ carries the one-line installer's files.
 
 ### Fixed
 
+- `mobile_support` flow: the recogniser's "IMA"/"im a"/"Ima" spelling of the RMA prefix is named in the rules, the welcome instruction and the `repair_status` argument — the prefix is restored to RMA and the digits kept, so the caller never repeats a clearly-stated order number; a caller who opens with their business is handled directly (#572).
+
 - **A machine that answers a campaign call records no lead** (#409). On a call
   the platform placed to a customer, each final transcript of the callee's
   words is now checked against a built-in Chinese and English list of what a

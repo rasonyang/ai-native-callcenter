@@ -133,6 +133,18 @@
         "behaviour": "Polite."
       },
       "model": {"visits": ["repair_report"], "avoids": ["need_transfer"]}
+    },
+    {
+      "name": "caller states the order once; the IMA spelling of RMA is normalized (#572)",
+      "description": "The recogniser spells the RMA prefix as IMA/im a; the flow text says it IS the order number, so the scripted bot call normalises the prefix to RMA and keeps the digits — the caller never repeats it.",
+      "lang": "zh",
+      "caller": "13800009998",
+      "steps": [
+        {"say": "维修进度ima1002。", "expect": {"phase": "welcome", "instructionContains": ["IMA", "RMA"]}},
+        {"call": "repair_status", "args": {"rma": "RMA1002"}, "expect": {"phase": "repair_report", "result": {"found": "1"}}},
+        {"call": "hangup", "args": {"reason": "CALLER_DECLINED_MORE_HELP"}, "expect": {"phase": "finish"}}
+      ],
+      "expect": {"path": ["welcome", "repair_report", "finish"], "ending": "hangup", "toolsRun": ["repair_status", "hangup"]}
     }
   ]
 }
