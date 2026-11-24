@@ -633,3 +633,165 @@ func TestCallResultsBranchesAreTheOnesTheGateDrives(t *testing.T) {
 	}
 	compare(t, "call_handlers.go", handlers, "callOperations", driven)
 }
+
+// ---------------------------------------------------------------------------
+// (e) A bounded query parameter outside its range is refused like a
+//     malformed one — and the bounds enforced are the contract's (#622).
+// ---------------------------------------------------------------------------
+
+// contractQueryBounds reads every bounded integer query parameter out of the
+// contract itself, in the same shape the generator emits, so the generated
+// table cannot drift from what the contract declares.
+func contractQueryBounds(t *testing.T) map[string]map[string]api.QueryBound {
+	t.Helper()
+	raw := readContract(t)
+	type specOp struct {
+		Parameters []struct {
+			Name   string `json:"name"`
+			In     string `json:"in"`
+			Schema struct {
+				Ref     string `json:"$ref"`
+				Type    string `json:"type"`
+				Minimum *int   `json:"minimum"`
+				Maximum *int   `json:"maximum"`
+			} `json:"schema"`
+		} `json:"parameters"`
+	}
+	var spec struct {
+		Paths      map[string]map[string]json.RawMessage `json:"paths"`
+		Components struct {
+			Schemas map[string]struct {
+				Type    string `json:"type"`
+				Minimum *int   `json:"minimum"`
+				Maximum *int   `json:"maximum"`
+			} `json:"schemas"`
+		} `json:"components"`
+	}
+	if err := json.Unmarshal(raw, &spec); err != nil {
+		t.Fatalf("parse the contract: %v", err)
+	}
+	bounds := map[string]map[string]api.QueryBound{}
+	for path, item := range spec.Paths {
+		for method, rawOp := range item {
+			switch method {
+			case "get", "put", "post", "delete", "options", "head", "patch", "trace":
+			default:
+				continue // path-level parameters and other non-operation keys
+			}
+			var op specOp
+			if err := json.Unmarshal(rawOp, &op); err != nil {
+				t.Fatalf("parse %s %s: %v", method, path, err)
+			}
+			for _, p := range op.Parameters {
+				if p.In != "query" || p.Name == "" {
+					continue
+				}
+				typ, min, max := p.Schema.Type, p.Schema.Minimum, p.Schema.Maximum
+				if strings.HasPrefix(p.Schema.Ref, "#/components/schemas/") {
+					ref := spec.Components.Schemas[strings.TrimPrefix(p.Schema.Ref, "#/components/schemas/")]
+					typ, min, max = ref.Type, ref.Minimum, ref.Maximum
+				}
+				if min == nil && max == nil {
+					continue
+				}
+				key := strings.ToUpper(method) + " " + path
+				if bounds[key] == nil {
+					bounds[key] = map[string]api.QueryBound{}
+				}
+				bounds[key][p.Name] = api.QueryBound{
+					Min: orZero(min), Max: orZero(max),
+					HasMin: min != nil, HasMax: max != nil,
+				}
+				_ = typ
+			}
+		}
+	}
+	return bounds
+}
+
+func orZero(v *int) int {
+	if v == nil {
+		return 0
+	}
+	return *v
+}
+
+// The generated table is the contract, stated once: any difference — a bound
+// added in code, one loosened in the spec without regenerating — fails here.
+func TestTheBoundsEnforcedAreTheContracts(t *testing.T) {
+	t.Parallel()
+	want := contractQueryBounds(t)
+	if !reflect.DeepEqual(api.QueryBoundsByRoute, want) {
+		t.Fatalf("the enforced query bounds have drifted from the contract:\ngot:  %v\nwant: %v\n(run make api-generate)", api.QueryBoundsByRoute, want)
+	}
+}
+
+// A value outside its declared range is refused before any handler runs, the
+// way the binding refuses a parameter it cannot parse: 400 naming the field.
+// A value at the bound itself is a page the operation serves.
+func TestABoundedParameterOutsideItsRangeIsRefused(t *testing.T) {
+	t.Parallel()
+	for route, params := range api.QueryBoundsByRoute {
+		method, pattern, found := strings.Cut(route, " ")
+		if !found {
+			t.Fatalf("bounds table key %q is not \"METHOD /path\"", route)
+		}
+		for name, bound := range params {
+			for _, tt := range []struct {
+				name  string
+				value *int
+				want  int
+			}{
+				{name: "below the minimum", value: ptr(bound.Min - 1), want: http.StatusBadRequest},
+				{name: "above the maximum", value: ptr(bound.Max + 1), want: http.StatusBadRequest},
+				{name: "at the bound serves a page", value: ptr(bound.Max), want: http.StatusOK},
+				{name: "unreadable is the binding's own answer", value: nil, want: http.StatusOK},
+			} {
+				if !bound.HasMin && tt.name == "below the minimum" {
+					continue
+				}
+				if !bound.HasMax && tt.name != "unreadable is the binding's own answer" {
+					continue
+				}
+				t.Run(route+"?"+name+"/"+tt.name, func(t *testing.T) {
+					reached := false
+					handler := (&Server{}).enforceQueryBounds(http.HandlerFunc(
+						func(w http.ResponseWriter, _ *http.Request) { reached = true; w.WriteHeader(http.StatusOK) }))
+					target := apiPrefix + pattern
+					q := "?"
+					if tt.value != nil {
+						q += name + "=" + strconv.Itoa(*tt.value)
+					} else {
+						q += name + "=abc"
+					}
+					r := httptest.NewRequest(method, target+q, nil)
+					rctx := chi.NewRouteContext()
+					rctx.RoutePatterns = []string{target}
+					r = r.WithContext(context.WithValue(r.Context(), chi.RouteCtxKey, rctx))
+					w := httptest.NewRecorder()
+					handler.ServeHTTP(w, r)
+					if w.Code != tt.want {
+						t.Fatalf("%s %s%s = %d, want %d: %s", method, pattern, q, w.Code, tt.want, w.Body)
+					}
+					if tt.want == http.StatusOK && !reached {
+						t.Fatal("a value inside the bounds did not reach the handler")
+					}
+					if tt.want == http.StatusBadRequest {
+						var reply struct {
+							Error struct {
+								Code   string         `json:"code"`
+								Params map[string]any `json:"params"`
+							} `json:"error"`
+						}
+						if err := json.Unmarshal(w.Body.Bytes(), &reply); err != nil {
+							t.Fatalf("the refusal is not the error body: %s", w.Body)
+						}
+						if reply.Error.Code != string(CodeValidationFailed) || reply.Error.Params["field"] != name {
+							t.Fatalf("the refusal does not name the field: %s", w.Body)
+						}
+					}
+				})
+			}
+		}
+	}
+}

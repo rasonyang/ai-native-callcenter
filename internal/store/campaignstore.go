@@ -151,7 +151,7 @@ func (c *CampaignStore) Get(ctx context.Context, id uuid.UUID) (campaign.Campaig
 
 // List pages campaigns, newest first, with the total for the filter.
 func (c *CampaignStore) List(ctx context.Context, f campaign.ListFilter) ([]campaign.Campaign, int64, error) {
-	if f.Limit <= 0 || f.Limit > 200 {
+	if f.Limit <= 0 {
 		f.Limit = 50
 	}
 	rows, err := c.q.ListCampaigns(ctx, queries.ListCampaignsParams{
@@ -432,7 +432,7 @@ func (c *CampaignStore) ImportContacts(ctx context.Context, campaignID uuid.UUID
 // canonical E.164 by now and is matched exactly.
 func (c *CampaignStore) ListContacts(ctx context.Context, campaignID uuid.UUID,
 	f campaign.ContactFilter) ([]campaign.Contact, int64, error) {
-	if f.Limit <= 0 || f.Limit > 1000 {
+	if f.Limit <= 0 {
 		f.Limit = 50
 	}
 	rows, err := c.q.ListCampaignContacts(ctx, queries.ListCampaignContactsParams{

@@ -222,7 +222,7 @@ func TestACampaignRunsItsLifecycleThroughTheAPI(t *testing.T) {
 		t.Errorf("status filter: %+v", list)
 	}
 	r = f.do(call{method: http.MethodGet, path: "/campaigns?status=BOGUS", cookie: admin})
-	wantReply(t, "unknown status filter", r, http.StatusUnprocessableEntity, "VALIDATION_FAILED")
+	wantReply(t, "unknown status filter", r, http.StatusBadRequest, "VALIDATION_FAILED")
 	r = f.do(call{method: http.MethodGet, path: "/campaigns?limit=1&offset=1", cookie: admin})
 	list.Items = nil
 	_ = json.Unmarshal(r.body, &list)
@@ -784,7 +784,7 @@ func TestCampaignContactsAreListedByStatusAndLead(t *testing.T) {
 	}
 	for _, q := range []string{"?status=GONE", "?leadIntent=WARM"} {
 		r := f.do(call{method: http.MethodGet, path: "/campaigns/" + c.ID + "/contacts" + q, cookie: admin})
-		wantReply(t, q, r, http.StatusUnprocessableEntity, "VALIDATION_FAILED")
+		wantReply(t, q, r, http.StatusBadRequest, "VALIDATION_FAILED")
 	}
 	// The campaign's counters agree.
 	v := decodeCampaign(t, f.do(call{method: http.MethodGet, path: "/campaigns/" + c.ID, cookie: admin}))

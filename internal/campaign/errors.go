@@ -62,6 +62,13 @@ func invalid(field, rule, format string, args ...any) *Error {
 	return &Error{Kind: ErrValidation, Field: field, Rule: rule, Message: fmt.Sprintf(format, args...)}
 }
 
+// unreadable is the refusal for a query parameter whose value cannot be read
+// as what it names (a listing's filter outside its enum); the transport
+// answers it as any parameter that does not parse.
+func unreadable(field, rule, format string, args ...any) *Error {
+	return &Error{Kind: ErrUnreadableParameter, Field: field, Rule: rule, Message: fmt.Sprintf(format, args...)}
+}
+
 // NewNotFound is the refusal for an unknown campaign.
 func NewNotFound() *Error { return &Error{Kind: ErrNotFound, Message: "no such campaign"} }
 

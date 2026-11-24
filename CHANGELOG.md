@@ -7,6 +7,27 @@ carries the one-line installer's files.
 
 ## Unreleased
 
+### Breaking (API)
+
+- **`limit` on the listing operations is bounded by what the server serves**
+  (#622). `GET /campaigns/{id}/contacts` and `GET /campaigns/{id}/attempts`
+  declare `limit`'s maximum as 1000, and `GET /campaigns`, `GET /contacts`,
+  `GET /dnc-numbers`, `GET /test-numbers`, `GET /cdrs`, `GET /cdrs/mine`,
+  `GET /callbacks` and `GET /audit-logs` declare it as 200 — down from a
+  stated 1,000,000 that was never honored (a limit above the store's bound
+  silently served the default page of 50, fewer rows for a larger limit).
+  A `limit` above the bound now answers 400 `VALIDATION_FAILED`, like any
+  parameter outside its schema; at or under the bound nothing changes.
+  Integrations that page at a larger `limit` get a 400 where they previously
+  got 50 rows: page at the declared bound and walk `offset`.
+- **An enum filter naming a value outside its enum answers 400, not 422**
+  (#621). `status`, `leadIntent` and `lastOutcome` on
+  `GET /campaigns/{id}/contacts`, `status` on `GET /campaigns`, and `outcome`
+  on `GET /campaigns/{id}/attempts` answer 400 `VALIDATION_FAILED` for an
+  unknown value — the same answer `phoneNumber` and any other parameter that
+  cannot be read gives. A client branching on 422 for a bad filter value sees
+  400 now; the `error.params.field` and `error.params.rule` are unchanged.
+
 ### Changed
 
 - Newer `golang.org/x/net` (v0.62.0) and `github.com/klauspost/compress`

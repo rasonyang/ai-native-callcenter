@@ -104,7 +104,7 @@ func (d *DNCStore) Contains(ctx context.Context, number string) (bool, error) {
 
 // List pages the list, newest first, with the total for the filter.
 func (d *DNCStore) List(ctx context.Context, f DNCFilter) ([]DNCNumber, int64, error) {
-	if f.Limit <= 0 || f.Limit > 200 {
+	if f.Limit <= 0 {
 		f.Limit = 50
 	}
 	prefix := strings.TrimSpace(f.Prefix)

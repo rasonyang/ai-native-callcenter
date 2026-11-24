@@ -362,7 +362,7 @@ func (s *Service) moved(ctx context.Context, c Campaign, err error) (Campaign, e
 // ListAttempts pages a campaign's attempts, newest first.
 func (s *Service) ListAttempts(ctx context.Context, id uuid.UUID, f AttemptFilter) ([]Attempt, int64, error) {
 	if f.Outcome != "" && !f.Outcome.IsValid() {
-		return nil, 0, invalid("outcome", "UNKNOWN_OUTCOME", "%q is not an outcome", f.Outcome)
+		return nil, 0, unreadable("outcome", "UNKNOWN_OUTCOME", "%q is not an outcome", f.Outcome)
 	}
 	c, err := s.repo.Get(ctx, id)
 	if err != nil {
@@ -515,7 +515,7 @@ func (s *Service) Get(ctx context.Context, id uuid.UUID) (Campaign, error) {
 // List pages campaigns, newest first.
 func (s *Service) List(ctx context.Context, f ListFilter) ([]Campaign, int64, error) {
 	if f.Status != "" && !f.Status.IsValid() {
-		return nil, 0, invalid("status", "UNKNOWN_STATUS", "%q is not a campaign status", f.Status)
+		return nil, 0, unreadable("status", "UNKNOWN_STATUS", "%q is not a campaign status", f.Status)
 	}
 	items, total, err := s.repo.List(ctx, f)
 	if err != nil {
@@ -730,13 +730,13 @@ func (s *Service) Cancel(ctx context.Context, id uuid.UUID) (Campaign, error) {
 // ListContacts pages a campaign's contacts in import order.
 func (s *Service) ListContacts(ctx context.Context, id uuid.UUID, f ContactFilter) ([]Contact, int64, error) {
 	if f.Status != "" && !f.Status.IsValid() {
-		return nil, 0, invalid("status", "UNKNOWN_STATUS", "%q is not a contact status", f.Status)
+		return nil, 0, unreadable("status", "UNKNOWN_STATUS", "%q is not a contact status", f.Status)
 	}
 	if f.LeadIntent != "" && !f.LeadIntent.IsValid() {
-		return nil, 0, invalid("leadIntent", "UNKNOWN_INTENT", "%q is not a lead intent", f.LeadIntent)
+		return nil, 0, unreadable("leadIntent", "UNKNOWN_INTENT", "%q is not a lead intent", f.LeadIntent)
 	}
 	if f.LastOutcome != "" && !f.LastOutcome.IsValid() {
-		return nil, 0, invalid("lastOutcome", "UNKNOWN_OUTCOME", "%q is not an outcome", f.LastOutcome)
+		return nil, 0, unreadable("lastOutcome", "UNKNOWN_OUTCOME", "%q is not an outcome", f.LastOutcome)
 	}
 	c, err := s.repo.Get(ctx, id)
 	if err != nil {
