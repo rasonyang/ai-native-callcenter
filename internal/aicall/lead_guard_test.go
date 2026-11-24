@@ -15,6 +15,7 @@ import (
 	"github.com/rasonyang/ai-native-callcenter/internal/campaign"
 	"github.com/rasonyang/ai-native-callcenter/internal/flow"
 	"github.com/rasonyang/ai-native-callcenter/internal/media"
+	"github.com/rasonyang/ai-native-callcenter/internal/obs"
 	"github.com/rasonyang/ai-native-callcenter/internal/provider"
 )
 
@@ -110,6 +111,9 @@ type leadRigOptions struct {
 	flow string
 	// isQuiet gives the model quiet tool answers (provider.QuietToolAnswerer).
 	isQuiet bool
+	// isInbound makes the call one a caller dialled in: not a campaign call,
+	// and not placed to a customer.
+	isInbound bool
 }
 
 func newLeadRig(t *testing.T, opts leadRigOptions) *leadRig {
@@ -148,6 +152,10 @@ func newLeadRig(t *testing.T, opts leadRigOptions) *leadRig {
 			h.session.cfg.IsEndingArmed = h.actions.isArmed
 			h.session.cfg.Session.Language = opts.lang
 			h.session.cfg.Session.OpeningText = opts.opening
+			h.session.cfg.IsPlacedToCustomer = !opts.isInbound
+			if opts.isInbound {
+				return
+			}
 			// What runCall does for a campaign call.
 			h.actions.campaignID, h.actions.attemptID = "c-1", "a-1"
 			h.o.cfg.Leads = r.leads
@@ -1263,6 +1271,141 @@ func TestAnAcknowledgementJustAfterTheOpeningsGreetingRecordsNoLead(t *testing.T
 	if got := r.leads.intents(); len(got) != 0 {
 		t.Errorf("leads written = %v, want none", got)
 	}
+}
+
+//
+// A machine answered (#409).
+//
+
+// assertMarked checks the call's machine mark.
+func (r *leadRig) assertMarked(t *testing.T, want string) {
+	t.Helper()
+	if category, isMarked := r.session.machineAnswered(); category != want || isMarked != (want != "") {
+		t.Errorf("machine mark = %q, %v; want %q", category, isMarked, want)
+	}
+}
+
+// A call assistant answered: every move into a HIGH or a MEDIUM phase is
+// refused, a later response on the same caller turn too (unlike words not
+// caught), and no lead is written.
+func TestAMachineAnsweredCallRecordsNoLead(t *testing.T) {
+	for _, intent := range []string{"HIGH", "MEDIUM"} {
+		t.Run(intent, func(t *testing.T) {
+			r := newLeadRig(t, leadRigOptions{
+				flow: strings.Replace(leadGuardFlow, `"intent": "HIGH"`, `"intent": "`+intent+`"`, 1)})
+			r.callerSpoke("u1")
+			r.final("u1", "您好，我是机主的智能助理，机主现在不方便接听，请问您有什么事？")
+			r.started()
+			r.speaks("好的，我帮您办理。")
+			r.agree("fc_1")
+			r.ended()
+			r.assertRefused(t, r.result(t, 1), "不是客户本人")
+			r.assertLine(t, 1, "tool=classify", "guard=B", "verdict=MACHINE_WORDING", "isRefused=true",
+				"final=BEFORE_CALL", "callerTurn=1")
+			r.assertMarked(t, obs.MachineCallAssistant)
+
+			r.started()
+			r.agree("fc_2")
+			r.ended()
+			r.assertRefused(t, r.result(t, 2), "不是客户本人")
+			r.assertLine(t, 2, "verdict=MACHINE_WORDING", "isRefused=true", "callerTurn=1")
+		})
+	}
+}
+
+// The final the call waits for is judged before the verdict: a voicemail
+// prompt transcribed while record_lead HIGH waits refuses it. record_lead
+// NONE is not judged and runs.
+func TestAMachinesWordingInTheAwaitedFinalRefusesRecordLead(t *testing.T) {
+	r := newLeadRig(t, leadRigOptions{})
+	r.callerSpoke("u1")
+	r.started()
+	r.call("fc_1", flow.ToolRecordLead, `{"intent":"HIGH","notes":"wants it"}`)
+	r.awaitFinalWaits(t, 1)
+	r.final("u1", "请在提示音后，录制留言。")
+	r.ended()
+	r.assertRefused(t, r.result(t, 1), "不是客户本人")
+	r.assertLine(t, 1, "tool=record_lead", "verdict=MACHINE_WORDING", "final=AFTER_CALL")
+	r.assertMarked(t, obs.MachineVoicemail)
+
+	r.started()
+	r.call("fc_2", flow.ToolRecordLead, `{"intent":"NONE","notes":"voicemail"}`)
+	r.ended()
+	if out := r.result(t, 2); !strings.Contains(out, `"ok":"1"`) {
+		t.Errorf("record_lead NONE = %s", out)
+	}
+	if got := r.leads.intents(); !slices.Equal(got, []string{"NONE"}) {
+		t.Errorf("leads written = %v, want NONE", got)
+	}
+}
+
+// The mark an earlier utterance made refuses the call that answers a later
+// "好的": an assistant's acknowledgement is no customer's agreement.
+func TestAMachinesLaterOkayRecordsNoLead(t *testing.T) {
+	r := newLeadRig(t, leadRigOptions{})
+	r.callerSpoke("u1")
+	r.final("u1", "我稍后会将您的来电情况转到机主。")
+	r.started()
+	r.speaks("好的，续约可以打八折，您看可以吗？")
+	r.ended()
+	r.callerSpoke("u2")
+	r.started()
+	r.agree("fc_1")
+	r.awaitFinalWaits(t, 1)
+	r.final("u2", "好的，我会转告他。")
+	r.ended()
+	r.assertRefused(t, r.result(t, 1), "不是客户本人")
+	r.assertLine(t, 1, "verdict=MACHINE_WORDING", "isRefused=true", "final=AFTER_CALL", "callerTurn=2")
+	r.assertMarked(t, obs.MachineCallAssistant)
+}
+
+// Over an ending under way a machine's mark does not refuse, as words not
+// caught do not.
+func TestOverAnEndingUnderwayAMachinesMarkDoesNotRefuse(t *testing.T) {
+	r := newLeadRig(t, leadRigOptions{})
+	r.actions.mu.Lock()
+	r.actions.isEndingLocked = true
+	r.actions.mu.Unlock()
+	r.callerSpoke("u1")
+	r.final("u1", "您拨打的用户已关机。")
+	r.started()
+	r.call("fc_1", flow.ToolRecordLead, `{"intent":"HIGH","notes":"agreed"}`)
+	r.ended()
+	if out := r.result(t, 1); !strings.Contains(out, `"ok":"1"`) {
+		t.Errorf("record_lead = %s, want it run", out)
+	}
+	r.assertLine(t, 1, "verdict=MACHINE_WORDING", "isRefused=false", "isEndingUnderway=true")
+	r.assertMarked(t, obs.MachineCarrierAnnouncement)
+}
+
+// A person on a call placed to them is not marked, though they name the line's
+// owner: the agreement runs and records its lead as before.
+func TestAPersonOnACallPlacedToThemIsNotMarked(t *testing.T) {
+	r := newLeadRig(t, leadRigOptions{})
+	r.callerSpoke("u1")
+	r.final("u1", "对，我是机主，可以办。")
+	r.started()
+	r.agree("fc_1")
+	r.ended()
+	r.assertAgreed(t, r.result(t, 1))
+	r.assertLine(t, 1, "verdict=WORDS", "isRefused=false")
+	r.assertMarked(t, "")
+}
+
+// An inbound call is never marked: a caller who asks to leave a message for
+// the owner is a person, and the agreement runs.
+func TestAnInboundCallerIsNeverMarkedAsAMachine(t *testing.T) {
+	r := newLeadRig(t, leadRigOptions{isInbound: true})
+	r.callerSpoke("u1")
+	r.final("u1", "我想留个言，请帮我转告机主，就说我同意续约。")
+	r.started()
+	r.agree("fc_1")
+	r.ended()
+	if out := r.result(t, 1); !strings.Contains(out, `"ok":"1"`) || r.node() != "agreed" {
+		t.Errorf("the agreement did not run: the call is in %q, tool result %s", r.node(), out)
+	}
+	r.assertLine(t, 1, "verdict=WORDS", "isRefused=false")
+	r.assertMarked(t, "")
 }
 
 //

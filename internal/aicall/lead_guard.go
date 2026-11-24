@@ -45,6 +45,16 @@ import (
 //     guarded call of a later response on the same caller turn runs, so a
 //     transcriber that dropped a real yes costs one exchange. Within one
 //     response the first verdict stands for its later guarded calls.
+//   - A machine (#409). On a call placed to a customer, a final caller
+//     transcript with wording only a voicemail prompt, a call assistant or a
+//     carrier announcement says (machine_wording.go) marks the call as
+//     answered by a machine for the rest of it. On a marked call, read after
+//     B's wait so the utterance the call answers has been judged too, the
+//     call is refused every time, as a conversation that says a recording or
+//     an automated assistant answered and no interest was recorded: a mark an
+//     earlier utterance made refuses the call that answers a later "好的", and
+//     one that came after a response's first verdict refuses its later calls.
+//     A and a refusal keep their own verdicts.
 //
 // B judges the caller's words, which the answer guard of #484 and #553 never
 // does (answer_guard.go): there a hangup is judged on the bot's own words,
@@ -57,7 +67,8 @@ import (
 //
 // Over an ending already under way (armed, decided by the time limit, a
 // handover settling) or in a terminal phase there is no turn left to confirm
-// in, so words not caught do not refuse there; a refusal and A still do.
+// in, so words not caught and a machine's mark do not refuse there; a refusal
+// and A still do.
 //
 // The guard runs after the cut refusals (#403, #594, #610): a moving tool they
 // refuse is theirs, and logged there. Nothing runs before the verdict: the
@@ -91,6 +102,9 @@ const (
 	interestNoFinal
 	interestBlankFinal
 	interestNoCallerTurn
+	// interestMachine: the call is marked as answered by a machine (#409);
+	// refused every time, except over an ending under way.
+	interestMachine
 )
 
 // reason is the verdict as the log and the count name it.
@@ -106,6 +120,8 @@ func (v interestVerdict) reason() string {
 		return obs.LeadGuardBlankFinal
 	case interestNoCallerTurn:
 		return obs.LeadGuardNoCallerTurn
+	case interestMachine:
+		return obs.LeadGuardMachineWording
 	}
 	return obs.LeadGuardWords
 }
@@ -175,8 +191,15 @@ func (o *Orchestrator) refusesInterest(event Event, g *interestGuard, session *S
 		}
 	}
 
-	reason := verdict.reason()
 	isEndingNear := actions.IsEndingUnderway() || runtime.Engine().IsTerminal()
+	// A machine answered (#409): read after the wait, so this utterance's own
+	// final has been judged, and on every call, so a mark that came after the
+	// response's first verdict refuses its later calls too. A and a refusal
+	// keep their verdicts.
+	if _, isMarked := session.machineAnswered(); isMarked &&
+		verdict != interestOpeningUnheard && verdict != interestDeclined {
+		verdict = interestMachine
+	}
 	if !isSameResponse {
 		switch {
 		case verdict == interestOpeningUnheard:
@@ -184,6 +207,8 @@ func (o *Orchestrator) refusesInterest(event Event, g *interestGuard, session *S
 			isSaidAgain = o.canSayOpeningAgain(session, runtime, actions)
 		case verdict == interestDeclined:
 			isRefused = true
+		case verdict == interestMachine:
+			isRefused = !isEndingNear
 		case verdict.isUnconfirmed():
 			isSpent := g.hasUnconfirmed && g.unconfirmedSeq == seq && g.unconfirmedTurn != event.Turn
 			isRefused = !isSpent && !isEndingNear
@@ -193,7 +218,10 @@ func (o *Orchestrator) refusesInterest(event Event, g *interestGuard, session *S
 		}
 		g.last.turn, g.last.seq, g.last.verdict = event.Turn, seq, verdict
 		g.last.isRefused, g.last.isAgain, g.last.isSet = isRefused, isSaidAgain, true
+	} else if verdict == interestMachine {
+		isRefused = !isEndingNear
 	}
+	reason := verdict.reason()
 	if verdict.isUnconfirmed() && !isRefused {
 		reason = obs.LeadGuardUnconfirmed
 	}
@@ -234,6 +262,8 @@ func (o *Orchestrator) refusesInterest(event Event, g *interestGuard, session *S
 		}
 	case interestDeclined:
 		output = runtime.RefuseAsDeclined(event.ToolName)
+	case interestMachine:
+		output = runtime.RefuseAsMachine(event.ToolName)
 	default:
 		output = runtime.RefuseAsUnconfirmed(event.ToolName)
 	}

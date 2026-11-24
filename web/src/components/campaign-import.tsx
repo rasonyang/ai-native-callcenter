@@ -9,7 +9,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import {
   buildRecords, emptySummary, guessRoles, mappingProblem, mergeSummaries, rejectedCsv, roleFromValue,
-  roleValue, runImport, type ColumnRole, type ImportSummary,
+  roleValue, runImport, templateCsv, type ColumnRole, type ImportSummary,
 } from '@/lib/campaign-import'
 import { IMPORT_CHUNK_SIZE, campaignApi } from '@/lib/campaigns'
 import { parseCsv } from '@/lib/csv'
@@ -63,12 +63,15 @@ interface PickedFile {
  */
 export function CampaignImportDialog({
   campaignId,
+  campaignName,
   flowFields,
   open,
   onOpenChange,
   onImported,
 }: {
   campaignId: string
+  /** The campaign's own name, for the downloaded template's file name. */
+  campaignName: string
   /**
    * The business-data names the campaign's flow reads (the campaign's
    * flowFields). Undefined means the server could not say, which is not the same
@@ -228,6 +231,21 @@ export function CampaignImportDialog({
               >
                 <Upload />
                 {t('campaign.import.choose')}
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={isRunning}
+                onClick={() =>
+                  downloadCsv(
+                    t('campaign.import.templateFile', { name: campaignName }),
+                    templateCsv(flowFields ?? [], t('campaign.import.templateNumber')),
+                  )
+                }
+              >
+                <Download />
+                {t('campaign.import.template')}
               </Button>
               <span className="text-xs text-muted-foreground">
                 {isReading
