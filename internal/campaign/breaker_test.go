@@ -154,3 +154,55 @@ func TestAFarEnds487AfterRingingDoesNotTripTheTrunkBreaker(t *testing.T) {
 		t.Error("n failures after the 487 did not trip the trunk breaker")
 	}
 }
+
+// A line that refuses every call (a carrier's 402 for an account out of
+// credit, before any ring) is a trunk outage: n of them in a row pause the
+// campaign. n callees who decline with a 603 are n customers and never trip
+// it, and one decline breaks a run of refusals. The outcomes come out of
+// Classify.
+func TestALineThatRefusesEveryCallTripsTheTrunkBreakerAndDeclinesDoNot(t *testing.T) {
+	const n = 20
+	classified := func(e CallEnd, k int) []Outcome {
+		out := make([]Outcome, k)
+		for i := range out {
+			out[i] = Classify(e)
+		}
+		return out
+	}
+	refused := CallEnd{HangupCause: CauseCallRejected, SIPStatus: 402, EndedBy: "PEER"}
+	declined := CallEnd{HangupCause: CauseCallRejected, SIPStatus: 603, HasRingProgress: true, EndedBy: "PEER"}
+
+	if got := classified(refused, n-1); TrunkBreakerTrips(got, n) {
+		t.Errorf("%d line refusals tripped the trunk breaker of %d", n-1, n)
+	}
+	if !TrunkBreakerTrips(classified(refused, n), n) {
+		t.Errorf("%d consecutive 402s did not trip the trunk breaker", n)
+	}
+	if TrunkBreakerTrips(classified(declined, n), n) {
+		t.Errorf("%d consecutive 603s tripped the trunk breaker", n)
+	}
+	for name, e := range map[string]CallEnd{
+		"a 402 after ringing": {HangupCause: CauseCallRejected, SIPStatus: 402, HasRingProgress: true},
+		"a 403":               {HangupCause: CauseCallRejected, SIPStatus: 403},
+		"a 401":               {HangupCause: CauseCallRejected, SIPStatus: 401},
+		"a 407":               {HangupCause: CauseCallRejected, SIPStatus: 407},
+		"a 608":               {HangupCause: CauseCallRejected, SIPStatus: 608},
+	} {
+		if !TrunkBreakerTrips(classified(e, n), n) {
+			t.Errorf("%d consecutive endings of %s did not trip the trunk breaker", n, name)
+		}
+	}
+	if TrunkBreakerTrips(classified(CallEnd{HangupCause: CauseCallRejected}, n), n) {
+		t.Errorf("%d refusals with no status (the callee's REJECTED) tripped the trunk breaker", n)
+	}
+
+	broken := slices.Concat(classified(refused, n-1), classified(declined, 1), classified(refused, n-1))
+	if TrunkBreakerTrips(broken, n) {
+		t.Error("a 603 did not break the run of line refusals")
+	}
+	// A line refusal joins a run of the other system failures.
+	mixed := slices.Concat(classified(refused, n/2), classified(CallEnd{HangupCause: "NORMAL_TEMPORARY_FAILURE", SIPStatus: 503}, n-n/2))
+	if !TrunkBreakerTrips(mixed, n) {
+		t.Error("line refusals mixed with 503s did not trip the trunk breaker")
+	}
+}

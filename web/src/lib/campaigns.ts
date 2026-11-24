@@ -51,13 +51,13 @@ export const CONTACT_STATUSES: CampaignContactStatus[] = [
 export const LEAD_INTENTS: CampaignLeadIntent[] = ['HIGH', 'MEDIUM', 'LOW', 'NONE', 'DO_NOT_CALL']
 export const CAMPAIGN_OUTCOMES: CampaignOutcome[] = [
   'ANSWERED', 'BOT_FAILED', 'OVERFLOW', 'NO_ANSWER', 'BUSY', 'REJECTED', 'UNKNOWN', 'TRANSIENT',
-  'ORIGINATE_FAILED', 'INVALID_NUMBER', 'DNC_SKIPPED',
+  'LINE_REJECTED', 'ORIGINATE_FAILED', 'INVALID_NUMBER', 'DNC_SKIPPED',
 ]
 export const WEEKDAYS: Weekday[] = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN']
 export const RETRY_OUTCOMES: CampaignRetryOutcome[] = [
-  'NO_ANSWER', 'BUSY', 'REJECTED', 'UNKNOWN', 'TRANSIENT', 'ORIGINATE_FAILED',
+  'NO_ANSWER', 'BUSY', 'REJECTED', 'UNKNOWN', 'TRANSIENT', 'LINE_REJECTED', 'ORIGINATE_FAILED',
 ]
-/** The outcomes whose retry waits on intervalSec; the other two use the backoff. */
+/** The outcomes whose retry waits on intervalSec; the others use the backoff. */
 export const INTERVAL_OUTCOMES = ['NO_ANSWER', 'BUSY', 'REJECTED', 'UNKNOWN'] as const
 export type IntervalOutcome = (typeof INTERVAL_OUTCOMES)[number]
 
@@ -368,6 +368,21 @@ export function isFieldEditable(status: CampaignStatus | undefined, field: Campa
  */
 export function hasCallRecord(outcome: CampaignOutcome | undefined): boolean {
   return outcome !== 'DNC_SKIPPED' && outcome !== 'INVALID_NUMBER'
+}
+
+/**
+ * An attempt's hangup cause as the attempts table shows it, with the far
+ * end's final SIP status after it when the switch reported one
+ * (CALL_REJECTED · 402), so that a line's refusal and a callee's 603 read
+ * apart under the same cause. A dash when the attempt has neither.
+ */
+export function attemptCauseText(
+  attempt: Pick<CampaignAttempt, 'hangupCause' | 'sipStatus'>,
+  t: TFunction,
+): string {
+  const cause = attempt.hangupCause || '—'
+  if (attempt.sipStatus === undefined) return cause
+  return t('campaign.hangupCauseWithStatus', { cause, status: attempt.sipStatus })
 }
 
 /**

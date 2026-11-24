@@ -409,6 +409,22 @@ func TestALeadVerdictIsCountedByVerdict(t *testing.T) {
 	}
 }
 
+func TestALineRefusalIsCountedByItsSIPStatus(t *testing.T) {
+	reader := useTestReader()
+	before := sumByLabels(t, reader, "aicc_campaign_line_rejected_total", "sip_status")
+	RecordCampaignLineRejected(402)
+	RecordCampaignLineRejected(402)
+	RecordCampaignLineRejected(403)
+	RecordCampaignLineRejected(0)
+	RecordCampaignLineRejected(1402)
+	after := sumByLabels(t, reader, "aicc_campaign_line_rejected_total", "sip_status")
+	for key, want := range map[string]int64{"402": 2, "403": 1, "OTHER": 2, "603": 0} {
+		if got := after[key] - before[key]; got != want {
+			t.Errorf("%s gained %d, want %d (before %v, after %v)", key, got, want, before, after)
+		}
+	}
+}
+
 // sumByLabels reads one counter or gauge: its value per combination of the
 // named labels, joined with "/".
 func sumByLabels(t *testing.T, reader sdkmetric.Reader, name string, labels ...string) map[string]int64 {

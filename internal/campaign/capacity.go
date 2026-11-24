@@ -33,8 +33,8 @@ const (
 // rang. So did NO_ANSWER, BUSY and REJECTED: the network reached the callee
 // and the callee did not pick up.
 //
-// Left out, deliberately: TRANSIENT, ORIGINATE_FAILED, INVALID_NUMBER and
-// DNC_SKIPPED never reached a phone, and UNKNOWN is an attempt that left no
+// Left out, deliberately: TRANSIENT, LINE_REJECTED, ORIGINATE_FAILED,
+// INVALID_NUMBER and DNC_SKIPPED never reached a phone, and UNKNOWN is an attempt that left no
 // trace, so nothing says whether it rang. Counting an UNKNOWN as unanswered
 // would pull the estimate down on no evidence, and the estimate must lean up.
 func DoesRing(o Outcome) bool {

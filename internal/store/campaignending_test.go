@@ -116,6 +116,36 @@ func TestAFarEnds487AfterRingingReadsAsNoAnswer(t *testing.T) {
 	}
 }
 
+// CALL_REJECTED is read with the row's status: a 603 or none is the callee's
+// REJECTED, any other status the line's LINE_REJECTED. The ending carries the
+// status, in whatever form the tech held it, for the attempt to keep.
+func TestACallRejectedReadsByItsStatus(t *testing.T) {
+	start := time.Date(2026, 6, 1, 14, 0, 0, 0, time.UTC)
+	ring := FormatRingStartedAt(start.Add(time.Second))
+	tests := []struct {
+		name       string
+		tech       map[string]any
+		want       campaign.Outcome
+		wantStatus int
+	}{
+		{"402 as just assembled", map[string]any{CDRTechSIPStatus: 402, CDRTechEndedBy: "PEER"}, campaign.OutcomeLineRejected, 402},
+		{"402 as read back from jsonb", map[string]any{CDRTechSIPStatus: float64(402)}, campaign.OutcomeLineRejected, 402},
+		{"403 after ringing", map[string]any{CDRTechSIPStatus: 403, CDRTechRingStartedAt: ring}, campaign.OutcomeLineRejected, 403},
+		{"603 after ringing", map[string]any{CDRTechSIPStatus: float64(603), CDRTechRingStartedAt: ring}, campaign.OutcomeRejected, 603},
+		{"no status", nil, campaign.OutcomeRejected, 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cdr := CDR{CallID: uuid.Must(uuid.NewV7()), Status: CDRStatusNoAnswer, HangupCause: "CALL_REJECTED",
+				EndedAt: start.Add(2 * time.Second), Tech: tt.tech}
+			got := endingFromCDR(cdr)
+			if got.Outcome != tt.want || got.SIPStatus != tt.wantStatus {
+				t.Errorf("ending = %s with status %d, want %s with %d", got.Outcome, got.SIPStatus, tt.want, tt.wantStatus)
+			}
+		})
+	}
+}
+
 // The warning of a cause the outcome table does not know names the call and
 // what the row's tech says: the far end's status, the ring and who ended it.
 //

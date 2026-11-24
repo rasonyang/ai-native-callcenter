@@ -93,8 +93,9 @@ type Config struct {
 	// OverflowHold is how long an answered outbound call waits for a bot slot
 	// before it is hung up as OVERFLOW (AICC_OVERFLOW_HOLD). 0 waits not at all.
 	OverflowHold time.Duration
-	// TrunkBreakerCount is how many consecutive TRANSIENT or ORIGINATE_FAILED
-	// attempts pause a campaign as TRUNK_FAILURE (AICC_TRUNK_BREAKER_COUNT).
+	// TrunkBreakerCount is how many consecutive TRANSIENT, LINE_REJECTED or
+	// ORIGINATE_FAILED attempts pause a campaign as TRUNK_FAILURE
+	// (AICC_TRUNK_BREAKER_COUNT).
 	TrunkBreakerCount int
 	// ProviderBreakerCount is how many consecutive answered calls ending
 	// BOT_FAILED pause a campaign as PROVIDER_FAILURE

@@ -24,6 +24,7 @@ function summary(): CampaignOutcomeSummary {
       { outcome: 'OVERFLOW', count: 46 }, { outcome: 'NO_ANSWER', count: 925 },
       { outcome: 'BUSY', count: 420 }, { outcome: 'REJECTED', count: 160 },
       { outcome: 'UNKNOWN', count: 45 }, { outcome: 'TRANSIENT', count: 101 },
+      { outcome: 'LINE_REJECTED', count: 77 },
       { outcome: 'ORIGINATE_FAILED', count: 59 }, { outcome: 'INVALID_NUMBER', count: 30 },
       { outcome: 'DNC_SKIPPED', count: 0 },
     ],
@@ -32,6 +33,7 @@ function summary(): CampaignOutcomeSummary {
       { outcome: 'OVERFLOW', count: 46 }, { outcome: 'NO_ANSWER', count: 140 },
       { outcome: 'BUSY', count: 60 }, { outcome: 'REJECTED', count: 25 },
       { outcome: 'UNKNOWN', count: 6 }, { outcome: 'TRANSIENT', count: 9 },
+      { outcome: 'LINE_REJECTED', count: 11 },
       { outcome: 'ORIGINATE_FAILED', count: 4 }, { outcome: 'INVALID_NUMBER', count: 30 },
       { outcome: 'DNC_SKIPPED', count: 0 },
     ],
@@ -81,13 +83,17 @@ describe('the outcome tab of a campaign', () => {
     expect(row(heading, i18n.t('campaign.outcomes.ANSWERED'))).toEqual(['Answered', '320', '317'])
     expect(row(heading, i18n.t('campaign.outcomes.BOT_FAILED'))).toEqual(['Bot failed', '113', '113'])
     expect(row(heading, i18n.t('campaign.outcomes.DNC_SKIPPED'))).toEqual(['Skipped (do not call)', '0', '0'])
-    expect(row(heading, i18n.t('campaign.summary.total'))).toEqual(['Total', '2219', '750'])
-    // Eleven outcomes and the total, in the contract's order.
+    // A line's refusals have a row of their own, apart from the callees who
+    // declined.
+    expect(row(heading, i18n.t('campaign.outcomes.REJECTED'))).toEqual(['Rejected', '160', '25'])
+    expect(row(heading, i18n.t('campaign.outcomes.LINE_REJECTED'))).toEqual(['Line rejected', '77', '11'])
+    expect(row(heading, i18n.t('campaign.summary.total'))).toEqual(['Total', '2296', '761'])
+    // Twelve outcomes and the total, in the contract's order.
     const section = screen.getByRole('heading', { name: heading }).closest('section') as HTMLElement
     const firstCells = within(section).getAllByRole('row').slice(1).map((r) => r.querySelector('td')?.textContent)
     expect(firstCells).toEqual([
       'Answered', 'Bot failed', 'Dropped at capacity', 'No answer', 'Busy', 'Rejected', 'Unknown',
-      'Network error', 'Could not place', 'Invalid number', 'Skipped (do not call)', 'Total',
+      'Network error', 'Line rejected', 'Could not place', 'Invalid number', 'Skipped (do not call)', 'Total',
     ])
   })
 

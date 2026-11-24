@@ -147,6 +147,7 @@ type CampaignAttempt struct {
 	LeadVerdict         *string            `json:"leadVerdict"`
 	LeadVerdictReason   *string            `json:"leadVerdictReason"`
 	LeadJudgeDeadlineAt pgtype.Timestamptz `json:"leadJudgeDeadlineAt"`
+	SIPStatus           *int32             `json:"sipStatus"`
 }
 
 type CampaignContact struct {

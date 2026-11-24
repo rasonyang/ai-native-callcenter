@@ -103,6 +103,17 @@ const SIPStatusRequestTimeout = 408
 // a callee who declined) cannot be told from this side.
 const SIPStatusRequestTerminated = 487
 
+// CauseCallRejected is the switch's cause for a dialled leg the far end
+// refused. mod_sofia folds six final responses into it
+// (sofia_glue_sip_cause_to_freeswitch, FreeSWITCH v1.11.3): 401, 402, 403,
+// 407, 603 and 608. Only the 603 is the callee's; Classify reads the cause
+// with the status.
+const CauseCallRejected = "CALL_REJECTED"
+
+// SIPStatusDecline is the SIP status of a callee who declined the call
+// (603 Decline): under CALL_REJECTED, the one status that is the customer.
+const SIPStatusDecline = 603
+
 // causeOutcomes is the cause to outcome table of design 10 section 7.2, for a
 // call the customer did not answer. It is data: one row per cause, one test
 // per row.
@@ -118,7 +129,7 @@ var causeOutcomes = map[string]Outcome{
 
 	"USER_BUSY": OutcomeBusy,
 
-	"CALL_REJECTED": OutcomeRejected,
+	CauseCallRejected: OutcomeRejected,
 
 	CauseVanished: OutcomeUnknown,
 
@@ -178,6 +189,12 @@ func CauseTable() map[string]Outcome {
 //     end ended the INVITE with a SIP 487 after the leg rang. Otherwise it is
 //     not a row: without ring progress or without the 487 it is the unknown
 //     cause below.
+//   - CALL_REJECTED on a call nobody answered is LINE_REJECTED when the far
+//     end sent any final status but a 603 (a 402, a 403, a 401 or 407, a 608):
+//     the line refused the call before it reached a phone, whether or not the
+//     leg rang, and it is counted by status in a metric. A 603, or no status
+//     at all, is the table's REJECTED: the callee declined, or nothing says
+//     otherwise.
 //   - Otherwise the table decides, and a cause it lacks is TRANSIENT with a
 //     warning and a metric, bounded by maxSystemRetries.
 func Classify(e CallEnd) Outcome {
@@ -221,6 +238,17 @@ func Classify(e CallEnd) Outcome {
 		e.HasRingProgress && !e.IsPlacementFailure {
 		return OutcomeNoAnswer
 	}
+	// The switch reports a carrier's own refusal (402 for a line out of
+	// credit, 401/407 for its authentication, 403, 608) with the same cause as
+	// a callee's 603 Decline. Only the 603 is a person saying no; every other
+	// status is the line, which is why a run of them is a trunk outage. Ring
+	// progress does not tell them apart and is not read. No status keeps the
+	// table's REJECTED: nothing says the line refused.
+	if e.HangupCause == CauseCallRejected && e.SIPStatus != 0 && e.SIPStatus != SIPStatusDecline &&
+		!e.IsPlacementFailure {
+		obs.RecordCampaignLineRejected(e.SIPStatus)
+		return OutcomeLineRejected
+	}
 	mapped, isMapped := causeOutcomes[e.HangupCause]
 	if e.IsPlacementFailure {
 		if isMapped && customerSide[mapped] {
@@ -257,7 +285,7 @@ func ClassOf(o Outcome) Class {
 	case OutcomeAnswered, OutcomeBotFailed, OutcomeOverflow,
 		OutcomeNoAnswer, OutcomeBusy, OutcomeRejected, OutcomeUnknown:
 		return ClassReached
-	case OutcomeTransient, OutcomeOriginateFailed:
+	case OutcomeTransient, OutcomeLineRejected, OutcomeOriginateFailed:
 		return ClassSystem
 	}
 	return ClassNone
@@ -266,6 +294,18 @@ func ClassOf(o Outcome) Class {
 // IsTouched reports whether the outcome reached the customer: the value of
 // campaign_attempts.is_touched, which the cross-campaign frequency check reads.
 func IsTouched(o Outcome) bool { return ClassOf(o) == ClassReached }
+
+// CountsTowardsDailyCap reports whether a finished attempt with this outcome
+// is a dial of its number for the daily dial cap (design 10 section 5.2). Every
+// outcome that spends a budget counts, the system failures included: the
+// dialer cannot tell whether the carrier passed the INVITE on to the phone, and
+// counting is the safe side. A line's refusal (LINE_REJECTED) is the one
+// exception, because the line answered the INVITE itself and the call certainly
+// never reached a phone. A skip and a bad number spend nothing and never count.
+// An attempt still in flight always counts; that is the store's to say.
+func CountsTowardsDailyCap(o Outcome) bool {
+	return ClassOf(o) != ClassNone && o != OutcomeLineRejected
+}
 
 // IsAnsweredOutcome reports whether the customer picked up. Such a number is
 // never dialled again.
@@ -278,10 +318,10 @@ func IsAnsweredOutcome(o Outcome) bool {
 func AllOutcomes() []Outcome {
 	return []Outcome{
 		OutcomeAnswered, OutcomeBotFailed, OutcomeOverflow, OutcomeNoAnswer, OutcomeBusy,
-		OutcomeRejected, OutcomeUnknown, OutcomeTransient, OutcomeOriginateFailed,
+		OutcomeRejected, OutcomeUnknown, OutcomeTransient, OutcomeLineRejected, OutcomeOriginateFailed,
 		OutcomeInvalidNumber, OutcomeDNCSkipped,
 	}
 }
 
-// IsValid reports whether o is one of the eleven outcomes.
+// IsValid reports whether o is one of the twelve outcomes.
 func (o Outcome) IsValid() bool { return slices.Contains(AllOutcomes(), o) }

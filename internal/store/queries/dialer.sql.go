@@ -193,10 +193,10 @@ type DialsTodayByNumberRow struct {
 // How many times each number was dialled in its local day, for the daily dial
 // cap: the numbers and the start of each one's day (its contact's zone) come as
 // two parallel arrays. A dial is a campaign attempt in flight or whose outcome
-// spent a budget (uncounted_outcomes lists the ones that did not: a DNC skip, a
-// bad number), from any campaign, plus an ad-hoc outbound call (a CDR with no
-// campaign) whose canonical callee is the number. A number on the list of test
-// numbers has no row: it is never capped.
+// counts (uncounted_outcomes lists the ones that do not: a DNC skip, a bad
+// number, a line's refusal), from any campaign, plus an ad-hoc outbound call
+// (a CDR with no campaign) whose canonical callee is the number. A number on
+// the list of test numbers has no row: it is never capped.
 func (q *Queries) DialsTodayByNumber(ctx context.Context, arg DialsTodayByNumberParams) ([]DialsTodayByNumberRow, error) {
 	rows, err := q.db.Query(ctx, dialsTodayByNumber,
 		arg.Now,
@@ -431,7 +431,7 @@ func (q *Queries) HeldByFrequency(ctx context.Context, arg HeldByFrequencyParams
 }
 
 const listCampaignAttempts = `-- name: ListCampaignAttempts :many
-SELECT id, campaign_id, campaign_contact_id, number_e164, call_id, leg_id, originate_job_id, state, outcome, hangup_cause, talk_sec, is_touched, lead_intent, lead_notes, started_at, finished_at, is_test_number, declared_lead_intent, lead_verdict, lead_verdict_reason, lead_judge_deadline_at FROM campaign_attempts
+SELECT id, campaign_id, campaign_contact_id, number_e164, call_id, leg_id, originate_job_id, state, outcome, hangup_cause, talk_sec, is_touched, lead_intent, lead_notes, started_at, finished_at, is_test_number, declared_lead_intent, lead_verdict, lead_verdict_reason, lead_judge_deadline_at, sip_status FROM campaign_attempts
 WHERE campaign_id = $1
   AND ($2::uuid IS NULL OR campaign_contact_id = $2::uuid)
   AND ($3::text = '' OR outcome = $3)
@@ -493,6 +493,7 @@ func (q *Queries) ListCampaignAttempts(ctx context.Context, arg ListCampaignAtte
 			&i.LeadVerdict,
 			&i.LeadVerdictReason,
 			&i.LeadJudgeDeadlineAt,
+			&i.SIPStatus,
 		); err != nil {
 			return nil, err
 		}
@@ -505,7 +506,7 @@ func (q *Queries) ListCampaignAttempts(ctx context.Context, arg ListCampaignAtte
 }
 
 const listDialingAttempts = `-- name: ListDialingAttempts :many
-SELECT a.id, a.campaign_id, a.campaign_contact_id, a.number_e164, a.call_id, a.leg_id, a.originate_job_id, a.state, a.outcome, a.hangup_cause, a.talk_sec, a.is_touched, a.lead_intent, a.lead_notes, a.started_at, a.finished_at, a.is_test_number, a.declared_lead_intent, a.lead_verdict, a.lead_verdict_reason, a.lead_judge_deadline_at, c.ring_timeout_sec
+SELECT a.id, a.campaign_id, a.campaign_contact_id, a.number_e164, a.call_id, a.leg_id, a.originate_job_id, a.state, a.outcome, a.hangup_cause, a.talk_sec, a.is_touched, a.lead_intent, a.lead_notes, a.started_at, a.finished_at, a.is_test_number, a.declared_lead_intent, a.lead_verdict, a.lead_verdict_reason, a.lead_judge_deadline_at, a.sip_status, c.ring_timeout_sec
 FROM campaign_attempts a
 JOIN campaigns c ON c.id = a.campaign_id
 WHERE a.state = 'DIALING'
@@ -550,6 +551,7 @@ func (q *Queries) ListDialingAttempts(ctx context.Context) ([]ListDialingAttempt
 			&i.CampaignAttempt.LeadVerdict,
 			&i.CampaignAttempt.LeadVerdictReason,
 			&i.CampaignAttempt.LeadJudgeDeadlineAt,
+			&i.CampaignAttempt.SIPStatus,
 			&i.RingTimeoutSec,
 		); err != nil {
 			return nil, err

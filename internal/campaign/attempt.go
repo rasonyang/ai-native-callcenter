@@ -44,8 +44,13 @@ type Attempt struct {
 	State          AttemptState
 	Outcome        Outcome
 	HangupCause    string
-	TalkSec        int
-	IsTouched      bool
+	// SIPStatus is the final SIP status the far end ended the call with, as the
+	// CDR's tech.sipStatus said; 0 when the switch reported none. It is what
+	// tells a line's refusal (LINE_REJECTED) from a callee's 603 (REJECTED)
+	// under one hangup cause.
+	SIPStatus int
+	TalkSec   int
+	IsTouched bool
 	// IsTestNumber: the number was on the list of test numbers when the
 	// attempt was placed. History; a later delisting does not change it.
 	IsTestNumber bool
@@ -67,7 +72,10 @@ type Attempt struct {
 type Ending struct {
 	Outcome     Outcome
 	HangupCause string
-	TalkSec     int
+	// SIPStatus is the far end's final SIP status, kept on the attempt; 0 for
+	// none (an ending with no CDR never has one).
+	SIPStatus int
+	TalkSec   int
 	// EndedAt is when the call ended; the retry is measured from it.
 	EndedAt time.Time
 }
@@ -83,6 +91,9 @@ type Finished struct {
 	// IsRevision: the attempt was already FINISHED and a fuller CDR replaced
 	// its outcome.
 	IsRevision bool
+	// PreviousOutcome is the outcome a revision replaced; empty unless
+	// IsRevision.
+	PreviousOutcome Outcome
 	// ContactStatus and NextAttemptAt are the contact as the routine left it.
 	ContactStatus ContactStatus
 	NextAttemptAt *time.Time

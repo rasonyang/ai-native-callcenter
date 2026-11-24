@@ -8,7 +8,7 @@ import (
 )
 
 // Backoff spaces the retries of a failure that never reached the customer
-// (TRANSIENT, ORIGINATE_FAILED): the first retry comes BaseSec after the
+// (TRANSIENT, LINE_REJECTED, ORIGINATE_FAILED): the first retry comes BaseSec after the
 // failure, each further one Factor times later than the one before, never more
 // than CapSec.
 type Backoff struct {
@@ -32,7 +32,7 @@ type RetryPolicy struct {
 	// IntervalSec is the wait after an outcome that reached the customer:
 	// NO_ANSWER, BUSY, REJECTED and UNKNOWN.
 	IntervalSec map[Outcome]int `json:"intervalSec"`
-	// TransientBackoff paces TRANSIENT and ORIGINATE_FAILED.
+	// TransientBackoff paces TRANSIENT, LINE_REJECTED and ORIGINATE_FAILED.
 	TransientBackoff Backoff `json:"transientBackoff"`
 }
 
@@ -55,7 +55,7 @@ const (
 // IntervalSec; systemOutcomes spend MaxSystemRetries and use TransientBackoff.
 var (
 	reachedOutcomes = []Outcome{OutcomeNoAnswer, OutcomeBusy, OutcomeRejected, OutcomeUnknown}
-	systemOutcomes  = []Outcome{OutcomeTransient, OutcomeOriginateFailed}
+	systemOutcomes  = []Outcome{OutcomeTransient, OutcomeLineRejected, OutcomeOriginateFailed}
 )
 
 // DefaultRetryPolicy is the policy of design 10 section 7.2.
@@ -65,7 +65,7 @@ func DefaultRetryPolicy() RetryPolicy {
 		MaxSystemRetries: defaultSystemRetries,
 		RetryOutcomes: []Outcome{
 			OutcomeNoAnswer, OutcomeBusy, OutcomeRejected, OutcomeUnknown,
-			OutcomeTransient, OutcomeOriginateFailed,
+			OutcomeTransient, OutcomeLineRejected, OutcomeOriginateFailed,
 		},
 		IntervalSec: map[Outcome]int{
 			OutcomeNoAnswer: 2 * 3600,
@@ -95,7 +95,7 @@ func (p RetryPolicy) Normalize() (RetryPolicy, error) {
 	for _, o := range p.RetryOutcomes {
 		if !slices.Contains(reachedOutcomes, o) && !slices.Contains(systemOutcomes, o) {
 			return RetryPolicy{}, invalid(field+".retryOutcomes", "NOT_RETRYABLE",
-				"%q cannot be retried; the outcomes that can are NO_ANSWER, BUSY, REJECTED, UNKNOWN, TRANSIENT and ORIGINATE_FAILED", o)
+				"%q cannot be retried; the outcomes that can are NO_ANSWER, BUSY, REJECTED, UNKNOWN, TRANSIENT, LINE_REJECTED and ORIGINATE_FAILED", o)
 		}
 		if !slices.Contains(outcomes, o) {
 			outcomes = append(outcomes, o)
@@ -107,7 +107,7 @@ func (p RetryPolicy) Normalize() (RetryPolicy, error) {
 	for o := range p.IntervalSec {
 		if !slices.Contains(reachedOutcomes, o) {
 			return RetryPolicy{}, invalid(field+".intervalSec", "UNKNOWN_OUTCOME",
-				"%q has no interval; intervals are for NO_ANSWER, BUSY, REJECTED and UNKNOWN (TRANSIENT and ORIGINATE_FAILED follow transientBackoff)", o)
+				"%q has no interval; intervals are for NO_ANSWER, BUSY, REJECTED and UNKNOWN (TRANSIENT, LINE_REJECTED and ORIGINATE_FAILED follow transientBackoff)", o)
 		}
 	}
 	for _, o := range reachedOutcomes {

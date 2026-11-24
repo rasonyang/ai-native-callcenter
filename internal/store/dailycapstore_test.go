@@ -120,6 +120,45 @@ func TestDialsTodayCountsWhatTheCapCounts(t *testing.T) {
 	}
 }
 
+// A line's refusal never reached a phone, so it is no dial of the number for
+// the cap; a TRANSIENT, which may have, still is. The rest of the rule is the
+// test above.
+func TestALineRefusalTodayIsNoDialForTheCap(t *testing.T) {
+	ctx := context.Background()
+	e := openAttempts(t)
+	st := e.st
+	a, cts := e.campaign(t, "line", "72", 2, nil)
+	now := ny(t, "2026-06-01 15:00")
+	dayStart := ny(t, "2026-06-01 00:00")
+
+	refused, transient := cts[0].Number, cts[1].Number
+	for _, at := range []string{"2026-06-01 09:00", "2026-06-01 09:05", "2026-06-01 09:20"} {
+		rawAttempt(t, st, a, cts[0], campaign.OutcomeLineRejected, ny(t, at))
+	}
+	rawAttempt(t, st, a, cts[1], campaign.OutcomeTransient, ny(t, "2026-06-01 09:00"))
+	rawAttempt(t, st, a, cts[1], campaign.OutcomeLineRejected, ny(t, "2026-06-01 09:05"))
+
+	got, err := st.Dialer().DialsToday(ctx, []string{refused, transient}, []time.Time{dayStart, dayStart}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []int{0, 1}; !equalInts(got, want) {
+		t.Errorf("dials today = %v, want %v (three line refusals; a TRANSIENT and a line refusal)", got, want)
+	}
+
+	// An attempt in flight counts whatever it comes to.
+	if _, err := st.Pool.Exec(ctx, `UPDATE campaign_contacts SET status = 'ACTIVE', next_attempt_at = NULL WHERE id = $1`, cts[0].ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.attempts.Begin(ctx, cts[0].ID, ny(t, "2026-06-01 14:00")); err != nil {
+		t.Fatal(err)
+	}
+	got, err = st.Dialer().DialsToday(ctx, []string{refused}, []time.Time{dayStart}, now)
+	if err != nil || len(got) != 1 || got[0] != 1 {
+		t.Errorf("dials today with one in flight = %v (%v), want 1", got, err)
+	}
+}
+
 func equalInts(a, b []int) bool {
 	if len(a) != len(b) {
 		return false

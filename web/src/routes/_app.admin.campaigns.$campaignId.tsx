@@ -21,7 +21,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useNameThisPage } from '@/lib/breadcrumb'
 import { useDIDs, useQueues } from '@/lib/catalog'
 import {
-  CAMPAIGN_OUTCOMES, CONTACT_STATUSES, hasCallRecord, LEAD_INTENTS, actionsFor, formFrom, isFinished, patchOf,
+  CAMPAIGN_OUTCOMES, CONTACT_STATUSES, attemptCauseText, hasCallRecord, LEAD_INTENTS, actionsFor, formFrom, isFinished, patchOf,
   useCampaign, useCampaignAttempts, useCampaignContacts, useCampaignMutations, useCampaignSettings,
   useInvalidateContacts, type Campaign, type CampaignContactStatus, type CampaignLeadIntent,
   type CampaignOutcome,
@@ -542,7 +542,7 @@ export function AttemptsTab({ campaign, view, onView }: {
                 {row.outcome ? t(`campaign.outcomes.${row.outcome}`) : t('campaign.attemptStates.DIALING')}
               </Td>
               <Td className="text-xs text-muted-foreground">
-                <CellText maxWidth="max-w-40" minWidth="min-w-upto-36">{row.hangupCause || '—'}</CellText>
+                <CellText maxWidth="max-w-40" minWidth="min-w-upto-36">{attemptCauseText(row, t)}</CellText>
               </Td>
               <Td align="right" className="tabular text-xs">
                 {row.talkSec === undefined ? '—' : formatDuration(row.talkSec)}

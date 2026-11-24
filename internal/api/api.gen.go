@@ -389,6 +389,7 @@ const (
 	CampaignOutcomeBUSY            CampaignOutcome = "BUSY"
 	CampaignOutcomeDNCSKIPPED      CampaignOutcome = "DNC_SKIPPED"
 	CampaignOutcomeINVALIDNUMBER   CampaignOutcome = "INVALID_NUMBER"
+	CampaignOutcomeLINEREJECTED    CampaignOutcome = "LINE_REJECTED"
 	CampaignOutcomeNOANSWER        CampaignOutcome = "NO_ANSWER"
 	CampaignOutcomeORIGINATEFAILED CampaignOutcome = "ORIGINATE_FAILED"
 	CampaignOutcomeOVERFLOW        CampaignOutcome = "OVERFLOW"
@@ -409,6 +410,8 @@ func (e CampaignOutcome) Valid() bool {
 	case CampaignOutcomeDNCSKIPPED:
 		return true
 	case CampaignOutcomeINVALIDNUMBER:
+		return true
+	case CampaignOutcomeLINEREJECTED:
 		return true
 	case CampaignOutcomeNOANSWER:
 		return true
@@ -454,6 +457,7 @@ func (e CampaignPauseReason) Valid() bool {
 // Defines values for CampaignRetryOutcome.
 const (
 	CampaignRetryOutcomeBUSY            CampaignRetryOutcome = "BUSY"
+	CampaignRetryOutcomeLINEREJECTED    CampaignRetryOutcome = "LINE_REJECTED"
 	CampaignRetryOutcomeNOANSWER        CampaignRetryOutcome = "NO_ANSWER"
 	CampaignRetryOutcomeORIGINATEFAILED CampaignRetryOutcome = "ORIGINATE_FAILED"
 	CampaignRetryOutcomeREJECTED        CampaignRetryOutcome = "REJECTED"
@@ -465,6 +469,8 @@ const (
 func (e CampaignRetryOutcome) Valid() bool {
 	switch e {
 	case CampaignRetryOutcomeBUSY:
+		return true
+	case CampaignRetryOutcomeLINEREJECTED:
 		return true
 	case CampaignRetryOutcomeNOANSWER:
 		return true
@@ -1811,9 +1817,12 @@ type CampaignAttempt struct {
 	// Number Canonical E.164 number dialled.
 	Number string `json:"number"`
 
-	// Outcome How an attempt ended (design 10 section 7.2). A contact's lastOutcome is the latest attempt's.
-	Outcome   *CampaignOutcome `json:"outcome,omitempty"`
-	StartedAt time.Time        `json:"startedAt"`
+	// Outcome How an attempt ended (design 10 section 7.2). A contact's lastOutcome is the latest attempt's. A call the switch reports as CALL_REJECTED is told apart by its final SIP status (sipStatus on the attempt): REJECTED is the callee declining, a 603 Decline or a refusal with no status, and spends maxAttempts; LINE_REJECTED is the line refusing the call before it reached a phone, any other status (402 Payment Required, 401 or 407 for the line's authentication, 403 Forbidden, 608 Rejected), a system failure that spends maxSystemRetries on transientBackoff like TRANSIENT, does not hold the number from other campaigns, is no dial of the number for the daily dial cap (it never reached a phone), and counts towards pausing the campaign as TRUNK_FAILURE.
+	Outcome *CampaignOutcome `json:"outcome,omitempty"`
+
+	// SIPStatus The final SIP status the far end ended the call with, such as 402 or 603: the CDR's tech.sipStatus, kept on the attempt. Present only when the switch reported one; a ring this platform cancelled at its ring timeout and a placement failure have none.
+	SIPStatus *int      `json:"sipStatus,omitempty"`
+	StartedAt time.Time `json:"startedAt"`
 
 	// State DIALING until the call ended and its outcome was written, once; a fuller CDR may later revise the outcome of a FINISHED attempt, never its state.
 	State CampaignAttemptState `json:"state"`
@@ -1833,7 +1842,7 @@ type CampaignAttemptList struct {
 // CampaignAttemptState DIALING until the call ended and its outcome was written, once; a fuller CDR may later revise the outcome of a FINISHED attempt, never its state.
 type CampaignAttemptState string
 
-// CampaignBackoff Spacing of the retries of a failure that never reached the customer (TRANSIENT, ORIGINATE_FAILED): the first retry comes baseSec after the failure, each next one factor times later, never more than capSec.
+// CampaignBackoff Spacing of the retries of a failure that never reached the customer (TRANSIENT, LINE_REJECTED, ORIGINATE_FAILED): the first retry comes baseSec after the failure, each next one factor times later, never more than capSec.
 type CampaignBackoff struct {
 	BaseSec int `json:"baseSec"`
 	CapSec  int `json:"capSec"`
@@ -1876,7 +1885,7 @@ type CampaignContact struct {
 	// LastCallID The call of this contact's latest finished attempt, or null before its first attempt has finished. It changes with every attempt, so after a retry it names the retry's call. A call that recorded a lead ends its contact, whatever the call's outcome, so when leadIntent is set it is this call's. Not every attempt is a call that took place: after a DNC_SKIPPED, INVALID_NUMBER, ORIGINATE_FAILED or UNKNOWN attempt the ledger may hold no CDR for it. A HIGH lead's callback is found with listCallbacks?callId=.
 	LastCallID *openapi_types.UUID `json:"lastCallId"`
 
-	// LastOutcome How an attempt ended (design 10 section 7.2). A contact's lastOutcome is the latest attempt's.
+	// LastOutcome How an attempt ended (design 10 section 7.2). A contact's lastOutcome is the latest attempt's. A call the switch reports as CALL_REJECTED is told apart by its final SIP status (sipStatus on the attempt): REJECTED is the callee declining, a 603 Decline or a refusal with no status, and spends maxAttempts; LINE_REJECTED is the line refusing the call before it reached a phone, any other status (402 Payment Required, 401 or 407 for the line's authentication, 403 Forbidden, 608 Rejected), a system failure that spends maxSystemRetries on transientBackoff like TRANSIENT, does not hold the number from other campaigns, is no dial of the number for the daily dial cap (it never reached a phone), and counts towards pausing the campaign as TRUNK_FAILURE.
 	LastOutcome *CampaignOutcome `json:"lastOutcome,omitempty"`
 
 	// LeadIntent What a call concluded about the customer. Absent on a contact no call has recorded a lead for, which is not the same as NONE.
@@ -1984,7 +1993,7 @@ type CampaignIntRange struct {
 	Min int `json:"min"`
 }
 
-// CampaignIntervalSec Seconds to wait after an outcome that reached the customer before dialling again: NO_ANSWER, BUSY, REJECTED and UNKNOWN, each from 60 to 2592000. Defaults: 7200, 1800, 86400, 86400. TRANSIENT and ORIGINATE_FAILED follow transientBackoff instead.
+// CampaignIntervalSec Seconds to wait after an outcome that reached the customer before dialling again: NO_ANSWER, BUSY, REJECTED and UNKNOWN, each from 60 to 2592000. Defaults: 7200, 1800, 86400, 86400. TRANSIENT, LINE_REJECTED and ORIGINATE_FAILED follow transientBackoff instead.
 type CampaignIntervalSec map[string]int
 
 // CampaignLeadIntent What a call concluded about the customer. Absent on a contact no call has recorded a lead for, which is not the same as NONE.
@@ -2026,14 +2035,14 @@ type CampaignOptOutCounts struct {
 	SaidInConversation int `json:"saidInConversation"`
 }
 
-// CampaignOutcome How an attempt ended (design 10 section 7.2). A contact's lastOutcome is the latest attempt's.
+// CampaignOutcome How an attempt ended (design 10 section 7.2). A contact's lastOutcome is the latest attempt's. A call the switch reports as CALL_REJECTED is told apart by its final SIP status (sipStatus on the attempt): REJECTED is the callee declining, a 603 Decline or a refusal with no status, and spends maxAttempts; LINE_REJECTED is the line refusing the call before it reached a phone, any other status (402 Payment Required, 401 or 407 for the line's authentication, 403 Forbidden, 608 Rejected), a system failure that spends maxSystemRetries on transientBackoff like TRANSIENT, does not hold the number from other campaigns, is no dial of the number for the daily dial cap (it never reached a phone), and counts towards pausing the campaign as TRUNK_FAILURE.
 type CampaignOutcome string
 
 // CampaignOutcomeCount How many attempts or contacts of a campaign have one outcome.
 type CampaignOutcomeCount struct {
 	Count int `json:"count"`
 
-	// Outcome How an attempt ended (design 10 section 7.2). A contact's lastOutcome is the latest attempt's.
+	// Outcome How an attempt ended (design 10 section 7.2). A contact's lastOutcome is the latest attempt's. A call the switch reports as CALL_REJECTED is told apart by its final SIP status (sipStatus on the attempt): REJECTED is the callee declining, a 603 Decline or a refusal with no status, and spends maxAttempts; LINE_REJECTED is the line refusing the call before it reached a phone, any other status (402 Payment Required, 401 or 407 for the line's authentication, 403 Forbidden, 608 Rejected), a system failure that spends maxSystemRetries on transientBackoff like TRANSIENT, does not hold the number from other campaigns, is no dial of the number for the daily dial cap (it never reached a phone), and counts towards pausing the campaign as TRUNK_FAILURE.
 	Outcome CampaignOutcome `json:"outcome"`
 }
 
@@ -2086,19 +2095,19 @@ type CampaignRetryOutcome string
 
 // CampaignRetryPolicy What happens to a contact after an attempt ends without settling it. Two budgets are counted separately: maxAttempts is how many times the customer's phone may be rung; maxSystemRetries is how many times our own or the network's failures are retried, and those never use up maxAttempts.
 type CampaignRetryPolicy struct {
-	// IntervalSec Seconds to wait after an outcome that reached the customer before dialling again: NO_ANSWER, BUSY, REJECTED and UNKNOWN, each from 60 to 2592000. Defaults: 7200, 1800, 86400, 86400. TRANSIENT and ORIGINATE_FAILED follow transientBackoff instead.
+	// IntervalSec Seconds to wait after an outcome that reached the customer before dialling again: NO_ANSWER, BUSY, REJECTED and UNKNOWN, each from 60 to 2592000. Defaults: 7200, 1800, 86400, 86400. TRANSIENT, LINE_REJECTED and ORIGINATE_FAILED follow transientBackoff instead.
 	IntervalSec      CampaignIntervalSec    `json:"intervalSec"`
 	MaxAttempts      int                    `json:"maxAttempts"`
 	MaxSystemRetries int                    `json:"maxSystemRetries"`
 	RetryOutcomes    []CampaignRetryOutcome `json:"retryOutcomes"`
 
-	// TransientBackoff Spacing of the retries of a failure that never reached the customer (TRANSIENT, ORIGINATE_FAILED): the first retry comes baseSec after the failure, each next one factor times later, never more than capSec.
+	// TransientBackoff Spacing of the retries of a failure that never reached the customer (TRANSIENT, LINE_REJECTED, ORIGINATE_FAILED): the first retry comes baseSec after the failure, each next one factor times later, never more than capSec.
 	TransientBackoff CampaignBackoff `json:"transientBackoff"`
 }
 
 // CampaignRetryPolicyWrite A retry policy as a client writes it. The object sent is the whole policy: a field left out takes its default (never the stored value), and an interval left out of intervalSec takes its default. The default retries every retryable outcome.
 type CampaignRetryPolicyWrite struct {
-	// IntervalSec Seconds to wait after an outcome that reached the customer before dialling again: NO_ANSWER, BUSY, REJECTED and UNKNOWN, each from 60 to 2592000. Defaults: 7200, 1800, 86400, 86400. TRANSIENT and ORIGINATE_FAILED follow transientBackoff instead.
+	// IntervalSec Seconds to wait after an outcome that reached the customer before dialling again: NO_ANSWER, BUSY, REJECTED and UNKNOWN, each from 60 to 2592000. Defaults: 7200, 1800, 86400, 86400. TRANSIENT, LINE_REJECTED and ORIGINATE_FAILED follow transientBackoff instead.
 	IntervalSec      *CampaignIntervalSec    `json:"intervalSec,omitempty"`
 	MaxAttempts      *int                    `json:"maxAttempts,omitempty"`
 	MaxSystemRetries *int                    `json:"maxSystemRetries,omitempty"`

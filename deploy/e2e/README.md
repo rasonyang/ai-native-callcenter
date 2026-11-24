@@ -147,7 +147,8 @@ be replaced by one a real trunk rings.
 | case | callee (`scenario.json`) | asserted |
 | --- | --- | --- |
 | C03 | 180, then 486 | `BUSY`, cause `USER_BUSY` |
-| C05 | 180, then 603 | `REJECTED`, cause `CALL_REJECTED` |
+| C05 | 180, then 603 | `REJECTED`, cause `CALL_REJECTED`; after the first attempt `attempts` 1 and `systemFailures` 0; CDR `tech.sipStatus` 603 and `tech.endedBy` `PEER`; the attempt's `sipStatus` 603 |
+| C12 | 402 at 50 ms, before any 180 (number `…17`) | `LINE_REJECTED`, cause `CALL_REJECTED`; after the first attempt `attempts` 0 and `systemFailures` 1, the contact `ACTIVE` with `nextAttemptAt` its end plus the 60 s backoff; CDR `tech.sipStatus` 402 and `tech.endedBy` `PEER`; the attempt's `sipStatus` 402; the callee sent no 180 or 183 |
 | C06 | 180, then 404 | `INVALID_NUMBER`, cause `UNALLOCATED_NUMBER`; contact `INVALID_NUMBER`; no further INVITE |
 | C07 | 180, never answered | `NO_ANSWER`; CANCEL 3.75 to 6 s after the INVITE (the 5 s ring timeout, read on the simulator's monotonic clock); CDR `tech.endedBy` `PLATFORM` and no `tech.sipStatus`; no provider session |
 | C11 | 180, then 487 at 2 s by itself, before the ring timeout (number `…16`) | `NO_ANSWER`, cause `ORIGINATOR_CANCEL`; after the first attempt `attempts` 1 and `systemFailures` 0; CDR `tech.sipStatus` 487 and `tech.endedBy` `PEER`; the caller sent no CANCEL |
@@ -179,6 +180,16 @@ outcome table reads as `NO_ANSWER` because the leg rang first. C07 is its
 control: there our own CANCEL ends the leg, the cause is `NO_ANSWER`, and the
 CDR's `tech.endedBy` says `PLATFORM` where C11's says `PEER`. A probe whose
 cause is `ORIGINATOR_CANCEL` is held to the same rule (`expectedOutcome`).
+
+C12 (#702) is C05's mirror: the same hangup cause, `CALL_REJECTED`, but from
+the line refusing the call (a carrier's 402 for an account out of credit)
+before any ring, where C05's is a callee's 603 after a 180. The switch folds
+401, 402, 403, 407, 603 and 608 into that one cause, so the outcome table reads
+the final status: 603, or none, is `REJECTED` on `maxAttempts`; any other is
+`LINE_REJECTED`, a system outcome on `maxSystemRetries` and the transient
+backoff, whether or not the leg rang. With the e2e policy it is dialled twice
+and ends `EXHAUSTED` with `attempts` 0 and `systemFailures` 2. A probe whose
+cause is `CALL_REJECTED` is held to the same rule (`expectedOutcome`).
 
 C07's bound is read from the INVITE to the CANCEL on the simulator's
 monotonic clock (`afterInviteMs` on the dialog's `end`, `cancelAfterInviteMs`

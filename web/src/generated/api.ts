@@ -3580,15 +3580,15 @@ export interface components {
          */
         CampaignContactStatus: "ACTIVE" | "DONE" | "EXHAUSTED" | "INVALID_NUMBER" | "DNC";
         /**
-         * @description How an attempt ended (design 10 section 7.2). A contact's lastOutcome is the latest attempt's.
+         * @description How an attempt ended (design 10 section 7.2). A contact's lastOutcome is the latest attempt's. A call the switch reports as CALL_REJECTED is told apart by its final SIP status (sipStatus on the attempt): REJECTED is the callee declining, a 603 Decline or a refusal with no status, and spends maxAttempts; LINE_REJECTED is the line refusing the call before it reached a phone, any other status (402 Payment Required, 401 or 407 for the line's authentication, 403 Forbidden, 608 Rejected), a system failure that spends maxSystemRetries on transientBackoff like TRANSIENT, does not hold the number from other campaigns, is no dial of the number for the daily dial cap (it never reached a phone), and counts towards pausing the campaign as TRUNK_FAILURE.
          * @enum {string}
          */
-        CampaignOutcome: "ANSWERED" | "BOT_FAILED" | "OVERFLOW" | "NO_ANSWER" | "BUSY" | "REJECTED" | "UNKNOWN" | "TRANSIENT" | "ORIGINATE_FAILED" | "INVALID_NUMBER" | "DNC_SKIPPED";
+        CampaignOutcome: "ANSWERED" | "BOT_FAILED" | "OVERFLOW" | "NO_ANSWER" | "BUSY" | "REJECTED" | "UNKNOWN" | "TRANSIENT" | "LINE_REJECTED" | "ORIGINATE_FAILED" | "INVALID_NUMBER" | "DNC_SKIPPED";
         /**
          * @description The outcomes a campaign may choose to dial again. An answered number is never dialled again, and neither is an invalid or do-not-call one, so those outcomes are not choices.
          * @enum {string}
          */
-        CampaignRetryOutcome: "NO_ANSWER" | "BUSY" | "REJECTED" | "UNKNOWN" | "TRANSIENT" | "ORIGINATE_FAILED";
+        CampaignRetryOutcome: "NO_ANSWER" | "BUSY" | "REJECTED" | "UNKNOWN" | "TRANSIENT" | "LINE_REJECTED" | "ORIGINATE_FAILED";
         /**
          * @description What a call concluded about the customer. Absent on a contact no call has recorded a lead for, which is not the same as NONE.
          * @enum {string}
@@ -3621,7 +3621,7 @@ export interface components {
             days: components["schemas"]["Weekday"][];
             ranges: components["schemas"]["CampaignTimeRange"][];
         };
-        /** @description Spacing of the retries of a failure that never reached the customer (TRANSIENT, ORIGINATE_FAILED): the first retry comes baseSec after the failure, each next one factor times later, never more than capSec. */
+        /** @description Spacing of the retries of a failure that never reached the customer (TRANSIENT, LINE_REJECTED, ORIGINATE_FAILED): the first retry comes baseSec after the failure, each next one factor times later, never more than capSec. */
         CampaignBackoff: {
             /** @default 300 */
             baseSec: number;
@@ -3639,7 +3639,7 @@ export interface components {
             /** @default 14400 */
             capSec?: number;
         };
-        /** @description Seconds to wait after an outcome that reached the customer before dialling again: NO_ANSWER, BUSY, REJECTED and UNKNOWN, each from 60 to 2592000. Defaults: 7200, 1800, 86400, 86400. TRANSIENT and ORIGINATE_FAILED follow transientBackoff instead. */
+        /** @description Seconds to wait after an outcome that reached the customer before dialling again: NO_ANSWER, BUSY, REJECTED and UNKNOWN, each from 60 to 2592000. Defaults: 7200, 1800, 86400, 86400. TRANSIENT, LINE_REJECTED and ORIGINATE_FAILED follow transientBackoff instead. */
         CampaignIntervalSec: {
             [key: string]: number;
         };
@@ -3902,6 +3902,8 @@ export interface components {
             state: components["schemas"]["CampaignAttemptState"];
             outcome?: components["schemas"]["CampaignOutcome"];
             hangupCause?: string;
+            /** @description The final SIP status the far end ended the call with, such as 402 or 603: the CDR's tech.sipStatus, kept on the attempt. Present only when the switch reported one; a ring this platform cancelled at its ring timeout and a placement failure have none. */
+            sipStatus?: number;
             /** @description Seconds the customer spent in conversation with the bot. A campaign call never reaches an agent, so this is the CDR's botSec plus talkSec, not talkSec alone. */
             talkSec?: number;
             /** @description True when the outcome reached the customer, so it counts against maxAttempts and holds the number from other campaigns for the deployment's frequency window. */

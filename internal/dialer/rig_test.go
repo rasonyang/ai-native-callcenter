@@ -255,6 +255,8 @@ type opts struct {
 	start time.Time
 	// onChange receives the dialer's change hints.
 	onChange func(uuid.UUID)
+	// log, when set, is the dialer's logger; default discards.
+	log *slog.Logger
 }
 
 type rig struct {
@@ -348,6 +350,9 @@ func newRig(t *testing.T, o opts) *rig {
 	}
 	st.CampaignFrequencyWindow = r.cfg.Frequency
 	r.dep = Deps{Store: st.Dialer(), Placer: r.placer, IsLive: r.placer.isLive, Clock: clock, Log: slog.New(slog.DiscardHandler), OnChange: o.onChange}
+	if o.log != nil {
+		r.dep.Log = o.log
+	}
 	if o.slots != nil {
 		r.dep.Slots = o.slots
 	}

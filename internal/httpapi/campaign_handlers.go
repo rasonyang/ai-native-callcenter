@@ -315,6 +315,10 @@ func campaignAttemptOut(a campaign.Attempt) api.CampaignAttempt {
 		c := a.HangupCause
 		out.HangupCause = &c
 	}
+	if a.SIPStatus != 0 {
+		st := a.SIPStatus
+		out.SIPStatus = &st
+	}
 	if a.LeadIntent != "" {
 		i := api.CampaignLeadIntent(a.LeadIntent)
 		out.LeadIntent = &i

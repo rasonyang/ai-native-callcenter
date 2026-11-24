@@ -445,6 +445,11 @@ func TestRetryPolicyNormalize(t *testing.T) {
 		got.IntervalSec[OutcomeRejected] != 86400 || got.IntervalSec[OutcomeUnknown] != 86400 {
 		t.Errorf("intervals = %v, want 600 for BUSY and the defaults for the rest", got.IntervalSec)
 	}
+	line := DefaultRetryPolicy()
+	line.RetryOutcomes = []Outcome{OutcomeLineRejected}
+	if got, err := line.Normalize(); err != nil || !slices.Equal(got.RetryOutcomes, []Outcome{OutcomeLineRejected}) {
+		t.Errorf("a campaign that retries only line refusals: %v %v", got.RetryOutcomes, err)
+	}
 	none := DefaultRetryPolicy()
 	none.RetryOutcomes = nil
 	if got, err := none.Normalize(); err != nil || got.RetryOutcomes == nil || len(got.RetryOutcomes) != 0 {
@@ -452,14 +457,17 @@ func TestRetryPolicyNormalize(t *testing.T) {
 	}
 
 	for name, mutate := range map[string]func(*RetryPolicy){
-		"zero attempts":              func(p *RetryPolicy) { p.MaxAttempts = 0 },
-		"21 attempts":                func(p *RetryPolicy) { p.MaxAttempts = 21 },
-		"negative system retries":    func(p *RetryPolicy) { p.MaxSystemRetries = -1 },
-		"51 system retries":          func(p *RetryPolicy) { p.MaxSystemRetries = 51 },
-		"answered is not retryable":  func(p *RetryPolicy) { p.RetryOutcomes = []Outcome{OutcomeAnswered} },
-		"DNC is not retryable":       func(p *RetryPolicy) { p.RetryOutcomes = []Outcome{OutcomeDNCSkipped} },
-		"a made-up outcome":          func(p *RetryPolicy) { p.RetryOutcomes = []Outcome{"MAYBE"} },
-		"an interval for TRANSIENT":  func(p *RetryPolicy) { p.IntervalSec = map[Outcome]int{OutcomeTransient: 300} },
+		"zero attempts":             func(p *RetryPolicy) { p.MaxAttempts = 0 },
+		"21 attempts":               func(p *RetryPolicy) { p.MaxAttempts = 21 },
+		"negative system retries":   func(p *RetryPolicy) { p.MaxSystemRetries = -1 },
+		"51 system retries":         func(p *RetryPolicy) { p.MaxSystemRetries = 51 },
+		"answered is not retryable": func(p *RetryPolicy) { p.RetryOutcomes = []Outcome{OutcomeAnswered} },
+		"DNC is not retryable":      func(p *RetryPolicy) { p.RetryOutcomes = []Outcome{OutcomeDNCSkipped} },
+		"a made-up outcome":         func(p *RetryPolicy) { p.RetryOutcomes = []Outcome{"MAYBE"} },
+		"an interval for TRANSIENT": func(p *RetryPolicy) { p.IntervalSec = map[Outcome]int{OutcomeTransient: 300} },
+		"an interval for LINE_REJECTED": func(p *RetryPolicy) {
+			p.IntervalSec = map[Outcome]int{OutcomeLineRejected: 300}
+		},
 		"an interval under a minute": func(p *RetryPolicy) { p.IntervalSec = map[Outcome]int{OutcomeBusy: 30} },
 		"an interval over 30 days":   func(p *RetryPolicy) { p.IntervalSec = map[Outcome]int{OutcomeBusy: 31 * 24 * 3600} },
 		"backoff factor 0":           func(p *RetryPolicy) { p.TransientBackoff = Backoff{BaseSec: 300, Factor: 0, CapSec: 900} },

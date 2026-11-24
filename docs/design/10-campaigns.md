@@ -222,6 +222,7 @@ final.
 | `state` | `DIALING \| FINISHED` |
 | `outcome` | §7; NULL while `DIALING` |
 | `hangup_cause`, `talk_sec` | from the CDR, or from the job result (§5.5) |
+| `sip_status` | the far end's final SIP status, from the CDR's `tech.sipStatus`; NULL when the switch reported none (a job result never has one, and attempts finished before migration 00052 have none). Tells a line's refusal from a callee's 603 under `CALL_REJECTED` (§7.2) |
 | `is_touched` | true when the outcome counts against `maxAttempts` (§7.2), i.e. the customer was reached; read by the frequency check |
 | `is_test_number` | true when the number was on the list of test numbers (§3.4a) at the moment the row was written. History: delisting the number later does not change it. Lets the outcome summary leave test calls out (§14) |
 | `lead_intent`, `lead_notes` | what this call recorded |
@@ -399,7 +400,10 @@ not sent. It is the deployment's, never a campaign's: the cap belongs to the car
   `campaign_attempts` row for N, from any campaign, that is in flight (`DIALING`) or whose
   outcome spends a budget (`campaign.ClassOf` is not `ClassNone`, so not `DNC_SKIPPED` and not
   `INVALID_NUMBER`), `ORIGINATE_FAILED` and `TRANSIENT` included (the dialer cannot tell whether
-  the carrier saw the INVITE, and counting is the safe side); a voided attempt is a deleted row and
+  the carrier passed the INVITE on to the phone, and counting is the safe side), except
+  `LINE_REJECTED` (§7.2): the line answered the INVITE itself, so the call certainly never reached
+  a phone (owner's decision, #702). The rule is `campaign.CountsTowardsDailyCap`. A voided attempt
+  is a deleted row and
   never counts. And every ad-hoc call: a `cdrs` row with `call_type = 'OUTBOUND'`, no `campaign_id`
   and `to_number_e164 = N`. A campaign call's CDR carries its campaign, so it is not counted twice.
   A number on the list of test numbers is not counted at all (the query leaves it out).
@@ -716,8 +720,8 @@ admit iff  ringing < maxRinging
   known seconds after the dial and non-answers only at the timeout, so a burst larger than the window
   fed in arrival order leaves the window holding nothing but non-answers and the dialer plans its way
   into overflow (found in the capacity simulation, `internal/dialer/sim_test.go`). `TRANSIENT`,
-  `ORIGINATE_FAILED`, `INVALID_NUMBER` and `DNC_SKIPPED` never rang and `UNKNOWN` left no trace, so none
-  is a sample.
+  `LINE_REJECTED`, `ORIGINATE_FAILED`, `INVALID_NUMBER` and `DNC_SKIPPED` never reached a phone and
+  `UNKNOWN` left no trace, so none is a sample.
 - After a restart the window is rebuilt from the campaign's last 600 finished attempts, then kept by
   each finish; no admission reads the database.
 
@@ -948,9 +952,10 @@ any channel (§5.5) — not from `releaseReason` alone, because `FAILED` folds a
 | `OVERFLOW` | answered; no bot slot after `overflowHold` (§6.4) | no — contact `DONE` | — | `maxAttempts` |
 | `NO_ANSWER` | `NO_ANSWER`, `NO_USER_RESPONSE`, our ring timeout; `RECOVERY_ON_TIMER_EXPIRE` when the far end sent a SIP 408 after the leg rang; `ORIGINATOR_CANCEL` when the far end sent a SIP 487 of its own after the leg rang (below) | yes | 2 h | `maxAttempts` |
 | `BUSY` | `USER_BUSY` | yes | 30 min | `maxAttempts` |
-| `REJECTED` | `CALL_REJECTED` | yes | 24 h | `maxAttempts` |
+| `REJECTED` | `CALL_REJECTED` with a SIP 603 or no status: the callee declined (below) | yes | 24 h | `maxAttempts` |
 | `UNKNOWN` | reconciliation could not tell (§8.2) | yes | 24 h | `maxAttempts` |
 | `TRANSIENT` | `NORMAL_TEMPORARY_FAILURE`, `NETWORK_OUT_OF_ORDER`, `RECOVERY_ON_TIMER_EXPIRE` (a 408 with no ring progress, or no 408 at all: our own recovery's reap), `SWITCH_CONGESTION`, `NORMAL_CIRCUIT_CONGESTION` | yes | 5, 15, 45 min … (×3 each time, capped at 4 h) | `maxSystemRetries` |
+| `LINE_REJECTED` | `CALL_REJECTED` with any other SIP status (402, 401, 407, 403, 608): the line refused the call before it reached a phone (below) | yes | as `TRANSIENT` | `maxSystemRetries` |
 | `ORIGINATE_FAILED` | failure before any channel (§5.5), e.g. `GATEWAY_DOWN` | yes | as `TRANSIENT` | `maxSystemRetries` |
 | `INVALID_NUMBER` | `UNALLOCATED_NUMBER`, `INVALID_NUMBER_FORMAT`, `NUMBER_CHANGED` | no — contact `INVALID_NUMBER` | — | — |
 | `DNC_SKIPPED` | on DNC at admission or inside `DialAI` | no — contact `DNC` | — | — |
@@ -980,6 +985,32 @@ any channel (§5.5) — not from `releaseReason` alone, because `FAILED` folds a
   `internal/telephony` from mod_sofia's `sip_hangup_disposition` on `CHANNEL_HANGUP_COMPLETE`; it
   can still be empty on the earlier `CHANNEL_HANGUP`). It is evidence for a person, not an input
   of the rule, so a CDR written before it was kept classifies the same.
+- **A line that refuses a call is `LINE_REJECTED`, not a callee who declined** (#702). mod_sofia
+  folds six final responses into the one cause `CALL_REJECTED` (`sofia_glue_sip_cause_to_freeswitch`
+  in FreeSWITCH v1.11.3: 401, 402, 403, 407, 603, 608), and only the 603 Decline is the callee's.
+  A carrier whose account is out of credit answers every INVITE with a 402 before any 180 or 183;
+  a 401 or 407 is the line's authentication failing, a 403 the carrier refusing the call (a caller
+  id it does not accept, a suspended account, screening), a 608 an intermediary refusing it by
+  policy. The rule reads the CDR's `tech.sipStatus`: `CALL_REJECTED` on a call nobody answered
+  with a status other than 603 is `LINE_REJECTED`, whether or not the leg rang; a 603, or no status
+  at all, is `REJECTED`. A placement failure carries no status, so a `CALL_REJECTED` from a job
+  result stays `REJECTED` under the customer-side rule. `LINE_REJECTED` is paid for as `TRANSIENT`:
+  it spends `maxSystemRetries` on `transientBackoff`, never `maxAttempts`; `is_touched` is false,
+  so it does not hold the number from other campaigns (§5.2); unlike `TRANSIENT` it is no dial of
+  the number for the daily dial cap (§5.2), because it certainly never reached a phone; it is a
+  system outcome for the trunk
+  breaker (§7.4), so a line that refuses every call pauses the campaign; and it is in the default
+  `retryOutcomes`. Migration 00052 gave every campaign whose policy retried `TRANSIENT` the value
+  too, so a running campaign does not end a contact `EXHAUSTED` on its first refusal; rows recorded
+  `REJECTED` before it are not rewritten. A 603 is `REJECTED` whether or not the leg rang: some
+  carriers may answer their own blocks with a 603, but calling a decline a line fault redials,
+  soon, someone who has just said no; `aicc_campaign_line_rejected_total{sip_status}` counts the
+  refusals so real traffic can decide later. A 403 for one number (a per-number block) arrives
+  scattered and does not trip the breaker, which needs a run; it spends only the bounded system
+  retries. The attempt keeps the status (`campaign_attempts.sip_status`, `CampaignAttempt.sipStatus`,
+  NULL when the switch reported none), so the console shows `CALL_REJECTED · 402` and a 603 row
+  its 603. 607 Unwanted is not under this cause: the switch reports it as `UNWANTED`, an unmapped
+  cause, `TRANSIENT` with the warning.
 - Which outcomes retry, their intervals and both budgets are the campaign's `retry_policy`; the
   table holds the defaults. The answered outcomes are not configurable.
 - **An answered number is never dialled again (owner's decision).** A customer who has picked up
@@ -1019,11 +1050,17 @@ outside the window, and move to Tuesday 09:00.
 
 ### 7.4 Breakers
 
-- **Trunk breaker:** `N` consecutive attempts in a campaign (default 20) ending `TRANSIENT` or
-  `ORIGINATE_FAILED` → `PAUSED / TRUNK_FAILURE`. Without it, a trunk outage spends the whole list's
-  system retries in minutes. A far end that ends unanswered calls itself after ringing, with a 408
-  or a 487 of its own (§7.2), is not an outage: those calls are `NO_ANSWER` and break the run like
-  any unanswered call. An unmapped cause still counts toward it as `TRANSIENT`.
+- **Trunk breaker:** `N` consecutive attempts in a campaign (default 20) ending `TRANSIENT`,
+  `LINE_REJECTED` or `ORIGINATE_FAILED` → `PAUSED / TRUNK_FAILURE`. Without it, a trunk outage
+  spends the whole list's system retries in minutes. A line that refuses every call (a carrier's
+  402 for an account out of credit, §7.2) is such an outage, and `N` refusals in a row pause the
+  campaign; `N` callees who decline with a 603 are `REJECTED` and never do. A far end that ends
+  unanswered calls itself after ringing, with a 408 or a 487 of its own (§7.2), is not an outage:
+  those calls are `NO_ANSWER` and break the run like any unanswered call. An unmapped cause still
+  counts toward it as `TRANSIENT`. A revision that turns an attempt into a system outcome from a
+  customer one (the job's `-ERR CALL_REJECTED` recorded `REJECTED`, then the channel's own record
+  with its 402 revising it to `LINE_REJECTED`) is judged by the breaker as well, though it is not
+  counted or sampled a second time.
 - **Provider breaker:** `M` consecutive answered calls (default 5) ending `BOT_FAILED` →
   `PAUSED / PROVIDER_FAILURE`. Answered contacts are not redialled, so a provider outage that does
   not stop the campaign burns one lead per answered call.
@@ -1539,6 +1576,8 @@ configuration today, so only the env names `AICC_OVERFLOW_HOLD` and the like app
 `internal/obs/callmetrics.go`):
 
 - `aicc_campaign_attempts_total{outcome}`
+- `aicc_campaign_line_rejected_total{sip_status}`: the line's refusals (`LINE_REJECTED`, §7.2) by
+  their final SIP status, counted as each is classified (#702)
 - `aicc_dialer_in_flight{kind=ringing|talking}`
 - `aicc_dialer_admission_blocked_total{reason}` (reasons include the provider rule's
   `PROVIDER_SESSION_RATE`, `PROVIDER_TOKEN_RATE`, `PROVIDER_QUOTA_BACKOFF`, #604)
@@ -1640,7 +1679,7 @@ Added by this design:
 - **Outcomes:** the cause → outcome table, one test per row and one for an unmapped cause.
 - **No redial after answer:** every answered outcome — a hang-up within a second, `BOT_FAILED`,
   `OVERFLOW`, no lead recorded — leaves the contact `DONE` with no further attempt.
-- **Budgets:** `TRANSIENT` / `ORIGINATE_FAILED` do not consume `maxAttempts`; reaching
+- **Budgets:** `TRANSIENT` / `LINE_REJECTED` / `ORIGINATE_FAILED` do not consume `maxAttempts`; reaching
   `maxSystemRetries` makes the contact `EXHAUSTED`; a retry falling outside the window moves to the
   next window's start, including across midnight and on a daylight-saving changeover day.
 - **Breakers:** the trunk breaker trips on the `N`th failure and not the `N − 1`th; the provider
