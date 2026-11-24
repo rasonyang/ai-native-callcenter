@@ -16,6 +16,9 @@
 #   installs on the runner's glibc can be missing.
 # - go.mod and go.sum: the image builds with CGO_ENABLED=0, and the `go` job
 #   builds with cgo for -race, so a dependency that needs cgo passes there.
+# - docs/embed.go: its go:embed directives name files the image build needs in
+#   the context; .dockerignore excludes most of docs/, so a new directive can
+#   fail the image build while every workstation build passes.
 # - deploy/docker-compose.yml: its build.args are passed to this Dockerfile by
 #   `make stack-up`, and Docker only warns about an argument nothing declares.
 #
@@ -33,6 +36,7 @@ on:
       - 'web/package-lock.json'
       - 'go.mod'
       - 'go.sum'
+      - 'docs/embed.go'
       - 'deploy/docker-compose.yml'
       - '.github/workflows/image.yml'
   push:
@@ -44,6 +48,7 @@ on:
       - 'web/package-lock.json'
       - 'go.mod'
       - 'go.sum'
+      - 'docs/embed.go'
       - 'deploy/docker-compose.yml'
       - '.github/workflows/image.yml'
 

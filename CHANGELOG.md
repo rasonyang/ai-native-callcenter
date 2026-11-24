@@ -15,6 +15,13 @@ carries the one-line installer's files.
 
 ### Fixed
 
+- Docs: `deploy/README.md` names `grok` among the installer's `--provider`
+  values, and says the `aicc_bot` gateway reads `Status DOWN` while the AI leg
+  is off (an install made with `--provider none`, or `AICC_BOT_ENABLED=false`):
+  that is expected, and `aicc doctor` skips the check. It turns `UP` once the
+  `AICC_BOT_ENABLED=false` line is removed and `docker compose up -d` has
+  recreated the application (#552, #654; thanks @sanketpatel32).
+
 - **A machine that answers a campaign call records no lead** (#409). On a call
   the platform placed to a customer, each final transcript of the callee's
   words is now checked against a built-in Chinese and English list of what a
