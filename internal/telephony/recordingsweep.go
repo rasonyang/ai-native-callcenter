@@ -216,10 +216,10 @@ func (a *CDRAssembler) RunSpoolSweep(ctx context.Context) {
 // spoolMinAge and has no row is booked, and every one that has a row is only
 // released.
 //
-// A recording booked here is not offered to post-call transcription: no
-// snapshot is left to say who answered. It is not lost to it, though: the
-// backfill command (CallsAwaitingTranscription) lists recorded calls with no
-// run by the recording row's creation time, which is the booking.
+// A recording booked here is offered to post-call transcription through
+// OfferBookedRecording, which carries no snapshot: who answered is derived
+// from the CDR row by the recipient, the same way the backfill's Plan
+// derives it.
 //
 // A call adopted after a restart mid-call never saw its RECORD_START, so the
 // hangup path treats its missing file as unremarkable; this pass is what
@@ -326,6 +326,9 @@ func (a *CDRAssembler) sweepOne(ctx context.Context, callID uuid.UUID, key strin
 		if outcome == bookedNow {
 			a.log.Info("recording booked from the spool", "callId", callID, "key", key,
 				"sizeBytes", booked.SizeBytes)
+			if a.offer != nil {
+				a.offer.OfferBookedRecording(booked)
+			}
 		}
 		a.mu.Lock()
 		delete(a.attempts, key)

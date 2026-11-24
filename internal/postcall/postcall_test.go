@@ -850,3 +850,65 @@ func TestAnUnreadableCDRFailsTheAttemptInsteadOfGuessing(t *testing.T) {
 		t.Errorf("recognizer called %d times before the mapping was known", asr.calls())
 	}
 }
+
+// A recording the sweep books arrives without a snapshot, so who answered is
+// derived from its CDR row — the same derivation Plan applies to an awaiting
+// call, exercised on the same rows and live transcripts (#523).
+func TestABookedOfferAndThePlanDeriveTheSameSides(t *testing.T) {
+	t.Parallel()
+	agent := uuid.Must(uuid.NewV7())
+	cases := []struct {
+		name     string
+		botSec   int
+		agents   []uuid.UUID
+		noCDRRow bool
+		speakers []string
+		covered  bool
+	}{
+		{"bot only, its transcript covers it", 12, nil, false, []string{"CUSTOMER", "BOT"}, true},
+		{"bot only, only the customer heard", 12, nil, false, []string{"CUSTOMER"}, false},
+		{"agent only, covered", 0, []uuid.UUID{agent}, false, []string{"CUSTOMER", "HUMAN_AGENT"}, true},
+		{"agent only, only a bot heard", 0, []uuid.UUID{agent}, false, []string{"CUSTOMER", "BOT"}, false},
+		{"a handover, both heard", 30, []uuid.UUID{agent}, false, []string{"CUSTOMER", "BOT", "HUMAN_AGENT"}, true},
+		{"a handover, only the bot heard", 30, []uuid.UUID{agent}, false, []string{"CUSTOMER", "BOT"}, false},
+		{"empty, non-null agent ids mean no agent", 30, []uuid.UUID{}, false, []string{"CUSTOMER", "BOT"}, true},
+		{"a CDR row that cannot be read answers nobody", 0, nil, true, []string{"CUSTOMER"}, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			db := newFakeLedger()
+			rec := db.addRecording(120)
+			if !tc.noCDRRow {
+				db.cdrs[rec.CallID] = store.CDR{BotSec: tc.botSec, AgentIDs: tc.agents}
+			}
+			db.speakers[rec.CallID] = tc.speakers
+			s := newService(db, fakeAudio{}, &fakeRecognizer{}, defaultCfg)
+			ctx := context.Background()
+			if err := s.Start(ctx); err != nil {
+				t.Fatal(err)
+			}
+			defer s.Stop()
+
+			plan, err := s.Plan(ctx, time.Now().Add(-time.Hour), 10)
+			if err != nil {
+				t.Fatal(err)
+			}
+			inPlan := len(plan) == 1 && plan[0].CallID == rec.CallID
+			if inPlan == tc.covered {
+				t.Fatalf("plan candidates = %+v; covered by live transcript = %v", plan, tc.covered)
+			}
+
+			s.OfferBookedRecording(rec)
+			if tc.covered {
+				time.Sleep(200 * time.Millisecond)
+				if db.status(rec.CallID) != "" {
+					t.Error("the booked offer queued a call its live transcript covers; Plan would not")
+				}
+				return
+			}
+			waitFor(t, "the booked recording to be queued", func() bool {
+				return db.status(rec.CallID) != ""
+			})
+		})
+	}
+}

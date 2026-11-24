@@ -50,6 +50,19 @@ carries the one-line installer's files.
 
 ### Fixed
 
+- **A recording the spool sweep books is offered for transcription, with who
+  answered derived from its CDR row** (#523). The sweep books old files that
+  never got a recording row — a call the platform restarted through, for
+  example — but until now such a booking was never offered to post-call
+  transcription, because the sweep has no call snapshot to say whether a bot
+  or a person answered. The sweep now hands every recording it books to the
+  post-call service, which derives who answered from the call's CDR row the
+  way its own planner does (`botSec > 0` says a bot spoke, a listed agent says
+  a person did; a row that cannot be read answers nobody) and applies the same
+  transcription policy to it. A spool copy of a call the ledger already had,
+  or one whose booking fails, is still not offered — a failed booking is
+  offered once, when a later pass books it.
+
 - **A machine that answers a campaign call records no lead** (#409). On a call
   the platform placed to a customer, each final transcript of the callee's
   words is now checked against a built-in Chinese and English list of what a

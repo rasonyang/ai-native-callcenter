@@ -170,17 +170,18 @@ func (l *listOnly) list(before time.Time) ([]string, error) {
 // bookLedger is a ledger that remembers recording rows.
 type bookLedger struct {
 	memoryLedger
-	rmu       sync.Mutex
-	rows      map[uuid.UUID]store.Recording
-	insertErr error
-	marked    []uuid.UUID
+	rmu          sync.Mutex
+	rows         map[uuid.UUID]store.Recording
+	insertErr    error
+	insertErrFor uuid.UUID // when set, only this call's insert fails
+	marked       []uuid.UUID
 }
 
 func (l *bookLedger) InsertRecording(_ context.Context, r store.Recording) (store.Recording, error) {
 	l.rmu.Lock()
 	defer l.rmu.Unlock()
-	if l.insertErr != nil {
-		return store.Recording{}, l.insertErr
+	if l.insertErr != nil || (l.insertErrFor != uuid.Nil && l.insertErrFor == r.CallID) {
+		return store.Recording{}, errors.New("insert refused")
 	}
 	if l.rows == nil {
 		l.rows = map[uuid.UUID]store.Recording{}
@@ -245,14 +246,29 @@ func (c *insertCounter) InsertRecording(ctx context.Context, r store.Recording) 
 }
 
 type countingOffer struct {
-	mu sync.Mutex
-	n  int
+	mu       sync.Mutex
+	n        int
+	booked   int
+	bookedID uuid.UUID
 }
 
 func (o *countingOffer) OfferRecording(store.Recording, bool, bool) {
 	o.mu.Lock()
 	o.n++
 	o.mu.Unlock()
+}
+
+func (o *countingOffer) OfferBookedRecording(rec store.Recording) {
+	o.mu.Lock()
+	o.booked++
+	o.bookedID = rec.CallID
+	o.mu.Unlock()
+}
+
+func (o *countingOffer) bookedCalls() (int, uuid.UUID) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.booked, o.bookedID
 }
 
 type sweepRig struct {
@@ -633,4 +649,45 @@ type hookedCounter struct {
 
 func (h *hookedCounter) BookedRecordingCallIDs(ctx context.Context, ids []uuid.UUID) ([]uuid.UUID, error) {
 	return h.hook.BookedRecordingCallIDs(ctx, ids)
+}
+
+// A recording the sweep books is offered to post-call transcription; one that
+// was only released, or whose booking failed, is not (#523).
+func TestTheSweepOffersWhatItBooksAndNothingElse(t *testing.T) {
+	t.Parallel()
+	r := newSweepRig(t)
+	offer := &countingOffer{}
+	r.a.SetRecordingOffer(offer)
+
+	swept, already, failing := uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7())
+	r.spoolFile(t, swept, 10*time.Minute)
+	_, alreadyFull := r.spoolFile(t, already, 10*time.Minute)
+	r.ledger.rows = map[uuid.UUID]store.Recording{already: {CallID: already}}
+	failKey, failFull := r.spoolFile(t, failing, 10*time.Minute)
+	r.ledger.insertErrFor = failing
+
+	r.a.SweepSpool(t.Context())
+
+	n, id := offer.bookedCalls()
+	if n != 1 || id != swept {
+		t.Errorf("offered %d bookings for %v; want exactly the swept call %s", n, id, swept)
+	}
+	if exists(alreadyFull) {
+		t.Error("the already-booked copy was not released")
+	}
+	if !exists(failFull) {
+		t.Error("the failed booking's copy was removed")
+	}
+
+	// A booking that fails is not offered — until a later pass, after its
+	// backoff, books it; then exactly once.
+	r.ledger.insertErrFor = uuid.Nil
+	r.a.mu.Lock()
+	delete(r.a.attempts, failKey)
+	r.a.mu.Unlock()
+	r.a.SweepSpool(t.Context())
+	n, _ = offer.bookedCalls()
+	if n != 2 {
+		t.Errorf("offered %d bookings after the retry; want the swept and the retried", n)
+	}
 }
