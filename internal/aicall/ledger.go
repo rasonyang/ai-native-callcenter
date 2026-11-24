@@ -135,7 +135,26 @@ func (r *callRecorder) say(speaker, text string) {
 	if text == "" {
 		return
 	}
-	r.add(speaker, store.TranscriptKindText, text, nil)
+	r.add(speaker, store.TranscriptKindText, text, nil, "")
+}
+
+// sayBot records a bot line with the turn it belongs to, so a later cut can
+// mark what of it the caller heard (#579). The turn is the line's
+// utteranceId, which the transcript already carries.
+func (r *callRecorder) sayBot(turn int, text string) {
+	if text == "" {
+		return
+	}
+	r.add(store.SpeakerBot, store.TranscriptKindText, text, nil, strconv.Itoa(turn))
+}
+
+// markBotHeard reports how much of a turn's line the caller heard: the
+// milliseconds played, or none of it (#579).
+func (r *callRecorder) markBotHeard(turn int, played time.Duration) {
+	if r.transcript == nil {
+		return
+	}
+	r.transcript.PostMark(transcript.Mark{Turn: strconv.Itoa(turn), PlayedMs: int(played.Milliseconds())})
 }
 
 // toolCall records the model asking for something.
@@ -146,7 +165,7 @@ func (r *callRecorder) say(speaker, text string) {
 // with the one word that carried its meaning missing.
 func (r *callRecorder) toolCall(name, args string) {
 	r.add(store.SpeakerBot, store.TranscriptKindToolCall, name,
-		map[string]any{"name": name, "args": args})
+		map[string]any{"name": name, "args": args}, "")
 }
 
 // toolResult records what the tool answered and the phase the call moved to,
@@ -161,23 +180,24 @@ func (r *callRecorder) toolResult(name, output, movedTo string) {
 	if movedTo != "" {
 		content["movedTo"] = movedTo
 	}
-	r.add(store.SpeakerBot, store.TranscriptKindToolResult, name, content)
+	r.add(store.SpeakerBot, store.TranscriptKindToolResult, name, content, "")
 }
 
 // add hands the line to the call's transcript actor. The bot's transcript is
 // the model's own, not recognition of audio, so every line it writes is a
 // final from a MODEL source.
-func (r *callRecorder) add(speaker, kind, text string, content map[string]any) {
+func (r *callRecorder) add(speaker, kind, text string, content map[string]any, utteranceID string) {
 	if r.transcript == nil {
 		return
 	}
 	r.transcript.Post(transcript.Line{
-		Speaker: speaker,
-		Kind:    kind,
-		Text:    text,
-		Content: content,
-		Source:  store.TranscriptSourceModel,
-		IsFinal: true,
+		Speaker:     speaker,
+		Kind:        kind,
+		Text:        text,
+		Content:     content,
+		Source:      store.TranscriptSourceModel,
+		IsFinal:     true,
+		UtteranceID: utteranceID,
 	})
 }
 

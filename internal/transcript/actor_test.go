@@ -34,6 +34,20 @@ func (f *fakeStore) InsertTranscriptLine(_ context.Context, _ uuid.UUID, line st
 	return nil
 }
 
+func (f *fakeStore) MarkTranscriptHeard(_ context.Context, _ uuid.UUID, seq int, heard string, playedMs *int32) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for i := range f.lines {
+		if f.lines[i].Seq == seq {
+			f.lines[i].Content["heard"] = heard
+			if playedMs != nil {
+				f.lines[i].Content["playedMs"] = *playedMs
+			}
+		}
+	}
+	return nil
+}
+
 func (f *fakeStore) all() []store.TranscriptLine {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -295,4 +309,32 @@ func TestCurrentStateIsIdleUntilSomethingSaysOtherwise(t *testing.T) {
 		t.Errorf("CurrentState = %q, want DEGRADED", got)
 	}
 	flush()
+}
+
+// A turn cut partway through is marked on its stored line with how much the
+// caller heard; a mark for a different turn is not the last bot line's to
+// take (#579).
+func TestACutTurnIsMarkedWithWhatTheCallerHeard(t *testing.T) {
+	t.Parallel()
+	actor, st, _, flush := newFixture(t)
+
+	actor.Post(Line{Speaker: store.SpeakerBot, Kind: store.TranscriptKindText,
+		Text: "the line the model wrote", IsFinal: true, UtteranceID: "7"})
+	actor.PostMark(Mark{Turn: "7", PlayedMs: 420})
+	actor.PostMark(Mark{Turn: "other-turn", PlayedMs: -1})
+	actor.Post(Line{Speaker: store.SpeakerBot, Kind: store.TranscriptKindText,
+		Text: "a fragment nobody heard", IsFinal: true, UtteranceID: "8"})
+	actor.PostMark(Mark{Turn: "8", PlayedMs: -1})
+	flush()
+
+	lines := st.all()
+	if len(lines) != 2 {
+		t.Fatalf("stored %d lines, want 2", len(lines))
+	}
+	if lines[0].Content["heard"] != "PARTIAL" || lines[0].Content["playedMs"] != int32(420) {
+		t.Errorf("cut turn stored content %v, want heard=PARTIAL playedMs=420", lines[0].Content)
+	}
+	if lines[1].Content["heard"] != "NONE" {
+		t.Errorf("unheard turn stored content %v, want heard=NONE", lines[1].Content)
+	}
 }

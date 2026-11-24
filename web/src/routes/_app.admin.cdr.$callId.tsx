@@ -184,7 +184,28 @@ function TranscriptRow({ entry, startedAt }: { entry: TranscriptLine; startedAt:
 
   let body: React.ReactNode
   if (entry.kind === 'TEXT') {
-    body = <span>{String(entry.content.text ?? '')}</span>
+    const text = String(entry.content.text ?? '')
+    const heard = entry.content.heard
+    if (heard === 'NONE') {
+      // A turn the caller heard none of reads differently from one said:
+      // the words are the model's draft, never played to the leg (#579).
+      body = (
+        <span className="text-muted-foreground">
+          {text} {t('cdr.heard.none')}
+        </span>
+      )
+    } else if (heard === 'PARTIAL') {
+      body = (
+        <span>
+          {text}{' '}
+          <span className="text-muted-foreground">
+            {t('cdr.heard.partial', { ms: entry.content.playedMs })}
+          </span>
+        </span>
+      )
+    } else {
+      body = <span>{text}</span>
+    }
   } else if (entry.kind === 'TOOL_CALL') {
     body = (
       <span className="text-muted-foreground">

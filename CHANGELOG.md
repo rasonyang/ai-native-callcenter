@@ -50,6 +50,8 @@ carries the one-line installer's files.
 
 ### Fixed
 
+- The CDR transcript now says what the caller actually heard of a bot line: a turn the caller heard none of is marked `heard=NONE`, and a cut turn `heard=PARTIAL` with `playedMs`; the console renders them distinctly (#579).
+
 - **A machine that answers a campaign call records no lead** (#409). On a call
   the platform placed to a customer, each final transcript of the callee's
   words is now checked against a built-in Chinese and English list of what a

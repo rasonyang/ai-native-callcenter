@@ -715,7 +715,7 @@ func (o *Orchestrator) drive(ctx context.Context, session *Session,
 						"turn", event.Turn, "text", event.Text)
 				}
 				if event.IsFinal && !isMuted {
-					recorder.say(store.SpeakerBot, event.Text)
+					recorder.sayBot(event.Turn, event.Text)
 					// A wait line is the application's words, not a claim
 					// of the model's ("let me check" is what it says).
 					if !event.IsAside {
@@ -804,8 +804,12 @@ func (o *Orchestrator) drive(ctx context.Context, session *Session,
 					}
 				}
 
+			case EventTypeTurnReplaced:
+				recorder.markBotHeard(event.Turn, event.Played)
+
 			case EventTypeBargeIn:
 				bargedTurn = event.Turn
+				recorder.markBotHeard(event.Turn, event.Played)
 				actions.onBargeIn(event)
 				claims.onBargeIn(event.Turn)
 				fw.due = nil

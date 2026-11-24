@@ -2830,7 +2830,7 @@ export interface components {
             occurredAt: string;
             speaker: components["schemas"]["Speaker"];
             kind: components["schemas"]["TranscriptKind"];
-            /** @description TEXT carries {text}; TOOL_CALL and TOOL_RESULT carry the tool name and arguments or result. */
+            /** @description TEXT carries {text}; TOOL_CALL and TOOL_RESULT carry the tool name and arguments or result. A bot line the caller heard none of carries heard NONE, and one heard only partway carries heard PARTIAL with playedMs; a line the caller heard whole carries neither (#579). */
             content: {
                 [key: string]: unknown;
             };

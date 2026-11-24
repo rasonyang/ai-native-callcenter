@@ -510,7 +510,11 @@
       "HUMAN_AGENT": "Agent"
     },
     "noRecord": "No call record",
-    "noRecordHint": "This call has no record in the ledger. Calls that never reached the switch, such as a skipped number, leave none."
+    "noRecordHint": "This call has no record in the ledger. Calls that never reached the switch, such as a skipped number, leave none.",
+    "heard": {
+      "none": "(the caller heard none of it — not played)",
+      "partial": "(the caller heard only the first {{ms}} ms — cut)"
+    }
   },
   "callbacks": {
     "hint": "Promises the bot made on the phone. Claim one before you ring.",

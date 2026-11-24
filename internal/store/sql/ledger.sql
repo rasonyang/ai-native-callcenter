@@ -473,3 +473,7 @@ LIMIT sqlc.arg(max_rows)::int;
 
 -- name: MarkRecordingDeleted :exec
 UPDATE recordings SET deleted_at = now() WHERE id = $1 AND deleted_at IS NULL;
+
+-- name: UpdateTranscriptLineContent :exec
+UPDATE transcripts SET content = content || CAST(sqlc.arg(patch) AS jsonb)
+WHERE call_id = $1 AND seq = $2;

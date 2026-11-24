@@ -54,6 +54,13 @@ const (
 	// session (bargeIn) or by the provider's turn detection, which cancelled
 	// the turn first (Event.IsByProvider).
 	EventTypeBargeIn EventType = "BARGE_IN"
+
+	// EventTypeTurnReplaced is a bot turn cut without the caller taking the
+	// floor: the application stopped it to make room for a phase's line
+	// (SYSTEM), or the provider confirmed a cut with nothing ever queued to
+	// play. The orchestrator marks the turn's transcript line with what the
+	// caller heard — nothing of it, or the milliseconds played (#579).
+	EventTypeTurnReplaced EventType = "TURN_REPLACED"
 	// EventTypeCallerSpeech is the provider reporting that the caller started
 	// to speak, whether or not the bot held the floor. A barge-in is reported
 	// only when there was something to cut, so this is the one signal that the
@@ -1292,6 +1299,18 @@ func (s *Session) handleModelEvent(event provider.Event) {
 					s.openCut(cut)
 				}
 			}
+		}
+		if isCurrent && (event.InterruptedBy == provider.InterruptReasonSystem || !hadQueued) {
+			// Not a barge-in — the caller did not take the floor (SYSTEM is
+			// this client making room for a line; nothing queued means
+			// nothing heard) — but the turn's transcript line still needs its
+			// heard mark: the CDR shows the fragment, and without a mark it
+			// reads as said (#579).
+			played := time.Duration(playedMs) * time.Millisecond
+			if !hadQueued {
+				played = -1
+			}
+			s.emit(Event{Type: EventTypeTurnReplaced, Turn: turn, Played: played})
 		}
 		if !hadQueued && isCurrent && event.InterruptedBy == provider.InterruptReasonSpeech {
 			// The opening cut before any of it was queued: nothing was heard

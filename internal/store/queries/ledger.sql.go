@@ -1776,6 +1776,22 @@ func (q *Queries) UpdateCDRHasRecording(ctx context.Context, callID uuid.UUID) e
 	return err
 }
 
+const updateTranscriptLineContent = `-- name: UpdateTranscriptLineContent :exec
+UPDATE transcripts SET content = content || CAST($3 AS jsonb)
+WHERE call_id = $1 AND seq = $2
+`
+
+type UpdateTranscriptLineContentParams struct {
+	CallID uuid.UUID `json:"callId"`
+	Seq    int32     `json:"seq"`
+	Patch  []byte    `json:"patch"`
+}
+
+func (q *Queries) UpdateTranscriptLineContent(ctx context.Context, arg UpdateTranscriptLineContentParams) error {
+	_, err := q.db.Exec(ctx, updateTranscriptLineContent, arg.CallID, arg.Seq, arg.Patch)
+	return err
+}
+
 const upsertWrapUp = `-- name: UpsertWrapUp :one
 INSERT INTO wrap_ups (call_id, agent_id, disposition_code, disposition_label, note, is_confirmed)
 VALUES ($1, $2, $3, $4, $5, $6)

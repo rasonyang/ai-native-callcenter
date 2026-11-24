@@ -1666,3 +1666,22 @@ func (s *LedgerStore) MarkRecordingDeleted(ctx context.Context, id uuid.UUID) er
 	}
 	return nil
 }
+
+// MarkTranscriptHeard folds into a stored line's content how much of it the
+// caller heard — "NONE" or "PARTIAL", and playedMs for PARTIAL — learned only
+// after the row was written (#579).
+func (l *LedgerStore) MarkTranscriptHeard(ctx context.Context, callID uuid.UUID, seq int, heard string, playedMs *int32) error {
+	patch := map[string]any{"heard": heard}
+	if playedMs != nil {
+		patch["playedMs"] = *playedMs
+	}
+	raw, err := json.Marshal(patch)
+	if err != nil {
+		return err
+	}
+	return l.q.UpdateTranscriptLineContent(ctx, queries.UpdateTranscriptLineContentParams{
+		CallID: callID,
+		Seq:    int32(seq),
+		Patch:  raw,
+	})
+}
