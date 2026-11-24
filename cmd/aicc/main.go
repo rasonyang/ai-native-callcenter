@@ -168,6 +168,15 @@ func run() error {
 	// dialer (a later slice) sets st.OnAttemptFinished to wake itself.
 	st.OutboundHours = cfg.OutboundHours
 	st.CampaignFrequencyWindow = cfg.CampaignFrequencyWindow
+	// A text model judges the lead of a campaign call the bot handled alone
+	// once it ends (design 10 section 11.1). The store marks a judgement owed
+	// only when the judge can make one; set before any store is built from st.
+	// With no text model the judge still settles, at their deadline, the
+	// judgements an earlier run left owed.
+	leadJudges := leadJudge(cfg, st.LeadJudgements(), os.Getenv, slog.Default())
+	st.IsLeadJudgeEnabled = leadJudges.IsJudging()
+	leadJudges.Start()
+	defer leadJudges.Stop()
 	// The dialer is built further down, after the services it depends on; what
 	// the store tells it is forwarded once it exists. Events before then are
 	// not lost: the dialer reads the database when it starts.
@@ -188,6 +197,7 @@ func run() error {
 		if d := campaignDialer.Load(); d != nil {
 			d.AttemptFinished(f)
 		}
+		leadJudges.AttemptFinished(f)
 	}
 	st.OnDNCAdded = func() {
 		if d := campaignDialer.Load(); d != nil {

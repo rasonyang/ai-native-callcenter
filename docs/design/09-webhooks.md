@@ -408,6 +408,11 @@ The stored CDR, as `GET /cdrs/{callId}` already serves it, wrapped in a delivery
 is in the body rather than only in a header so that a payload logged on its own still says which
 version of the call it is.
 
+A campaign call carries its lead (`leadIntent`, and on a judged lead `declaredLeadIntent`,
+`leadVerdict`, `leadVerdictReason`), read from the attempt in the CDR's transaction like
+`campaignId`. A call whose lead a text model is judging is queued held, with `NOT_JUDGED` in the
+payload, until the verdict replaces and releases it or the hold ends (design 10 §11.1).
+
 `cdr`, not `event` — the two are different things, and naming the field for what it carries
 keeps a future generic-event webhook from having to reuse a field that means something else.
 The shape is `store.CDR` (`ledgerstore.go:31`), already a wire type guarded by

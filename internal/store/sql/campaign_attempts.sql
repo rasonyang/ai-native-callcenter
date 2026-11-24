@@ -123,7 +123,70 @@ WHERE campaign_id = $1 AND state = 'FINISHED'
 ORDER BY finished_at DESC, id DESC
 LIMIT sqlc.arg('row_limit');
 
--- The campaign a call was placed for, within the CDR's transaction, so the
--- webhook filter and the delivered payload agree with the row just written.
+-- The campaign a call was placed for and the lead its attempt holds, within
+-- the CDR's transaction, so the webhook filter and the delivered payload agree
+-- with the rows just written. The verdict's deadline says how long a delivery
+-- waits for a judgement still owed.
 -- name: CampaignOfCall :one
-SELECT campaign_id FROM campaign_attempts WHERE call_id = $1;
+SELECT campaign_id, lead_intent, declared_lead_intent, lead_verdict, lead_verdict_reason,
+       lead_judge_deadline_at
+FROM campaign_attempts WHERE call_id = $1;
+
+-- The lead of each of these calls that recorded one, for the ledger's reads.
+-- name: CampaignLeadsOfCalls :many
+SELECT call_id, lead_intent, declared_lead_intent, lead_verdict, lead_verdict_reason
+FROM campaign_attempts
+WHERE call_id = ANY (sqlc.arg('call_ids')::uuid[]) AND lead_intent IS NOT NULL;
+
+-- A judgement of the lead becomes owed (design section 11.1): the flow's
+-- intent is kept apart and the deadline set, both from the database's clock.
+-- Only once per attempt, and only for a lead that is judged at all; a revised
+-- CDR finds declared_lead_intent set and changes nothing.
+-- name: OweLeadJudgement :one
+UPDATE campaign_attempts
+SET declared_lead_intent = lead_intent, lead_verdict = 'PENDING',
+    lead_judge_deadline_at = now() + sqlc.arg('deadline_sec')::int * interval '1 second'
+WHERE id = $1 AND declared_lead_intent IS NULL AND lead_intent IN ('HIGH', 'MEDIUM')
+RETURNING *;
+
+-- The verdict and the lead it leaves, written only while the judgement is
+-- still owed and its deadline has not passed: no row back means too late, and
+-- the verdict is discarded, so the record says what the receiver was sent.
+-- name: SettleLeadVerdict :one
+UPDATE campaign_attempts
+SET lead_verdict = sqlc.arg('lead_verdict'), lead_verdict_reason = sqlc.narg('lead_verdict_reason'),
+    lead_intent = sqlc.arg('lead_intent')
+WHERE id = $1 AND lead_verdict = 'PENDING' AND lead_judge_deadline_at > now()
+RETURNING *;
+
+-- A judgement whose deadline passed with no verdict: the lead the flow
+-- declared stands, marked as not judged.
+-- name: ExpireLeadJudgement :one
+UPDATE campaign_attempts
+SET lead_verdict = 'NOT_JUDGED', lead_verdict_reason = NULL
+WHERE call_id = $1 AND lead_verdict = 'PENDING' AND lead_judge_deadline_at <= now()
+RETURNING *;
+
+-- The judgements past their deadline, oldest first, for the sweep.
+-- name: ExpiredLeadJudgements :many
+SELECT call_id FROM campaign_attempts
+WHERE lead_verdict = 'PENDING' AND lead_judge_deadline_at <= now()
+ORDER BY lead_judge_deadline_at
+LIMIT sqlc.arg('row_limit');
+
+-- The judgements still owed and still in time, soonest deadline first, for a
+-- worker that starts (or looks again) and finds work nobody handed it. The
+-- deadline also says when the judgement became owed: LeadJudgeDeadline before.
+-- name: PendingLeadJudgements :many
+SELECT call_id, lead_judge_deadline_at FROM campaign_attempts
+WHERE lead_verdict = 'PENDING' AND lead_judge_deadline_at > now()
+ORDER BY lead_judge_deadline_at
+LIMIT sqlc.arg('row_limit');
+
+-- A verdict moves the contact's lead only while this attempt is still the
+-- contact's latest: a later call has settled the contact since, and its lead
+-- (or the lead it kept) is not this call's to change.
+-- name: SetContactLeadOfAttempt :execrows
+UPDATE campaign_contacts
+SET lead_intent = sqlc.arg('lead_intent'), updated_at = now()
+WHERE id = $1 AND last_attempt_id = sqlc.arg('attempt_id')::uuid;

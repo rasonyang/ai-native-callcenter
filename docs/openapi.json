@@ -7353,7 +7353,7 @@
           "webhooks"
         ],
         "summary": "A finished call, delivered to a subscription",
-        "description": "Not an operation of this server: this is the request the platform sends to the `url` of every enabled webhook subscription whose filter matches a finished call, and the operation the receiving endpoint implements. Create subscriptions with `createWebhookSubscription`.\n\nThe request is a POST with a JSON body (`WebhookCdrDelivery`). `X-AICC-Webhook-Id` carries the `deliveryId` as a header too. When the subscription has a token, `Authorization: Bearer <token>` carries it: the subscription's own credential, never one of this deployment's API keys. A subscription with no token sends no Authorization header.\n\nThe receiver's answer decides what happens next.\n\n**Acknowledgement.** Any 2xx status acknowledges the delivery; the response body is read (up to 4 KiB) and discarded. Anything else is a failed attempt: every non-2xx status (4xx included, because a malformed-payload rejection cannot be told from a gateway hiccup by status code), a timeout, a refused or reset connection, and a redirect. Redirects are never followed, so the subscription URL must be the endpoint itself.\n\n**Timeout.** One attempt is bounded at 10 seconds.\n\n**Retry.** A delivery is attempted at most 7 times. After the first failed attempt the next is made 10 seconds later, then 1 minute, 5 minutes, 30 minutes, 2 hours and 6 hours after the following failures, roughly 8.6 hours in all from the first attempt. After the seventh failure the delivery is FAILED and is not retried again. Every retry sends the same `deliveryId` and `revision` with `attempt` incremented. A delivery in flight when the server restarts is retried after about an hour.\n\n**Concurrency.** At most 4 deliveries are in flight to one subscription at a time, and deliveries are not ordered, so a later revision can arrive before an earlier one.\n\n**Revisions: the last `revision` wins per `callId`.** The first delivery of a call to a subscription is revision 1. If the call's record is later written again (a fuller CDR replacing the first), the receiver is told again. Only a delivery that has never been attempted is replaced in place, so its first attempt already carries the corrected record. Once any attempt has been made (in flight, waiting to retry, delivered or failed), a correction is a new delivery with a new `deliveryId` and the next `revision`; the earlier delivery is not recalled and keeps its own retries. One `deliveryId` always carries one body. A receiver keeps, per `callId`, the delivery with the highest `revision`, and ignores one with a lower `revision` than it already holds whatever order they arrive in. `X-AICC-Webhook-Id` is the deduplication key for a retry of the same delivery, so a receiver that skips a `deliveryId` it has already stored never discards a correction.",
+        "description": "Not an operation of this server: this is the request the platform sends to the `url` of every enabled webhook subscription whose filter matches a finished call, and the operation the receiving endpoint implements. Create subscriptions with `createWebhookSubscription`.\n\nThe request is a POST with a JSON body (`WebhookCdrDelivery`). `X-AICC-Webhook-Id` carries the `deliveryId` as a header too. When the subscription has a token, `Authorization: Bearer <token>` carries it: the subscription's own credential, never one of this deployment's API keys. A subscription with no token sends no Authorization header.\n\nThe receiver's answer decides what happens next.\n\n**Acknowledgement.** Any 2xx status acknowledges the delivery; the response body is read (up to 4 KiB) and discarded. Anything else is a failed attempt: every non-2xx status (4xx included, because a malformed-payload rejection cannot be told from a gateway hiccup by status code), a timeout, a refused or reset connection, and a redirect. Redirects are never followed, so the subscription URL must be the endpoint itself.\n\n**Timeout.** One attempt is bounded at 10 seconds.\n\n**Retry.** A delivery is attempted at most 7 times. After the first failed attempt the next is made 10 seconds later, then 1 minute, 5 minutes, 30 minutes, 2 hours and 6 hours after the following failures, roughly 8.6 hours in all from the first attempt. After the seventh failure the delivery is FAILED and is not retried again. Every retry sends the same `deliveryId` and `revision` with `attempt` incremented. A delivery in flight when the server restarts is retried after about an hour.\n\n**Concurrency.** At most 4 deliveries are in flight to one subscription at a time, and deliveries are not ordered, so a later revision can arrive before an earlier one.\n\n**Revisions: the last `revision` wins per `callId`.** The first delivery of a call to a subscription is revision 1. If the call's record is later written again (a fuller CDR replacing the first), the receiver is told again. Only a delivery that has never been attempted is replaced in place, so its first attempt already carries the corrected record. Once any attempt has been made (in flight, waiting to retry, delivered or failed), a correction is a new delivery with a new `deliveryId` and the next `revision`; the earlier delivery is not recalled and keeps its own retries. One `deliveryId` always carries one body. A receiver keeps, per `callId`, the delivery with the highest `revision`, and ignores one with a lower `revision` than it already holds whatever order they arrive in. `X-AICC-Webhook-Id` is the deduplication key for a retry of the same delivery, so a receiver that skips a `deliveryId` it has already stored never discards a correction.\n\n**A campaign lead waits for its verdict.** On a deployment with a text model configured, a campaign call the bot handled alone that recorded a HIGH or MEDIUM lead is judged after it ends (CampaignLeadVerdict), and its delivery waits for the verdict so the receiver is told the final lead once. The delivery is queued when the call's record is written and held for at most 35 seconds, already carrying `leadVerdict` NOT_JUDGED and the declared lead in `leadIntent` and `declaredLeadIntent`. A verdict that lands within 30 seconds replaces that payload in place and releases it at once, with the lead the verdict left; with no verdict the held payload goes out by itself when the hold ends, and a verdict later than that is discarded, so the record and what the receiver was sent agree. Every other call (no lead, LOW, NONE or DO_NOT_CALL, never answered, handed to an agent, or not a campaign's) is delivered at once, as is every call on a deployment with no text model.",
         "security": [
           {
             "subscriptionToken": []
@@ -9602,6 +9602,22 @@
             "type": "string",
             "format": "uuid",
             "description": "The campaign this call was placed for. Absent for every other call. Set when the call's record is written (and again when a fuller record replaces it), from the campaign attempt that carries the call's id."
+          },
+          "leadIntent": {
+            "$ref": "#/components/schemas/CampaignLeadIntent",
+            "description": "The lead this campaign call recorded, read from its campaign attempt (CampaignAttempt.leadIntent): after the verdict when the lead was judged. Absent on a call that is no campaign's and on one that recorded no lead."
+          },
+          "declaredLeadIntent": {
+            "$ref": "#/components/schemas/CampaignLeadIntent",
+            "description": "The lead the flow recorded, before the verdict. Present only when leadVerdict is."
+          },
+          "leadVerdict": {
+            "$ref": "#/components/schemas/CampaignLeadVerdict",
+            "description": "The text model's verdict on the declared lead (CampaignAttempt.leadVerdict). Absent on a call whose lead was not judged. A webhook delivery never carries PENDING: one queued while the verdict is awaited carries NOT_JUDGED and the declared lead, and is replaced by the verdict when it lands in time (webhooks.cdrDelivery)."
+          },
+          "leadVerdictReason": {
+            "type": "string",
+            "description": "The verdict's reason, one sentence in the call's language. Absent on PENDING and NOT_JUDGED, and when the model gave none."
           }
         },
         "required": [
@@ -11746,6 +11762,19 @@
         ],
         "description": "What a call concluded about the customer. Absent on a contact no call has recorded a lead for, which is not the same as NONE."
       },
+      "CampaignLeadVerdict": {
+        "type": "string",
+        "enum": [
+          "PENDING",
+          "CONFIRMED",
+          "UNDECIDED",
+          "REFUSED",
+          "MACHINE",
+          "NO_EVIDENCE",
+          "NOT_JUDGED"
+        ],
+        "description": "What the platform's text model said, after a campaign call ended, about the lead the flow recorded. Only a call the bot handled alone that recorded a HIGH or MEDIUM lead is judged, and only on a deployment with a text model configured; every other call has no verdict. The model reads the callee's and the bot's words of the transcript, never a tool call, and the lead the flow declared.\n\n- PENDING: the call has ended and the verdict is awaited, for at most 30 seconds.\n- CONFIRMED: a callee line states acceptance of the offer in plain words. The declared lead stands.\n- UNDECIDED: a person talked about the offer and neither accepted nor refused it, or accepted in words whose meaning has to be inferred, conditionally, jokingly, or with a bare yes to a line that presents the offer and asks for the decision at once. HIGH becomes MEDIUM; MEDIUM stays.\n- REFUSED: the callee declined, put it off, or agreed and took it back. The lead becomes NONE.\n- MACHINE: a voicemail prompt, a call assistant, an IVR or a carrier announcement answered. The lead becomes NONE.\n- NO_EVIDENCE: no callee words bear on the offer: none at all, only greetings or acknowledgements, noise, or fragments in another language. The lead becomes NONE.\n- NOT_JUDGED: no verdict was reached in time (the model failed, answered something unusable, or took longer than the 30 seconds). The declared lead stands."
+      },
       "Weekday": {
         "type": "string",
         "enum": [
@@ -12519,10 +12548,23 @@
             "description": "True when the number was on the list of test numbers at the moment the attempt was placed. History: taking the number off the list later does not change it."
           },
           "leadIntent": {
-            "$ref": "#/components/schemas/CampaignLeadIntent"
+            "$ref": "#/components/schemas/CampaignLeadIntent",
+            "description": "The lead the call recorded. On a call whose lead was judged (leadVerdict) it is the lead the verdict left; declaredLeadIntent keeps the one the flow recorded."
           },
           "leadNotes": {
             "type": "string"
+          },
+          "declaredLeadIntent": {
+            "$ref": "#/components/schemas/CampaignLeadIntent",
+            "description": "The lead the flow recorded, as it was before the verdict. Present only when leadVerdict is."
+          },
+          "leadVerdict": {
+            "$ref": "#/components/schemas/CampaignLeadVerdict",
+            "description": "The text model's verdict on the declared lead. Absent on an attempt whose lead was not judged."
+          },
+          "leadVerdictReason": {
+            "type": "string",
+            "description": "The verdict's reason, one sentence in the call's language. Absent on PENDING and NOT_JUDGED, and when the model gave none."
           },
           "startedAt": {
             "type": "string",

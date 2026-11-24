@@ -323,6 +323,18 @@ func campaignAttemptOut(a campaign.Attempt) api.CampaignAttempt {
 		n := a.LeadNotes
 		out.LeadNotes = &n
 	}
+	if a.LeadVerdict != "" {
+		v := api.CampaignLeadVerdict(a.LeadVerdict)
+		out.LeadVerdict = &v
+		if a.DeclaredLeadIntent != "" {
+			d := api.CampaignLeadIntent(a.DeclaredLeadIntent)
+			out.DeclaredLeadIntent = &d
+		}
+		if a.LeadVerdictReason != "" {
+			r := a.LeadVerdictReason
+			out.LeadVerdictReason = &r
+		}
+	}
 	return out
 }
 

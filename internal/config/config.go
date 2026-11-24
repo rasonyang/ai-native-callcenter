@@ -313,6 +313,14 @@ type Config struct {
 	// IsWrapUpDraftEnabled turns the AI draft of after-call work on or off
 	// when the text model is configured and live transcription is enabled.
 	IsWrapUpDraftEnabled bool
+	// IsLeadJudgeEnabled turns the judging of campaign leads on or off when
+	// the text model is configured (design 10 section 11.1): after a campaign
+	// call the bot handled alone ends with a HIGH or MEDIUM lead, the model
+	// reads its transcript and its verdict decides the lead, and the call's
+	// webhook delivery waits for it. It needs the caller's words in the bot
+	// phase's transcript, so it is off too when AICC_PROVIDER_TRANSCRIBE_MODEL
+	// is "off"; it does not need live transcription of the human phase.
+	IsLeadJudgeEnabled bool
 
 	// Recordings. Backend FS keeps files where the switch wrote them;
 	// S3 uploads them to any S3-compatible store and clears the local spool.
@@ -553,6 +561,7 @@ func Load() (Config, error) {
 		TextLLMTimeout:                envDuration("AICC_TEXT_LLM_TIMEOUT", DefaultTextLLMTimeout),
 		TextLLMContextChars:           envInt("AICC_TEXT_LLM_CONTEXT_CHARS", DefaultTextLLMContextChars),
 		IsWrapUpDraftEnabled:          envBool("AICC_WRAPUP_DRAFT_ENABLED", true),
+		IsLeadJudgeEnabled:            envBool("AICC_LEAD_JUDGE_ENABLED", true),
 		IsPostCallTranscribeEnabled:   envBool("AICC_POSTCALL_TRANSCRIBE_ENABLED", false),
 		PostCallTranscribeEndpoint:    env("AICC_POSTCALL_TRANSCRIBE_ENDPOINT", ""),
 		PostCallTranscribeModel:       env("AICC_POSTCALL_TRANSCRIBE_MODEL", "qwen-audio-3.1-asr-flash"),

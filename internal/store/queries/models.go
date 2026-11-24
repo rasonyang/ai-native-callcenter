@@ -126,23 +126,27 @@ type Campaign struct {
 }
 
 type CampaignAttempt struct {
-	ID                uuid.UUID          `json:"id"`
-	CampaignID        uuid.UUID          `json:"campaignId"`
-	CampaignContactID uuid.UUID          `json:"campaignContactId"`
-	NumberE164        string             `json:"numberE164"`
-	CallID            uuid.UUID          `json:"callId"`
-	LegID             uuid.UUID          `json:"legId"`
-	OriginateJobID    *string            `json:"originateJobId"`
-	State             string             `json:"state"`
-	Outcome           *string            `json:"outcome"`
-	HangupCause       *string            `json:"hangupCause"`
-	TalkSec           *int32             `json:"talkSec"`
-	IsTouched         bool               `json:"isTouched"`
-	LeadIntent        *string            `json:"leadIntent"`
-	LeadNotes         *string            `json:"leadNotes"`
-	StartedAt         pgtype.Timestamptz `json:"startedAt"`
-	FinishedAt        pgtype.Timestamptz `json:"finishedAt"`
-	IsTestNumber      bool               `json:"isTestNumber"`
+	ID                  uuid.UUID          `json:"id"`
+	CampaignID          uuid.UUID          `json:"campaignId"`
+	CampaignContactID   uuid.UUID          `json:"campaignContactId"`
+	NumberE164          string             `json:"numberE164"`
+	CallID              uuid.UUID          `json:"callId"`
+	LegID               uuid.UUID          `json:"legId"`
+	OriginateJobID      *string            `json:"originateJobId"`
+	State               string             `json:"state"`
+	Outcome             *string            `json:"outcome"`
+	HangupCause         *string            `json:"hangupCause"`
+	TalkSec             *int32             `json:"talkSec"`
+	IsTouched           bool               `json:"isTouched"`
+	LeadIntent          *string            `json:"leadIntent"`
+	LeadNotes           *string            `json:"leadNotes"`
+	StartedAt           pgtype.Timestamptz `json:"startedAt"`
+	FinishedAt          pgtype.Timestamptz `json:"finishedAt"`
+	IsTestNumber        bool               `json:"isTestNumber"`
+	DeclaredLeadIntent  *string            `json:"declaredLeadIntent"`
+	LeadVerdict         *string            `json:"leadVerdict"`
+	LeadVerdictReason   *string            `json:"leadVerdictReason"`
+	LeadJudgeDeadlineAt pgtype.Timestamptz `json:"leadJudgeDeadlineAt"`
 }
 
 type CampaignContact struct {

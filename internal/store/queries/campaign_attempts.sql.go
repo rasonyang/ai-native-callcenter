@@ -68,17 +68,78 @@ func (q *Queries) CallHasRealCDR(ctx context.Context, callID uuid.UUID) (bool, e
 	return has_real_cdr, err
 }
 
-const campaignOfCall = `-- name: CampaignOfCall :one
-SELECT campaign_id FROM campaign_attempts WHERE call_id = $1
+const campaignLeadsOfCalls = `-- name: CampaignLeadsOfCalls :many
+SELECT call_id, lead_intent, declared_lead_intent, lead_verdict, lead_verdict_reason
+FROM campaign_attempts
+WHERE call_id = ANY ($1::uuid[]) AND lead_intent IS NOT NULL
 `
 
-// The campaign a call was placed for, within the CDR's transaction, so the
-// webhook filter and the delivered payload agree with the row just written.
-func (q *Queries) CampaignOfCall(ctx context.Context, callID uuid.UUID) (uuid.UUID, error) {
+type CampaignLeadsOfCallsRow struct {
+	CallID             uuid.UUID `json:"callId"`
+	LeadIntent         *string   `json:"leadIntent"`
+	DeclaredLeadIntent *string   `json:"declaredLeadIntent"`
+	LeadVerdict        *string   `json:"leadVerdict"`
+	LeadVerdictReason  *string   `json:"leadVerdictReason"`
+}
+
+// The lead of each of these calls that recorded one, for the ledger's reads.
+func (q *Queries) CampaignLeadsOfCalls(ctx context.Context, callIds []uuid.UUID) ([]CampaignLeadsOfCallsRow, error) {
+	rows, err := q.db.Query(ctx, campaignLeadsOfCalls, callIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []CampaignLeadsOfCallsRow{}
+	for rows.Next() {
+		var i CampaignLeadsOfCallsRow
+		if err := rows.Scan(
+			&i.CallID,
+			&i.LeadIntent,
+			&i.DeclaredLeadIntent,
+			&i.LeadVerdict,
+			&i.LeadVerdictReason,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const campaignOfCall = `-- name: CampaignOfCall :one
+SELECT campaign_id, lead_intent, declared_lead_intent, lead_verdict, lead_verdict_reason,
+       lead_judge_deadline_at
+FROM campaign_attempts WHERE call_id = $1
+`
+
+type CampaignOfCallRow struct {
+	CampaignID          uuid.UUID          `json:"campaignId"`
+	LeadIntent          *string            `json:"leadIntent"`
+	DeclaredLeadIntent  *string            `json:"declaredLeadIntent"`
+	LeadVerdict         *string            `json:"leadVerdict"`
+	LeadVerdictReason   *string            `json:"leadVerdictReason"`
+	LeadJudgeDeadlineAt pgtype.Timestamptz `json:"leadJudgeDeadlineAt"`
+}
+
+// The campaign a call was placed for and the lead its attempt holds, within
+// the CDR's transaction, so the webhook filter and the delivered payload agree
+// with the rows just written. The verdict's deadline says how long a delivery
+// waits for a judgement still owed.
+func (q *Queries) CampaignOfCall(ctx context.Context, callID uuid.UUID) (CampaignOfCallRow, error) {
 	row := q.db.QueryRow(ctx, campaignOfCall, callID)
-	var campaign_id uuid.UUID
-	err := row.Scan(&campaign_id)
-	return campaign_id, err
+	var i CampaignOfCallRow
+	err := row.Scan(
+		&i.CampaignID,
+		&i.LeadIntent,
+		&i.DeclaredLeadIntent,
+		&i.LeadVerdict,
+		&i.LeadVerdictReason,
+		&i.LeadJudgeDeadlineAt,
+	)
+	return i, err
 }
 
 const claimContactForDial = `-- name: ClaimContactForDial :one
@@ -123,6 +184,72 @@ func (q *Queries) DeleteDialingAttempt(ctx context.Context, callID uuid.UUID) (u
 	return campaign_contact_id, err
 }
 
+const expireLeadJudgement = `-- name: ExpireLeadJudgement :one
+UPDATE campaign_attempts
+SET lead_verdict = 'NOT_JUDGED', lead_verdict_reason = NULL
+WHERE call_id = $1 AND lead_verdict = 'PENDING' AND lead_judge_deadline_at <= now()
+RETURNING id, campaign_id, campaign_contact_id, number_e164, call_id, leg_id, originate_job_id, state, outcome, hangup_cause, talk_sec, is_touched, lead_intent, lead_notes, started_at, finished_at, is_test_number, declared_lead_intent, lead_verdict, lead_verdict_reason, lead_judge_deadline_at
+`
+
+// A judgement whose deadline passed with no verdict: the lead the flow
+// declared stands, marked as not judged.
+func (q *Queries) ExpireLeadJudgement(ctx context.Context, callID uuid.UUID) (CampaignAttempt, error) {
+	row := q.db.QueryRow(ctx, expireLeadJudgement, callID)
+	var i CampaignAttempt
+	err := row.Scan(
+		&i.ID,
+		&i.CampaignID,
+		&i.CampaignContactID,
+		&i.NumberE164,
+		&i.CallID,
+		&i.LegID,
+		&i.OriginateJobID,
+		&i.State,
+		&i.Outcome,
+		&i.HangupCause,
+		&i.TalkSec,
+		&i.IsTouched,
+		&i.LeadIntent,
+		&i.LeadNotes,
+		&i.StartedAt,
+		&i.FinishedAt,
+		&i.IsTestNumber,
+		&i.DeclaredLeadIntent,
+		&i.LeadVerdict,
+		&i.LeadVerdictReason,
+		&i.LeadJudgeDeadlineAt,
+	)
+	return i, err
+}
+
+const expiredLeadJudgements = `-- name: ExpiredLeadJudgements :many
+SELECT call_id FROM campaign_attempts
+WHERE lead_verdict = 'PENDING' AND lead_judge_deadline_at <= now()
+ORDER BY lead_judge_deadline_at
+LIMIT $1
+`
+
+// The judgements past their deadline, oldest first, for the sweep.
+func (q *Queries) ExpiredLeadJudgements(ctx context.Context, rowLimit int32) ([]uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, expiredLeadJudgements, rowLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []uuid.UUID{}
+	for rows.Next() {
+		var call_id uuid.UUID
+		if err := rows.Scan(&call_id); err != nil {
+			return nil, err
+		}
+		items = append(items, call_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const finishCampaignAttempt = `-- name: FinishCampaignAttempt :exec
 UPDATE campaign_attempts
 SET state = 'FINISHED', outcome = $2, hangup_cause = $3, talk_sec = $4,
@@ -152,7 +279,7 @@ func (q *Queries) FinishCampaignAttempt(ctx context.Context, arg FinishCampaignA
 }
 
 const getAttemptByCall = `-- name: GetAttemptByCall :one
-SELECT id, campaign_id, campaign_contact_id, number_e164, call_id, leg_id, originate_job_id, state, outcome, hangup_cause, talk_sec, is_touched, lead_intent, lead_notes, started_at, finished_at, is_test_number FROM campaign_attempts WHERE call_id = $1
+SELECT id, campaign_id, campaign_contact_id, number_e164, call_id, leg_id, originate_job_id, state, outcome, hangup_cause, talk_sec, is_touched, lead_intent, lead_notes, started_at, finished_at, is_test_number, declared_lead_intent, lead_verdict, lead_verdict_reason, lead_judge_deadline_at FROM campaign_attempts WHERE call_id = $1
 `
 
 func (q *Queries) GetAttemptByCall(ctx context.Context, callID uuid.UUID) (CampaignAttempt, error) {
@@ -176,6 +303,10 @@ func (q *Queries) GetAttemptByCall(ctx context.Context, callID uuid.UUID) (Campa
 		&i.StartedAt,
 		&i.FinishedAt,
 		&i.IsTestNumber,
+		&i.DeclaredLeadIntent,
+		&i.LeadVerdict,
+		&i.LeadVerdictReason,
+		&i.LeadJudgeDeadlineAt,
 	)
 	return i, err
 }
@@ -215,7 +346,7 @@ INSERT INTO campaign_attempts (id, campaign_id, campaign_contact_id, number_e164
                                call_id, leg_id, started_at, is_test_number)
 VALUES ($1, $2, $3, $4, $5, $6, $7,
         EXISTS (SELECT 1 FROM test_numbers t WHERE t.number_e164 = $4))
-RETURNING id, campaign_id, campaign_contact_id, number_e164, call_id, leg_id, originate_job_id, state, outcome, hangup_cause, talk_sec, is_touched, lead_intent, lead_notes, started_at, finished_at, is_test_number
+RETURNING id, campaign_id, campaign_contact_id, number_e164, call_id, leg_id, originate_job_id, state, outcome, hangup_cause, talk_sec, is_touched, lead_intent, lead_notes, started_at, finished_at, is_test_number, declared_lead_intent, lead_verdict, lead_verdict_reason, lead_judge_deadline_at
 `
 
 type InsertCampaignAttemptParams struct {
@@ -259,12 +390,16 @@ func (q *Queries) InsertCampaignAttempt(ctx context.Context, arg InsertCampaignA
 		&i.StartedAt,
 		&i.FinishedAt,
 		&i.IsTestNumber,
+		&i.DeclaredLeadIntent,
+		&i.LeadVerdict,
+		&i.LeadVerdictReason,
+		&i.LeadJudgeDeadlineAt,
 	)
 	return i, err
 }
 
 const lockAttemptByCall = `-- name: LockAttemptByCall :one
-SELECT id, campaign_id, campaign_contact_id, number_e164, call_id, leg_id, originate_job_id, state, outcome, hangup_cause, talk_sec, is_touched, lead_intent, lead_notes, started_at, finished_at, is_test_number FROM campaign_attempts WHERE call_id = $1 FOR UPDATE
+SELECT id, campaign_id, campaign_contact_id, number_e164, call_id, leg_id, originate_job_id, state, outcome, hangup_cause, talk_sec, is_touched, lead_intent, lead_notes, started_at, finished_at, is_test_number, declared_lead_intent, lead_verdict, lead_verdict_reason, lead_judge_deadline_at FROM campaign_attempts WHERE call_id = $1 FOR UPDATE
 `
 
 // The finish routine's lock. A CDR and a standalone finish for one call
@@ -290,6 +425,10 @@ func (q *Queries) LockAttemptByCall(ctx context.Context, callID uuid.UUID) (Camp
 		&i.StartedAt,
 		&i.FinishedAt,
 		&i.IsTestNumber,
+		&i.DeclaredLeadIntent,
+		&i.LeadVerdict,
+		&i.LeadVerdictReason,
+		&i.LeadJudgeDeadlineAt,
 	)
 	return i, err
 }
@@ -345,6 +484,87 @@ func (q *Queries) MakeContactDue(ctx context.Context, arg MakeContactDueParams) 
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const oweLeadJudgement = `-- name: OweLeadJudgement :one
+UPDATE campaign_attempts
+SET declared_lead_intent = lead_intent, lead_verdict = 'PENDING',
+    lead_judge_deadline_at = now() + $2::int * interval '1 second'
+WHERE id = $1 AND declared_lead_intent IS NULL AND lead_intent IN ('HIGH', 'MEDIUM')
+RETURNING id, campaign_id, campaign_contact_id, number_e164, call_id, leg_id, originate_job_id, state, outcome, hangup_cause, talk_sec, is_touched, lead_intent, lead_notes, started_at, finished_at, is_test_number, declared_lead_intent, lead_verdict, lead_verdict_reason, lead_judge_deadline_at
+`
+
+type OweLeadJudgementParams struct {
+	ID          uuid.UUID `json:"id"`
+	DeadlineSec int32     `json:"deadlineSec"`
+}
+
+// A judgement of the lead becomes owed (design section 11.1): the flow's
+// intent is kept apart and the deadline set, both from the database's clock.
+// Only once per attempt, and only for a lead that is judged at all; a revised
+// CDR finds declared_lead_intent set and changes nothing.
+func (q *Queries) OweLeadJudgement(ctx context.Context, arg OweLeadJudgementParams) (CampaignAttempt, error) {
+	row := q.db.QueryRow(ctx, oweLeadJudgement, arg.ID, arg.DeadlineSec)
+	var i CampaignAttempt
+	err := row.Scan(
+		&i.ID,
+		&i.CampaignID,
+		&i.CampaignContactID,
+		&i.NumberE164,
+		&i.CallID,
+		&i.LegID,
+		&i.OriginateJobID,
+		&i.State,
+		&i.Outcome,
+		&i.HangupCause,
+		&i.TalkSec,
+		&i.IsTouched,
+		&i.LeadIntent,
+		&i.LeadNotes,
+		&i.StartedAt,
+		&i.FinishedAt,
+		&i.IsTestNumber,
+		&i.DeclaredLeadIntent,
+		&i.LeadVerdict,
+		&i.LeadVerdictReason,
+		&i.LeadJudgeDeadlineAt,
+	)
+	return i, err
+}
+
+const pendingLeadJudgements = `-- name: PendingLeadJudgements :many
+SELECT call_id, lead_judge_deadline_at FROM campaign_attempts
+WHERE lead_verdict = 'PENDING' AND lead_judge_deadline_at > now()
+ORDER BY lead_judge_deadline_at
+LIMIT $1
+`
+
+type PendingLeadJudgementsRow struct {
+	CallID              uuid.UUID          `json:"callId"`
+	LeadJudgeDeadlineAt pgtype.Timestamptz `json:"leadJudgeDeadlineAt"`
+}
+
+// The judgements still owed and still in time, soonest deadline first, for a
+// worker that starts (or looks again) and finds work nobody handed it. The
+// deadline also says when the judgement became owed: LeadJudgeDeadline before.
+func (q *Queries) PendingLeadJudgements(ctx context.Context, rowLimit int32) ([]PendingLeadJudgementsRow, error) {
+	rows, err := q.db.Query(ctx, pendingLeadJudgements, rowLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []PendingLeadJudgementsRow{}
+	for rows.Next() {
+		var i PendingLeadJudgementsRow
+		if err := rows.Scan(&i.CallID, &i.LeadJudgeDeadlineAt); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const recentAttemptOutcomes = `-- name: RecentAttemptOutcomes :many
@@ -420,6 +640,29 @@ func (q *Queries) SetAttemptLead(ctx context.Context, arg SetAttemptLeadParams) 
 	return result.RowsAffected(), nil
 }
 
+const setContactLeadOfAttempt = `-- name: SetContactLeadOfAttempt :execrows
+UPDATE campaign_contacts
+SET lead_intent = $2, updated_at = now()
+WHERE id = $1 AND last_attempt_id = $3::uuid
+`
+
+type SetContactLeadOfAttemptParams struct {
+	ID         uuid.UUID `json:"id"`
+	LeadIntent *string   `json:"leadIntent"`
+	AttemptID  uuid.UUID `json:"attemptId"`
+}
+
+// A verdict moves the contact's lead only while this attempt is still the
+// contact's latest: a later call has settled the contact since, and its lead
+// (or the lead it kept) is not this call's to change.
+func (q *Queries) SetContactLeadOfAttempt(ctx context.Context, arg SetContactLeadOfAttemptParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setContactLeadOfAttempt, arg.ID, arg.LeadIntent, arg.AttemptID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const settleCampaignContact = `-- name: SettleCampaignContact :exec
 UPDATE campaign_contacts
 SET attempts = $2, system_failures = $3, status = $4, next_attempt_at = $5,
@@ -468,4 +711,56 @@ func (q *Queries) SettleCampaignContact(ctx context.Context, arg SettleCampaignC
 		arg.LeadNotes,
 	)
 	return err
+}
+
+const settleLeadVerdict = `-- name: SettleLeadVerdict :one
+UPDATE campaign_attempts
+SET lead_verdict = $2, lead_verdict_reason = $3,
+    lead_intent = $4
+WHERE id = $1 AND lead_verdict = 'PENDING' AND lead_judge_deadline_at > now()
+RETURNING id, campaign_id, campaign_contact_id, number_e164, call_id, leg_id, originate_job_id, state, outcome, hangup_cause, talk_sec, is_touched, lead_intent, lead_notes, started_at, finished_at, is_test_number, declared_lead_intent, lead_verdict, lead_verdict_reason, lead_judge_deadline_at
+`
+
+type SettleLeadVerdictParams struct {
+	ID                uuid.UUID `json:"id"`
+	LeadVerdict       *string   `json:"leadVerdict"`
+	LeadVerdictReason *string   `json:"leadVerdictReason"`
+	LeadIntent        *string   `json:"leadIntent"`
+}
+
+// The verdict and the lead it leaves, written only while the judgement is
+// still owed and its deadline has not passed: no row back means too late, and
+// the verdict is discarded, so the record says what the receiver was sent.
+func (q *Queries) SettleLeadVerdict(ctx context.Context, arg SettleLeadVerdictParams) (CampaignAttempt, error) {
+	row := q.db.QueryRow(ctx, settleLeadVerdict,
+		arg.ID,
+		arg.LeadVerdict,
+		arg.LeadVerdictReason,
+		arg.LeadIntent,
+	)
+	var i CampaignAttempt
+	err := row.Scan(
+		&i.ID,
+		&i.CampaignID,
+		&i.CampaignContactID,
+		&i.NumberE164,
+		&i.CallID,
+		&i.LegID,
+		&i.OriginateJobID,
+		&i.State,
+		&i.Outcome,
+		&i.HangupCause,
+		&i.TalkSec,
+		&i.IsTouched,
+		&i.LeadIntent,
+		&i.LeadNotes,
+		&i.StartedAt,
+		&i.FinishedAt,
+		&i.IsTestNumber,
+		&i.DeclaredLeadIntent,
+		&i.LeadVerdict,
+		&i.LeadVerdictReason,
+		&i.LeadJudgeDeadlineAt,
+	)
+	return i, err
 }

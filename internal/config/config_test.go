@@ -604,7 +604,7 @@ func TestTheTextModelIsOffByDefaultAndChecksItsSettings(t *testing.T) {
 		t.Fatal(err)
 	}
 	if c.TextLLMEndpoint != "" || c.TextLLMModel != "" || c.TextLLMTimeout != 20*time.Second ||
-		c.TextLLMContextChars != 24000 || !c.IsWrapUpDraftEnabled {
+		c.TextLLMContextChars != 24000 || !c.IsWrapUpDraftEnabled || !c.IsLeadJudgeEnabled {
 		t.Errorf("defaults = %+v, want the ones .env.example documents", c)
 	}
 

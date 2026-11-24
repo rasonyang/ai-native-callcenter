@@ -1247,7 +1247,9 @@ The model judges; code records.
   the final value:
   - `DO_NOT_CALL`: the number goes into `dnc_numbers` with `source = CONVERSATION`;
   - `HIGH`: a `callbacks` row (F9) with `phone_number`, `call_id`,
-    `queue_id = follow_up_queue_id`, and the notes as `message`.
+    `queue_id = follow_up_queue_id`, and the notes as `message`. On a call whose lead a text
+    model judges (§11.1) the callback waits for the verdict and is filed only if the lead is
+    still `HIGH`.
 
   A model changing its mind mid-call therefore leaves no duplicate or stale callback, and nothing
   needs undoing. A DNC that takes effect at the end of the call rather than during it changes
@@ -1280,6 +1282,67 @@ The model judges; code records.
   configurable later. Intent is a contract enum, not built on dispositions, which are read-only
   today.
 - `record_lead` is not offered outside campaign calls.
+
+### 11.1 A text model reads the finished call and decides the lead (#661)
+
+The lead above is the realtime model's hearing of one moment of audio. After a campaign call
+**the bot handled alone** ends with a `HIGH` or `MEDIUM` lead, one text-model job
+(`internal/leadjudge`, the `AICC_TEXT_LLM_*` model, not the voice provider) reads the transcript
+and gives a verdict, and the verdict decides the lead. Nobody reviews it. The rules come from
+the two offline runs posted on the issue; the owner's decisions of 2026-11-24 fixed the rest.
+
+- **Verdicts** (`CampaignLeadVerdict`, `campaign_attempts.lead_verdict`): `CONFIRMED` keeps the
+  declared intent; `UNDECIDED` lowers `HIGH` to `MEDIUM` and leaves `MEDIUM`; `REFUSED`,
+  `MACHINE` and `NO_EVIDENCE` leave the call with no lead (`NONE`); `NOT_JUDGED` (no usable
+  verdict in time) keeps it. `PENDING` is the row while the verdict is awaited.
+  `campaign.LeadAfterVerdict` is the one table.
+- **Storage: the attempt row is the queue.** `declared_lead_intent` (the flow's intent, copied
+  when the judgement becomes owed and never changed after), `lead_verdict`, `lead_verdict_reason`
+  and `lead_judge_deadline_at` (migration 00051, a partial index on `PENDING`). `lead_intent`
+  stays the effective lead, so every consumer of it (contacts, the summary, exports) needed no
+  change.
+- **Owed inside the CDR's transaction.** `attemptFinisher.fromCDR` marks the attempt `PENDING`
+  with a deadline 30 s from the database's clock when the store judges leads
+  (`Store.IsLeadJudgeEnabled`, set from wiring), the lead is `HIGH` or `MEDIUM`, and the CDR is
+  answered, more than a placement failure, has a bot, and reached no queue and no agent
+  (`isJudgedCall`). The call's webhook deliveries are queued in the same transaction, held
+  35 s, with a payload that already says `leadVerdict: NOT_JUDGED` and the declared lead: if
+  nothing ever acts, the delivery goes out by itself at the bound and is correct as it stands.
+  A fuller CDR while the judgement is owed keeps the hold. Every other call (no lead, `LOW`,
+  `NONE`, `DO_NOT_CALL`, unanswered, handed to an agent, not a campaign's) is untouched and
+  delivered at once, with no text-model request.
+- **The callback waits.** While the attempt is `PENDING`, `leadSideEffects` files no callback
+  for `HIGH`; the verdict files it when the lead it leaves is still `HIGH`, `NOT_JUDGED` at the
+  deadline included. `DO_NOT_CALL` is never judged and goes on the list as before. Retry and
+  redial are not recomputed: the call was answered (a redial after `MACHINE` is #664's).
+- **The job.** Woken by the attempt hook (`campaign.Finished.IsLeadJudgementOwed`), and by a scan
+  of `PENDING` rows at start and every 5 s for crash safety. It waits 3 s for the transcript's
+  last lines, which land after the CDR, then reads the `CUSTOMER` and `BOT` rows of kind `TEXT`
+  only: no tool row, not even by name (the first offline run read tool arguments as the callee's
+  words). A call with no callee row, or whose callee rows are only pickup greetings and acknowledgement sounds (`saysOnlySounds`; answer words such as 好 or yes are not sounds), is `NO_EVIDENCE` in code, without a request: the model read a bare sound after the bot's question as `UNDECIDED` in the live evaluation. Otherwise one
+  request with JSON output `{"verdict","reason"}`, bounded by the deadline (less a 1 s margin
+  for the write) and `AICC_TEXT_LLM_TIMEOUT`, shortened by `AICC_TEXT_LLM_CONTEXT_CHARS` as the
+  wrap-up draft is; one retry only if time remains. A malformed, empty or unknown answer, or a
+  timeout, is `NOT_JUDGED`. The prompt is the platform's, zh or en by the call's language, and
+  gets the declared intent and the notes the flow rendered (a phase's `lead` or `record_lead`
+  carries nothing else); the reason is one sentence in that language.
+- **Applying a verdict** is one transaction, conditional on `PENDING` and a deadline not yet
+  passed (no row: too late, discarded, so the record says what the receiver was sent): verdict,
+  reason, effective lead; the contact's lead only while its `last_attempt_id` is still this
+  attempt; the deferred callback; the payload rebuilt from the rows and the held delivery
+  replaced through `ReplacePendingWebhookDelivery`, which releases it. **The sweep** turns a
+  `PENDING` row past its deadline into `NOT_JUDGED` (callback filed if `HIGH`) and leaves the held
+  delivery alone: it already carries that payload and releases itself at the bound. With no text
+  model the service still sweeps, so a judgement an earlier run left owed is never stuck.
+- **When it is on.** `AICC_LEAD_JUDGE_ENABLED` (default true) and the text model configured with
+  a key. It does not need live transcription of the human phase, but it does need the caller's
+  words in the bot phase's transcript, so `AICC_PROVIDER_TRANSCRIBE_MODEL=off` turns it off:
+  every lead would be `NO_EVIDENCE`. `aicc_campaign_lead_verdicts_total{verdict}` counts what is
+  written.
+- **Known gaps.** The transcript rows carry no acknowledgement or cut flag, so the judge cannot
+  be shown them. A plain affirmative to a one-breath pitch cannot be told from a lead by text
+  alone; it is `UNDECIDED`, kept visible rather than dropped. `GET /cdrs` shows `PENDING` while
+  the verdict is awaited; a delivery never does.
 
 ---
 

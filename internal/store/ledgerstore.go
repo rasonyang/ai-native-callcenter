@@ -89,6 +89,17 @@ type CDR struct {
 	// CampaignID is the campaign this call was placed for, from the attempt
 	// that carries its call id; nil for every other call.
 	CampaignID *uuid.UUID `json:"campaignId,omitempty"`
+	// The lead the call's campaign attempt holds, read from that attempt like
+	// CampaignID and never written with the row: empty on a call that is no
+	// campaign's or recorded no lead. LeadIntent is the effective lead; the
+	// other three are set only when a text model was owed to judge it (design
+	// 10 section 11.1). A webhook delivery never says PENDING: one queued while
+	// the verdict is awaited says NOT_JUDGED, which is what goes out if no
+	// verdict lands in time.
+	LeadIntent         campaign.LeadIntent  `json:"leadIntent,omitempty"`
+	DeclaredLeadIntent campaign.LeadIntent  `json:"declaredLeadIntent,omitempty"`
+	LeadVerdict        campaign.LeadVerdict `json:"leadVerdict,omitempty"`
+	LeadVerdictReason  string               `json:"leadVerdictReason,omitempty"`
 
 	AgentIDs       []uuid.UUID `json:"agentIds,omitempty"`
 	PrimaryAgentID *uuid.UUID  `json:"primaryAgentId,omitempty"`
@@ -317,16 +328,22 @@ func (l *LedgerStore) InsertCDR(ctx context.Context, cdr CDR) error {
 			return err
 		}
 		// The row carries the campaign of that attempt (InsertCDR copies it);
-		// the deliveries below are filtered and written from the same fact.
-		switch id, err := q.CampaignOfCall(ctx, cdr.CallID); {
+		// the deliveries below are filtered and written from the same fact,
+		// and carry the lead the attempt holds now. A lead still being judged
+		// holds them until the judgement's bound (design 10 section 11.1).
+		var hold *time.Time
+		switch row, err := q.CampaignOfCall(ctx, cdr.CallID); {
 		case errors.Is(err, pgx.ErrNoRows):
 			cdr.CampaignID = nil
+			setCDRLead(&cdr, nil, nil, nil, nil)
 		case err != nil:
 			return fmt.Errorf("read the call's campaign: %w", err)
 		default:
-			cdr.CampaignID = &id
+			cdr.CampaignID = &row.CampaignID
+			setCDRLead(&cdr, row.LeadIntent, row.DeclaredLeadIntent, row.LeadVerdict, row.LeadVerdictReason)
+			hold = leadJudgeHold(row.LeadVerdict, row.LeadJudgeDeadlineAt)
 		}
-		return enqueueFor(ctx, q, cdr)
+		return enqueueFor(ctx, q, deliveredCDR(cdr), hold)
 	})
 	if err == nil && finished != nil && l.onAttemptFinished != nil {
 		l.onAttemptFinished(*finished)
@@ -337,6 +354,63 @@ func (l *LedgerStore) InsertCDR(ctx context.Context, cdr CDR) error {
 		}
 	}
 	return err
+}
+
+// setCDRLead puts a campaign attempt's lead columns on a CDR.
+func setCDRLead(cdr *CDR, lead, declared, verdict, reason *string) {
+	cdr.LeadIntent = campaign.LeadIntent(deref(lead))
+	cdr.DeclaredLeadIntent = campaign.LeadIntent(deref(declared))
+	cdr.LeadVerdict = campaign.LeadVerdict(deref(verdict))
+	cdr.LeadVerdictReason = deref(reason)
+}
+
+// deliveredCDR is the CDR as a webhook delivery carries it: a verdict still
+// PENDING goes out as NOT_JUDGED, the lead that stands if no verdict replaces
+// the delivery before its hold ends.
+func deliveredCDR(cdr CDR) CDR {
+	if cdr.LeadVerdict == campaign.VerdictPending {
+		cdr.LeadVerdict = campaign.VerdictNotJudged
+	}
+	return cdr
+}
+
+// leadJudgeHold is when a delivery of a call whose lead is still being judged
+// is first due: the judgement's deadline plus the margin between the deadline
+// and the hold, both counted from the CDR's write. Nil when nothing is owed.
+func leadJudgeHold(verdict *string, deadline pgtype.Timestamptz) *time.Time {
+	if campaign.LeadVerdict(deref(verdict)) != campaign.VerdictPending || !deadline.Valid {
+		return nil
+	}
+	at := deadline.Time.Add(campaign.LeadJudgeHold - campaign.LeadJudgeDeadline)
+	return &at
+}
+
+// attachLeads fills the campaign lead of every CDR whose call recorded one, as
+// the delivery that told a subscriber about the call carries it.
+func attachLeads(ctx context.Context, q *queries.Queries, cdrs []CDR) error {
+	ids := make([]uuid.UUID, 0, len(cdrs))
+	for _, c := range cdrs {
+		if c.CampaignID != nil {
+			ids = append(ids, c.CallID)
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	rows, err := q.CampaignLeadsOfCalls(ctx, ids)
+	if err != nil {
+		return fmt.Errorf("read the calls' leads: %w", err)
+	}
+	byCall := make(map[uuid.UUID]queries.CampaignLeadsOfCallsRow, len(rows))
+	for _, r := range rows {
+		byCall[r.CallID] = r
+	}
+	for i := range cdrs {
+		if r, ok := byCall[cdrs[i].CallID]; ok {
+			setCDRLead(&cdrs[i], r.LeadIntent, r.DeclaredLeadIntent, r.LeadVerdict, r.LeadVerdictReason)
+		}
+	}
+	return nil
 }
 
 // CDRFilter narrows a ledger listing. Zero values mean "any".
@@ -402,6 +476,9 @@ func (l *LedgerStore) ListCDRs(ctx context.Context, filter CDRFilter) ([]CDR, in
 		out = append(out, fromRow(row))
 	}
 	if err := l.attachWrapUps(ctx, out, filter.AgentID); err != nil {
+		return nil, 0, err
+	}
+	if err := attachLeads(ctx, l.q, out); err != nil {
 		return nil, 0, err
 	}
 	return out, total, nil
@@ -479,6 +556,9 @@ func (l *LedgerStore) GetCDR(ctx context.Context, callID uuid.UUID) (CDR, error)
 	}
 	out := []CDR{fromRow(row)}
 	if err := l.attachWrapUps(ctx, out, nil); err != nil {
+		return CDR{}, err
+	}
+	if err := attachLeads(ctx, l.q, out); err != nil {
 		return CDR{}, err
 	}
 	return out[0], nil
