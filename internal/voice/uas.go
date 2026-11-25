@@ -16,6 +16,7 @@ import (
 	"golang.org/x/net/ipv4"
 
 	"github.com/rasonyang/ai-native-callcenter/internal/media"
+	"github.com/rasonyang/ai-native-callcenter/internal/obs"
 )
 
 // Config parameterises the user agent server.
@@ -357,6 +358,7 @@ func (u *UAS) Start() error {
 	u.mu.Unlock()
 
 	go u.readLoop()
+	go u.watchSocketDrops()
 	allowedPeers := "any"
 	if len(u.allowed) > 0 {
 		allowedPeers = fmt.Sprint(u.cfg.AllowedPeers)
@@ -404,6 +406,37 @@ func (u *UAS) Stop() {
 		_ = u.conn.Close()
 	}
 	u.log.Info("sip uas stopped")
+}
+
+// watchSocketDrops publishes the SIP socket's kernel drops as
+// aicc_sip_socket_drops_total (#597). A burst of INVITEs that overflows the
+// receive buffer is otherwise invisible: each dropped INVITE or ACK is felt
+// only as a retransmission seconds later. Linux reports the count per socket;
+// elsewhere socketDrops returns -1 and this stays silent.
+func (u *UAS) watchSocketDrops() {
+	last := socketDrops(u.localPort)
+	if last < 0 {
+		return
+	}
+	ticker := time.NewTicker(15 * time.Second)
+	defer ticker.Stop()
+	for {
+		<-ticker.C
+		u.mu.Lock()
+		running := u.isRunning
+		u.mu.Unlock()
+		if !running {
+			return
+		}
+		if drops := socketDrops(u.localPort); drops >= last {
+			if delta := drops - last; delta > 0 {
+				obs.RecordSIPSocketDrops(delta)
+				u.log.Warn("sip socket dropped datagrams: receive buffer overflowed",
+					"drops", delta)
+			}
+			last = drops
+		}
+	}
 }
 
 // LocalPort is the bound SIP port, resolved after Start.

@@ -90,6 +90,8 @@ var (
 	switchRTPExhausted metric.Int64Counter
 
 	callMaxDurationKills metric.Int64Counter
+
+	sipSocketDrops metric.Int64Counter
 )
 
 // CallKind labels a live call. The two populations overlap rather than sum:
@@ -453,6 +455,11 @@ func init() {
 		metric.WithDescription("Audio frames discarded because a recognition session could "+
 			"not keep up. Dropped audio is otherwise invisible: a missing transcript line "+
 			"looks the same whether the engine failed to hear it or we never sent it."))
+	sipSocketDrops, _ = meter.Int64Counter("aicc_sip_socket_drops_total",
+		metric.WithDescription("Datagrams the kernel dropped from the bot's SIP socket "+
+			"because its receive buffer was full (#597). Each dropped INVITE or ACK "+
+			"costs the call a retransmission. Linux only: sampled from the socket's "+
+			"drops column in /proc/net/udp."))
 }
 
 // CallStarted and CallEnded move the live-call gauge. They must be paired:
@@ -1303,4 +1310,16 @@ func RecordMaxCallDurationKill(side string) {
 	}
 	callMaxDurationKills.Add(context.Background(), 1,
 		metric.WithAttributes(attribute.String("side", side)))
+}
+
+// RecordSIPSocketDrops counts datagrams the kernel discarded from the bot's
+// SIP socket because its receive buffer was full (#597): on Linux the count
+// comes from the socket's drops column in /proc/net/udp, sampled by the UAS.
+// A burst of INVITEs that overflows the buffer costs every affected call a
+// retransmission.
+func RecordSIPSocketDrops(n int64) {
+	if sipSocketDrops == nil {
+		return
+	}
+	sipSocketDrops.Add(context.Background(), n)
 }

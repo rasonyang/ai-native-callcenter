@@ -166,6 +166,14 @@ carries the one-line installer's files.
   enough, that other columns are ignored unless the flow reads them, and that
   a file edited in Excel can be saved as `.xlsx` and imported as it is.
 
+### Added
+
+- **`aicc_sip_socket_drops_total` counts what the bot's SIP socket loses to a
+  full receive buffer** (#597): a burst of INVITEs that overflows the kernel
+  buffer is invisible except as retransmissions, so the UAS samples the
+  socket's drops column in `/proc/net/udp` every 15 s and logs a WARN when it
+  rises. Linux only.
+
 ### Changed
 
 - **The switch image builds FreeSWITCH v1.11.4, up from v1.11.3** (#709).
