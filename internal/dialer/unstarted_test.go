@@ -417,3 +417,66 @@ func TestTheBotRuleHoldsAPlaceForAnAnsweredLegFromItsAnswer(t *testing.T) {
 	r.wantTerm(0, "every answered leg counted")
 	r.noViolations()
 }
+
+// Every ending releases the term, and no order of its messages leaves it
+// anything but the answered flights whose start is not counted (#640): an
+// answer or a count reported twice, a count before its answer (the leg is then
+// held until it ends, the safe direction) or after its leg ended, a count for
+// an inbound call, which is no flight's, or for a leg still ringing; a callee
+// who hangs up inside the window, a leg whose overflow hold expires, a leg
+// whose originate never let go of it (design 10 section 5.6: no slot, no
+// session, ended by the switch's park timeout), and one whose CDR was lost,
+// settled by its backstop. The ringing and talking counts return to zero too.
+func TestTheUnstartedTermLeaksNothingOnAnyEndingOrMessageOrder(t *testing.T) {
+	r := newTermRig(t, 0, 7, voice.Usage{Cap: 100})
+	calls := r.placer.placedCalls()
+	if len(calls) != 7 {
+		t.Fatalf("%d calls placed, want the campaign's 7", len(calls))
+	}
+	r.stopAdmitting()
+	ids := callIDs(calls)
+	talked, early, window, parked, noOK, lostCDR, rang := ids[0], ids[1], ids[2], ids[3], ids[4], ids[5], ids[6]
+
+	r.answer(talked, talked)
+	r.wantTerm(1, "an answer reported twice")
+	r.counted(talked, talked)
+	r.wantTerm(0, "a start counted twice")
+
+	r.counted(early)
+	r.wantTerm(0, "a count before its answer")
+	r.answer(early)
+	r.wantTerm(1, "the answer after its count")
+
+	r.answer(window, parked, noOK, lostCDR)
+	r.wantTerm(5, "four more answers")
+	r.counted(uuid.Must(uuid.NewV7()), rang)
+	r.wantTerm(5, "a count for an inbound call and one for a leg still ringing")
+
+	r.end(window, campaign.OutcomeAnswered)
+	r.wantTerm(4, "a callee who hung up inside the window")
+	r.end(parked, campaign.OutcomeOverflow)
+	r.wantTerm(3, "a leg whose overflow hold expired")
+	r.end(noOK, campaign.OutcomeBotFailed)
+	r.wantTerm(2, "a leg the originate never let go of, ended by the park timeout")
+	r.end(early, campaign.OutcomeAnswered)
+	r.wantTerm(1, "the leg whose count came before its answer ended")
+	r.end(talked, campaign.OutcomeAnswered)
+	r.wantTerm(1, "a counted leg ended")
+	r.counted(talked)
+	r.wantTerm(1, "a count after its leg ended")
+
+	// No CDR ever comes for this one and its call is gone: past its ring
+	// timeout and the margin the backstop settles it as UNKNOWN.
+	r.placer.drop(lostCDR)
+	r.clock.Advance(time.Minute + time.Second)
+	r.d.Wake()
+	r.settle()
+	r.wantTerm(0, "a leg whose CDR was lost, settled by its backstop")
+
+	r.end(rang, campaign.OutcomeNoAnswer)
+	r.wantTerm(0, "every leg ended")
+	if ringing, talking, flights := r.legs(); ringing != 0 || talking != 0 || flights != 0 {
+		t.Errorf("after every leg ended %d ringing, %d talking, %d flights, want none", ringing, talking, flights)
+	}
+	r.noViolations()
+}

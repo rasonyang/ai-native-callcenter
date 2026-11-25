@@ -774,6 +774,23 @@ func (s *sim) run(d time.Duration) {
 	}
 }
 
+// checkTerm fails the test unless the dialer's unstarted term (#640) is the
+// answered legs still in flight whose start was never counted: a leg counted
+// twice, or taken and never released, shows here. Called after run, when the
+// dialer's goroutine has stopped.
+func (s *sim) checkTerm() {
+	s.t.Helper()
+	want := 0
+	for _, f := range s.d.flights {
+		if f.isAnswered && !f.sessionCounted {
+			want++
+		}
+	}
+	if s.d.unstarted != want {
+		s.t.Errorf("the unstarted term is %d, want %d answered-but-uncounted legs in flight", s.d.unstarted, want)
+	}
+}
+
 // measureFrom starts the utilisation measurement at the current simulated time.
 func (s *sim) measureFrom() {
 	s.mu.Lock()

@@ -5,6 +5,7 @@ package dialer
 import (
 	"cmp"
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -347,18 +348,7 @@ func runScenario(t *testing.T, sc providerScenario) providerRun {
 		startWindow: sc.startWindow, hangupInWindow: sc.hangupInWindow, jitterWindow: sc.jitterWindow})
 	p.measureFrom = s.start.Add(sc.warmUp)
 	s.run(sc.d)
-	// The unstarted term leaks none of what it took (#640): after the run it
-	// is exactly the answered legs still in flight whose start was never
-	// counted — a leg counted twice or released never shows here.
-	want := 0
-	for _, f := range s.d.flights {
-		if f.isAnswered && !f.sessionCounted {
-			want++
-		}
-	}
-	if s.d.unstarted != want {
-		t.Errorf("the unstarted term is %d, want %d answered-but-uncounted legs in flight", s.d.unstarted, want)
-	}
+	s.checkTerm()
 	run := providerRun{
 		starts: p.accepted + p.refuse, refusals: p.refuse,
 		startsAfter: p.startedAfter, refusalsAfter: p.refusedAfter,
@@ -422,6 +412,62 @@ func TestTheConnectRateGateHoldsAcrossTheSessionStartWindow(t *testing.T) {
 					t.Errorf("window %s jitter=%v seed %d: only %d starts in %d minutes: the connect rate of %d a minute is left unused",
 						window, jit, seed, run.starts, minutes, rate)
 				}
+			}
+		}
+	}
+}
+
+// The window of #640 where the rules are exact: every callee answers, so the
+// answer-rate bound stays 1 and each ringing leg is one session to come. A leg
+// in the window that no count saw would let admission place one call more
+// than the bot or the provider can take, at every answer. With the term, at
+// every window, fixed or jittered, with callees hanging up inside it, the bot
+// never reaches into the inbound reserve, nothing overflows and no start is
+// refused, as with no window, and both are still used. Without the term the
+// same runs took the bot into its reserve and had starts refused at every
+// window.
+func TestWithEveryCalleeAnsweringTheWindowAdmitsNoCallTheRulesCannotHold(t *testing.T) {
+	const capacity, reserve, rate, minutes = 60, 6, 20, 10
+	for _, window := range []time.Duration{0, 50 * time.Millisecond, 200 * time.Millisecond, time.Second} {
+		hang := 0.0
+		if window > 0 {
+			hang = 0.15
+		}
+		for _, jit := range []bool{false, true} {
+			if window == 0 && jit {
+				continue
+			}
+			name := fmt.Sprintf("window %s jitter=%v", window, jit)
+			bot := newSim(t, simSpec{capacity: capacity, inboundReserve: reserve, campaigns: 1, seed: 1, maxConcurrent: 1000,
+				rates:       []func(time.Duration) float64{constRate(1)},
+				startWindow: window, hangupInWindow: hang, jitterWindow: jit})
+			bot.run(2 * minutes * time.Minute)
+			bot.checkTerm()
+			overflows := bot.store.count(bot.store.camps[0].ID, campaign.OutcomeOverflow)
+			t.Logf("%s, bot rule: %d calls, peak %d sessions, %d overflowed", name, bot.placements, bot.peakInUse, overflows)
+			if overflows != 0 || bot.peakInUse > capacity-reserve {
+				t.Errorf("%s: %d calls overflowed and the bot peaked at %d sessions, want none and at most %d",
+					name, overflows, bot.peakInUse, capacity-reserve)
+			}
+			if bot.placements < 500 {
+				t.Errorf("%s: only %d calls placed in %d minutes: the bot is left unused", name, bot.placements, 2*minutes)
+			}
+
+			p := simProvider{connectLimit: rate}
+			prov := newSim(t, simSpec{capacity: 400, inboundReserve: 4, campaigns: 1, seed: 1, maxConcurrent: 1000,
+				rates: []func(time.Duration) float64{constRate(1)}, provider: &p,
+				isGated: true, sessionLimit: rate, sessionPeriod: time.Minute,
+				startWindow: window, hangupInWindow: hang, jitterWindow: jit})
+			prov.run(minutes * time.Minute)
+			prov.checkTerm()
+			starts := p.accepted + p.refuse
+			t.Logf("%s, provider rule: %d starts, %d refused", name, starts, p.refuse)
+			if p.refuse != 0 {
+				t.Errorf("%s: %d of %d starts were refused, want none", name, p.refuse, starts)
+			}
+			if starts*5 < minutes*rate*4 {
+				t.Errorf("%s: only %d starts in %d minutes: the connect rate of %d a minute is left unused",
+					name, starts, minutes, rate)
 			}
 		}
 	}

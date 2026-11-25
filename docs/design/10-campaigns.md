@@ -851,9 +851,16 @@ Both rules use it:
 The simulation's answer event now models the window (`startWindow`, fixed and jittered): the dialer
 hears `Answered` first and the slot, the counted start and `SessionCounted` follow by the span; a
 share of callees hang up inside it and release the term by ending. At 0 / 50 / 200 / 1000 ms the
-connect-rate gate keeps refusals within the windowless bound over many seeds, the rate is still
-used, and the term returns to the legs actually uncounted at the run's end — the leak check in
-`runScenario`.
+connect-rate gate keeps refusals within the windowless bound over three seeds each, the rate is
+still used, and the term returns to the legs actually uncounted at the run's end (`checkTerm`).
+That list answers half its calls, and over those runs its refusals stayed within the bound without
+the term too, so the sweep alone does not show the term at work. The case that does is a list whose
+every callee answers, where each ringing leg is one session to come and the rules are exact: with
+the term, at every window, the bot never reaches into the inbound reserve, nothing overflows and no
+start is refused; without it, at every window, the bot went into its reserve and starts were
+refused. The simulation's rings are whole seconds, so a 50 ms and a 200 ms window order events
+alike. Unit tests on the in-memory store walk the term through every ending and message order, the
+bot rule from the answer to the counted start, a start waiting in the gate, and a restart.
 
 ### 6.4 Take a slot on answer; wait briefly if there is none
 
