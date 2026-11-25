@@ -1070,7 +1070,49 @@ dc() {
 }
 
 logs_hint() {
-    say "Logs: cd $DIR && docker compose logs --tail 100 aicc freeswitch lua-role postgres" >&2
+    # .env is root-owned mode 0600 on Linux, so the operator's own shell needs
+    # sudo for compose to read it; on macOS the file is theirs.
+    _lh_dc='docker compose'
+    [ "$OS" = linux ] && _lh_dc='sudo docker compose'
+    say "Logs: cd $DIR && $_lh_dc logs --tail 100 aicc freeswitch lua-role postgres" >&2
+}
+
+# completed_install: the install got as far as running — a marker a completed
+# run wrote, or the containers or the data volume an installer without one
+# (before #551) left behind. A run that died after writing .env has none of
+# these, so the run that finishes still counts as the first install.
+completed_install() {
+    [ -f "$DIR/.install-complete" ] && return 0
+    command -v docker >/dev/null 2>&1 || return 1
+    if [ -f "$DIR/docker-compose.yml" ] && dc ps -a -q 2>/dev/null | grep -q .; then
+        return 0
+    fi
+    docker volume inspect aicc_postgres-data >/dev/null 2>&1
+}
+
+# Written only once the stack is up and doctor has run: what tells the first
+# completed install from a rerun, not the .env an earlier attempt left.
+mark_install_complete() {
+    printf '%s\n' "$TAG" >"$DIR/.install-complete"
+}
+
+# A pull that failed names the image it stopped on and says what to do next;
+# nothing was created, so there are no container logs to point at (#551).
+pull_hint() {
+    # compose prints "<service> Error"/"Interrupted" per image it gave up on;
+    # `dc config` maps the service to the image it pulls.
+    _ph_svcs=$(printf '%s\n' "$1" |
+        awk '$2 == "Error" || $2 == "Interrupted" { print $1 }' | sort -u | tr '\n' ' ')
+    if [ -n "$_ph_svcs" ]; then
+        _ph_imgs=$(dc config 2>/dev/null |
+            awk -v want=" $_ph_svcs" '
+                $0 ~ /^  [a-zA-Z0-9_-]+:$/ { svc = substr($1, 1, length($1) - 1) }
+                $0 ~ /^    image:/ { gsub(/"/, "", $2); if (index(want, " " svc " ")) print $2 }' |
+            sort -u | tr '\n' ' ')
+        [ -z "${_ph_imgs% }" ] && _ph_imgs=$_ph_svcs
+        say "The pull stopped on: $_ph_imgs" >&2
+    fi
+    say "Nothing was started; rerunning this installer resumes the pull." >&2
 }
 
 backup_database() {
@@ -1090,8 +1132,9 @@ backup_database() {
 compose_up() {
     say "Pulling images"
     # missing: the tags are exact and never move, so what is here is right.
-    dc pull --policy missing --quiet || {
-        logs_hint
+    _cu_pull=$(dc pull --policy missing --quiet 2>&1) || {
+        printf '%s\n' "$_cu_pull" >&2
+        pull_hint "$_cu_pull"
         die "docker compose pull failed"
     }
     recheck_deferred_images
@@ -1197,8 +1240,13 @@ main() {
         do_uninstall
         return 0
     fi
+    # "First install" is decided by what completed before, not by .env: a run
+    # that died after writing .env left no marker, containers or volume, so
+    # the run that finishes still prints the password and proves the key
+    # (#551). An older install has no marker but left its containers and
+    # volume, and counts as the rerun it is.
     FIRST_INSTALL=1
-    [ -f "$ENV_FILE" ] && FIRST_INSTALL=0
+    completed_install && FIRST_INSTALL=0
     resolve_tag
     say "Checking this host for $TAG ($OS/$ARCH)"
     preflight
@@ -1219,6 +1267,7 @@ main() {
     env_merge "$ENV_FILE"
     compose_up
     run_doctor
+    mark_install_complete
     final_output
 }
 
