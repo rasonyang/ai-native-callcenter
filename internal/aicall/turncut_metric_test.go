@@ -337,8 +337,10 @@ func TestACutAnotherReplacesIsCountedOnce(t *testing.T) {
 		r := startTurnCutRig(t, "", nil)
 		r.cutBySpeech(t, r.botSpeaks(t), "u1")
 		r.cutBySpeech(t, r.botSpeaks(t), "u2")
-		r.awaitCounted(t, 1)
-		r.meter.assert(t, map[string]int64{cutKey(obs.TurnCutWordsMissing, obs.TurnCutLineLater): 1})
+		// The call's tally moves first; the meter right after, off the lock.
+		missing := cutKey(obs.TurnCutWordsMissing, obs.TurnCutLineLater)
+		waitLong(t, "the replaced cut to be counted", func() bool { return r.meter.since(t)[missing] == 1 })
+		r.meter.assert(t, map[string]int64{missing: 1})
 
 		r.final("u1", "I said I am busy.") // the replaced cut's own final, late
 		r.final("u2", "Please call me next week.")
