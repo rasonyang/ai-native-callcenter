@@ -13,7 +13,7 @@ tree onto a FreeSWITCH you built yourself.
 
 | Path | Purpose |
 |---|---|
-| `conf/` | The complete FreeSWITCH configuration tree, 184 files. Its baseline is `git archive v1.11.3 conf/vanilla`; this project's changes are made in the files themselves |
+| `conf/` | The complete FreeSWITCH configuration tree, 184 files. Its baseline is `git archive v1.11.4 conf/vanilla`; this project's changes are made in the files themselves |
 | `CONF-DEVIATIONS.md` | The file-by-file record of every difference from that baseline, and of what was left vanilla that could still surprise a deployment. Read it before changing anything under `conf/` |
 | `scripts/aicc_xml.lua` | Serves the `directory` section (SIP users) and `callcenter.conf` from the database |
 | `scripts/aicc_inbound.lua` | Inbound entry point: answers every external number with a bot, and schedules the switch's own end to the part of the call the bot serves (#637). Test: `lua freeswitch/tests/aicc_inbound_test.lua` |
@@ -22,7 +22,7 @@ tree onto a FreeSWITCH you built yourself.
 | `scripts/aicc_queue.lua` | Queue entry point and overflow handling; the first entry fixes the switch's own end to the part of the call an agent serves, and every entry keeps that deadline (#637). Test: `lua freeswitch/tests/aicc_queue_test.lua` |
 | `scripts/aicc_spool.lua` | Run by the application through `lua`: removes a booked recording from the spool (S3 backend), because the switch owns the spool's directories; also the probe the connect check and `aicc doctor` use. Test: `lua freeswitch/tests/aicc_spool_test.lua` |
 | `scripts/aicc_track.lua` | Names the agent an internal call is ringing, so mod_callcenter stops offering them queue calls |
-| `Dockerfile` | Builds FreeSWITCH v1.11.3 from source, with this tree and `mod_audio_stream` inside it |
+| `Dockerfile` | Builds FreeSWITCH v1.11.4 from source, with this tree and `mod_audio_stream` inside it |
 | `modules.conf` | The 26 modules that build compiles. The build fails if the shipped `modules.conf.xml` loads anything not on the list |
 | `docker-entrypoint.sh` | Injects a deployment's own values into the shipped configuration at every container start. Its header comment is the contract |
 | `assert-audio-stream.sh` | Fails the build if the built `mod_audio_stream` does not declare SpeexDSP |
@@ -78,7 +78,7 @@ per architecture and publishes `rasonyang/freeswitch-aicc:<tag>` beside
 `make fs-push` is for a manual build.
 
 Nothing is read from the machine running the build. The FreeSWITCH sources
-(tag `v1.11.3`, with sofia-sip and spandsp pinned to commits),
+(tag `v1.11.4`, with sofia-sip and spandsp pinned to commits),
 `mod_audio_stream` and the sound files are all fetched inside the build at pins
 the Dockerfile names, and the sound tarballs are verified by sha256. A push
 from a dirty working tree is refused, because the image is labelled with the

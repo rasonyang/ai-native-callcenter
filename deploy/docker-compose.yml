@@ -174,7 +174,7 @@ services:
     entrypoint: ["/bin/sh", "/lua-role.sh"]
 
   freeswitch:
-    # This repository's own switch image: FreeSWITCH v1.11.3 from source, the
+    # This repository's own switch image: FreeSWITCH v1.11.4 from source, the
     # configuration tree in freeswitch/conf/, the Lua scripts, and
     # mod_audio_stream. Nothing site-specific is baked in; the entrypoint
     # injects what is below. freeswitch/DOCKERHUB.md is that contract in full.

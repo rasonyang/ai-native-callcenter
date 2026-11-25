@@ -238,7 +238,7 @@ jobs:
           file: freeswitch/Dockerfile
           platforms: ${{ matrix.platform }}
           build-args: |
-            FS_VERSION=v1.11.3
+            FS_VERSION=v1.11.4
             SOUNDS=8000
             GIT_REVISION=${{ github.sha }}
             VERSION=${{ github.ref_name }}

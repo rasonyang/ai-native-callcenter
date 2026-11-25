@@ -21,7 +21,7 @@ document explains the shape, not the package inventory.
                             ┌──────▼──────┐  SIP/WSS (agents' browser phones)
   Agent browser ────────────►             ◄──────────────┐
   ├─ SPA (React, SSE) ──┐   │ FreeSWITCH  │              │
-  └─ web-sip-phone ext ─┘   │  1.11.3     │   G.711 RTP  │
+  └─ web-sip-phone ext ─┘   │  1.11.4     │   G.711 RTP  │
      (SIP.js, audio only)   │ mod_callcenter  ┌──────────▼─────────┐
                             │ mod_lua ────────►                    │
                             └──────▲──────┘   │   aicc (Go, one    │

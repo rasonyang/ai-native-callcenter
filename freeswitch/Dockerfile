@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 # SPDX-License-Identifier: Apache-2.0
 #
-# The switch, built. FreeSWITCH v1.11.3 compiled from source, plus
+# The switch, built. FreeSWITCH v1.11.4 compiled from source, plus
 # mod_audio_stream, plus *this repository's* configuration and Lua scripts.
 #
 #   docker buildx build -f freeswitch/Dockerfile freeswitch/     # or: freeswitch/build.sh
@@ -22,19 +22,23 @@
 # that are unmistakably defaults.
 #
 # What is kept from the published recipe is kept because it was verified on the
-# live switch and in the published image: the v1.11.3 tag, the sofia-sip and
-# spandsp commit pins (the packages branch of spandsp is 3.0.0 and fails
-# FreeSWITCH's >= 3.1.1 check), the module list in modules.conf, the two-stage
-# build onto debian:bookworm-slim, the OCI labels, the fs_cli healthcheck, the
-# multi-arch build and the entrypoint's environment-variable contract.
+# live switch and in the published image: the spandsp commit pin (the packages
+# branch of spandsp is 3.0.0 and fails FreeSWITCH's >= 3.1.1 check), the module
+# list in modules.conf, the two-stage build onto debian:bookworm-slim, the OCI
+# labels, the fs_cli healthcheck, the multi-arch build and the entrypoint's
+# environment-variable contract. The FreeSWITCH tag and the sofia-sip pin it
+# carried (v1.11.3, sofia-sip v1.13.18) have since moved to v1.11.4 and
+# sofia-sip v1.13.19 (#709).
 
 # --- pins ---------------------------------------------------------------------
 #
 # FROM-scope. A global ARG is not visible inside a stage; each stage that wants
 # one redeclares it by name, which is why the ARG lines repeat below.
-ARG SOFIASIP_REF=ad36ac8f755308e8b87f98a505e83d4e408e5cc3
+# sofia-sip is the commit of its v1.13.19 tag: FreeSWITCH v1.11.4's configure
+# requires sofia-sip-ua >= 1.13.19.
+ARG SOFIASIP_REF=6dce59d35535e6dd3945c7b0f76dbf1ba884202d
 ARG SPANDSP_REF=8f1e1646bdec99eac5fd2cd92c35563f736b9b89
-ARG FS_VERSION=v1.11.3
+ARG FS_VERSION=v1.11.4
 
 # mod_audio_stream comes from our fork, rasonyang/mod_audio_stream, at a pinned
 # commit. Changes to the module are made there and land here as a new pin.
@@ -120,17 +124,22 @@ ARG MAKE_JOBS
 ENV DEBIAN_FRONTEND=noninteractive
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
+# libminiupnpc-dev and libnatpmp-dev: v1.11.4 removed the copies of both that
+# its source tree used to bundle, and its configure fails without
+# miniupnpc >= 2.1 and natpmp.h. libfreeswitch links both, so the runtime stage
+# installs their libraries (libminiupnpc17, libnatpmp1).
 RUN apt-get update && apt-get install -y --no-install-recommends \
       build-essential autoconf automake libtool libtool-bin pkg-config cmake git ca-certificates \
       libpq-dev libssl-dev libcurl4-openssl-dev libpcre2-dev libspeex-dev libspeexdsp-dev \
       libedit-dev libsqlite3-dev libtiff-dev libjpeg62-turbo-dev uuid-dev libldns-dev \
       libopus-dev liblua5.3-dev libsndfile1-dev libevent-dev zlib1g-dev libjbig-dev \
       libdb-dev libncurses-dev libogg-dev libvorbis-dev libflac-dev yasm \
+      libminiupnpc-dev libnatpmp-dev \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /usr/src
 
-# sofia-sip, pinned.
+# sofia-sip, pinned (v1.13.19).
 RUN git clone https://github.com/freeswitch/sofia-sip.git && cd sofia-sip \
     && git checkout "$SOFIASIP_REF" \
     && ./autogen.sh && ./configure --prefix=/usr/local --with-pic --with-glib=no --without-doxygen --disable-stun \
@@ -255,7 +264,7 @@ LABEL org.opencontainers.image.title="freeswitch-aicc" \
 RUN apt-get update && apt-get install -y --no-install-recommends \
       libpq5 libssl3 libcurl4 libpcre2-8-0 libspeex1 libspeexdsp1 libedit2 libsqlite3-0 libtiff6 \
       libjpeg62-turbo libuuid1 libldns3 libopus0 liblua5.3-0 libsndfile1 libevent-2.1-7 libevent-pthreads-2.1-7 zlib1g \
-      libjbig0 libdb5.3 libncurses6 libtinfo6 ca-certificates procps openssl gosu \
+      libjbig0 libdb5.3 libncurses6 libtinfo6 libminiupnpc17 libnatpmp1 ca-certificates procps openssl gosu \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd -r freeswitch && useradd -r -g freeswitch -d /usr/local/freeswitch -s /usr/sbin/nologin freeswitch
 

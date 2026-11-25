@@ -630,7 +630,7 @@ docker compose logs aicc | grep 'ai conversation started'
 | `postgres` | PostgreSQL 18. Holds `aicc` and mod_callcenter's `aicc_fs` |
 | `aicc` | The application: REST API, event stream, embedded SPA, and the SIP endpoint for AI calls |
 | `lua-role` | Runs once, creates the confined role the switch reads the database with, and exits |
-| `freeswitch` | FreeSWITCH v1.11.3, this repository's own image |
+| `freeswitch` | FreeSWITCH v1.11.4, this repository's own image |
 
 Volumes: `postgres-data`, `recordings` (written by the switch, read by the
 application), `fs-db`, `fs-log`, `app-logs`.

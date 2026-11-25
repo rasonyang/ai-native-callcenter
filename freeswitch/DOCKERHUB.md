@@ -10,12 +10,12 @@
 
 # rasonyang/freeswitch-aicc
 
-FreeSWITCH **v1.11.3**, built from source for [aicc](https://github.com/rasonyang/ai-native-callcenter), an AI-native call center. The module set, the configuration tree and the Lua scripts inside the image come from that repository; every external dependency — PostgreSQL, S3, the voice bot, the PSTN trunk — is injected at container start through environment variables.
+FreeSWITCH **v1.11.4**, built from source for [aicc](https://github.com/rasonyang/ai-native-callcenter), an AI-native call center. The module set, the configuration tree and the Lua scripts inside the image come from that repository; every external dependency — PostgreSQL, S3, the voice bot, the PSTN trunk — is injected at container start through environment variables.
 
 Nothing site-specific is baked in. The image carries no database credential, no ACL subnet belonging to anyone's office, no LAN address and no trunk.
 
 - Platforms: `linux/amd64` and `linux/arm64`
-- FreeSWITCH: tag `v1.11.3` (sofia-sip and spandsp pinned to commits — see the image labels)
+- FreeSWITCH: tag `v1.11.4` (sofia-sip and spandsp pinned to commits — see the image labels)
 - Extra module: `mod_audio_stream` from [rasonyang/mod_audio_stream](https://github.com/rasonyang/mod_audio_stream) at a pinned commit, with `libwsc` linked statically and SpeexDSP linked explicitly
 - Base image: `debian:bookworm-slim`
 
@@ -198,6 +198,6 @@ VERSION=v0.1.0 MAKE_JOBS=3 freeswitch/build.sh                      # emulated b
 VERSION=v0.1.0 SOUNDS=none freeswitch/build.sh                      # no stock sound packs (queue hold music stops working; the aicc prompts stay)
 ```
 
-These are manual builds; a release is built and pushed by `.github/workflows/release.yml`. `VERSION` is required and is the image tag: the application's release tag for the same commit. `FS_REF` (default `v1.11.3`) selects the FreeSWITCH source and is never a tag. The build context is the repository's `freeswitch/` directory as it stands in the working tree. Nothing is read from the machine running the build: the FreeSWITCH and `mod_audio_stream` sources are cloned at pinned refs and the sound files are downloaded at pinned versions and checksummed. A push from a dirty working tree is refused, because `org.opencontainers.image.revision` would then name a commit nobody can check out.
+These are manual builds; a release is built and pushed by `.github/workflows/release.yml`. `VERSION` is required and is the image tag: the application's release tag for the same commit. `FS_REF` (default `v1.11.4`) selects the FreeSWITCH source and is never a tag. The build context is the repository's `freeswitch/` directory as it stands in the working tree. Nothing is read from the machine running the build: the FreeSWITCH and `mod_audio_stream` sources are cloned at pinned refs and the sound files are downloaded at pinned versions and checksummed. A push from a dirty working tree is refused, because `org.opencontainers.image.revision` would then name a commit nobody can check out.
 
 On Apple Silicon, run Colima with `--vz-rosetta` so the amd64 half compiles under Rosetta; QEMU user-mode emulation segfaults gcc at random.

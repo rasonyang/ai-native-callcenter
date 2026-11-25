@@ -27,7 +27,7 @@
 #   VERSION     release tag for the image, required (e.g. v0.1.0, the value
 #               `make image VERSION=...` uses for the application)
 #   IMAGE       image name (default rasonyang/freeswitch-aicc)
-#   FS_REF      FreeSWITCH source tag to build (default v1.11.3); recorded in the
+#   FS_REF      FreeSWITCH source tag to build (default v1.11.4); recorded in the
 #               freeswitch.version label, never used as an image tag
 #   PLATFORM    target platforms (default linux/amd64,linux/arm64)
 #   LOAD        set to 1 to build one platform and --load it into the local
@@ -50,7 +50,7 @@ if [ -z "$VERSION" ]; then
   exit 1
 fi
 IMAGE="${IMAGE:-rasonyang/freeswitch-aicc}"
-FS_REF="${FS_REF:-v1.11.3}"
+FS_REF="${FS_REF:-v1.11.4}"
 PLATFORM="${PLATFORM:-linux/amd64,linux/arm64}"
 LOAD="${LOAD:-}"
 SOUNDS="${SOUNDS:-8000}"
