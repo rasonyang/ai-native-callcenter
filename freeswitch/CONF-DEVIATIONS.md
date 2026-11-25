@@ -1,12 +1,12 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
-# `freeswitch/conf/` versus vanilla FreeSWITCH v1.11.3
+# `freeswitch/conf/` versus vanilla FreeSWITCH v1.11.4
 
 This tree is copied over `/usr/local/freeswitch/conf` in the image. Its baseline
 is upstream, exactly:
 
 ```sh
-git -C <freeswitch-source> archive v1.11.3 conf/vanilla | tar -x -C <scratch>
+git -C <freeswitch-source> archive v1.11.4 conf/vanilla | tar -x -C <scratch>
 ```
 
 Everything below is the complete difference from that. It replaced
@@ -18,6 +18,14 @@ values marked below from the environment.
 Reasoning lives in `docs/design/01-telephony.md` §7 (diffs D1–D8 and the D6a
 amendment). This file is the reviewer's index, so nobody has to diff 180 XML
 files.
+
+The baseline moved from v1.11.3 to v1.11.4 (#709). Between the two tags
+upstream changed two files of `conf/vanilla`, comments only:
+`sip_profiles/internal.xml` gained the commented-out `enable-info-api-request`
+parameter, merged into this tree's copy at vanilla's position, and
+`autoload_configs/verto.conf.xml` gained the commented-out
+`enable-uservars-namespace` parameter and is taken as upstream has it. The
+differences below are unchanged.
 
 ## Files changed
 
@@ -32,7 +40,7 @@ files.
 | `autoload_configs/callcenter.conf.xml` | Stock `support@default` queue removed; `<queues>` empty, commented agent/tier examples renamed to bare `1000` / `support`. Vanilla's settings block and WARNING comments kept. | aicc_xml.lua renders callcenter.conf from the database, but this file is the fallback when that handler declines on an unreachable database — vanilla's queue would then be installed under a name carrying a domain, which mod_callcenter persists. A queue name carries no domain at any layer (C1); an empty block installs nothing. The agent `contact` stays domain-qualified because an endpoint address genuinely is. |
 | `sip_profiles/internal.xml` | `context` `public` → `aicc`. `local-network-acl` `localnet.auto` → `aicc_sip_local`; `aggressive-nat-detection=true` uncommented in place. | The single most load-bearing change. A phone's INVITE takes the profile's context, and in `public` the stock `public_extensions` rule transfers `10xx` into the stock `default` dialplan before any aicc rule is reached — `dialplan/aicc.xml` would be installed, valid, visible to `xml_locate`, and never executed. Design 01 §7 D6a records the three things tried first that did not work. The local network: a phone reaching the container through Docker's port forwarding arrives from the compose network's gateway address, which is private and inside `localnet.auto`. Sofia then took the phone to be on its own link, skipped NAT handling and answered with the container's address (`10.130.0.3`) in the SDP instead of `ext-rtp-ip`: the switch's audio reached the phone, the phone's audio went to an address it cannot reach, and a bot call ended on the media watchdog after 5 s. With only loopback local, every phone is answered with `ext-rtp-ip` (`FS_EXTERNAL_IP`) and RTP auto-adjust follows the address the media actually arrives from; `disable_rtp_auto_adjust` must stay unset. The external profile, which carries the `aicc_bot` gateway, keeps `localnet.auto`, so the bot leg still advertises the container's address. Verified live with two-way audio on Docker Desktop on an Intel Mac, and on 2026-09-28 with a WebRTC browser agent on Ubuntu 24.04.5 x86_64 (Linux host-network overlay, switch image built from main, LAN agent over `ws://`) and on macOS 26.6.2 arm64 (Colima 0.10.3 with the `grpc` port forwarder, macOS shared-namespace overlay). |
 | `sip_profiles/internal-ipv6.xml`, `sip_profiles/external-ipv6.xml`, `sip_profiles/external-ipv6/` | Deleted. | The switch is only ever on the LAN and all public traffic reaches it through the edge SBC, and the product's phones are browser phones over IPv4. With host networking (`compose.linux.yml`, a native install) on a host with a global IPv6 address, both profiles bound that public address whatever `FS_LOCAL_IP` said: `external-ipv6` on 5080 in the `public` context with `auth-calls=false` and no inbound ACL, `internal-ipv6` on 5060, a second way in that skipped the edge. IPv6 toward carriers or remote phones belongs on the edge SBC. `mod_verto` and `mod_enum` are commented out in `modules.conf.xml`, so `verto.conf.xml`'s `[$${local_ip_v6}]` binds and `enum.conf.xml`'s `${use_profile}-ipv6` routes are inert and left as vanilla. (#422) |
-| `vars.xml` | `default_password` → `REPLACE_ME`. Added `aicc_lua_dsn`, `aicc_cc_dsn`, `aicc_bot_host`, `aicc_bot_port`, `aicc_recordings_dir`. `global_codec_prefs`/`outbound_codec_prefs` lose `H264,VP8`. `external_rtp_ip`/`external_sip_ip`: `stun-set` → `set` `$${local_ip_v4}`. Comments added on `domain` and `internal_auth_calls`, and one saying why `aicc_max_call_duration_bot_sec`/`aicc_max_call_duration_agent_sec` are not set here. | Every value added is a placeholder the entrypoint rewrites (`AICC_DB_HOST`, `AICC_LUA_PASSWORD`, `AICC_DB_PASSWORD`, `AICC_BOT_HOST`, `AICC_BOT_PORT`, `AICC_RECORDINGS_DIR`, `AICC_DOMAIN`, `AICC_EXTERNAL_IP`). H264 and VP8 need `mod_av`/`mod_h26x`, which are neither built nor loaded, so every call would negotiate a video codec the switch cannot carry. STUN answers with the address the whole network is seen at from the internet, and the bot leg would be told to send its media out of the host and back — and it means the image reaching a third-party server on every boot. `internal_auth_calls` is already `true` in v1.11.3 and stays true; only a comment was added saying why it must. **`local_ip_v4` is not pinned anywhere** — a pinned one goes stale the first time DHCP moves the box, and presents as every call failing at once with nothing in the logs naming an address. The two maximum-call-duration globals are the application's, set with `global_setvar` on every connect (#637); a `reloadxml` re-applies every `set` in this file over a runtime value (measured on the dev switch, 2026-11-20), so a default here would undo a deployment's cap until the next connect. The scripts carry the defaults instead. |
+| `vars.xml` | `default_password` → `REPLACE_ME`. Added `aicc_lua_dsn`, `aicc_cc_dsn`, `aicc_bot_host`, `aicc_bot_port`, `aicc_recordings_dir`. `global_codec_prefs`/`outbound_codec_prefs` lose `H264,VP8`. `external_rtp_ip`/`external_sip_ip`: `stun-set` → `set` `$${local_ip_v4}`. Comments added on `domain` and `internal_auth_calls`, and one saying why `aicc_max_call_duration_bot_sec`/`aicc_max_call_duration_agent_sec` are not set here. | Every value added is a placeholder the entrypoint rewrites (`AICC_DB_HOST`, `AICC_LUA_PASSWORD`, `AICC_DB_PASSWORD`, `AICC_BOT_HOST`, `AICC_BOT_PORT`, `AICC_RECORDINGS_DIR`, `AICC_DOMAIN`, `AICC_EXTERNAL_IP`). H264 and VP8 need `mod_av`/`mod_h26x`, which are neither built nor loaded, so every call would negotiate a video codec the switch cannot carry. STUN answers with the address the whole network is seen at from the internet, and the bot leg would be told to send its media out of the host and back — and it means the image reaching a third-party server on every boot. `internal_auth_calls` is already `true` in v1.11.4 and stays true; only a comment was added saying why it must. **`local_ip_v4` is not pinned anywhere** — a pinned one goes stale the first time DHCP moves the box, and presents as every call failing at once with nothing in the logs naming an address. The two maximum-call-duration globals are the application's, set with `global_setvar` on every connect (#637); a `reloadxml` re-applies every `set` in this file over a runtime value (measured on the dev switch, 2026-11-20), so a default here would undo a deployment's cap until the next connect. The scripts carry the defaults instead. |
 | `dialplan/public.xml` | Removed `public_extensions` (`10xx`) and `public_conference_extensions` (`3500–3819`). | Both transfer an unauthenticated inbound call into the stock `default` context, and both sit *above* the `public/*.xml` include where this product's doorway lives — an include's position is fixed in the file, not by filename. `3500–3819` is an ordinary four-digit DID range: a deployment handed one would find its calls answered by a stock conference, with nothing in the configuration naming the rule that took them. |
 | `directory/default.xml` | Removed the `sales`/`billing`/`support` groups; kept the domain, its params and the `default` group's glob. | Those groups are `type="pointer"` entries for users 1000–1014, which are deleted below; dangling pointers warn at every boot. See the deletion note for why the users went. |
 
@@ -123,7 +131,7 @@ find freeswitch/conf -name '*.xml' -print0 | xargs -0 python3 -c \
   "import xml.etree.ElementTree as E,sys;[E.parse(p) for p in sys.argv[1:]]"
 
 # the complete difference from the baseline
-git -C <freeswitch-source> archive v1.11.3 conf/vanilla | tar -x -C /tmp/v
+git -C <freeswitch-source> archive v1.11.4 conf/vanilla | tar -x -C /tmp/v
 diff -rq /tmp/v/conf/vanilla freeswitch/conf
 
 # no address or credential from anyone's deployment

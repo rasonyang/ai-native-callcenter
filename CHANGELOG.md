@@ -60,6 +60,16 @@ carries the one-line installer's files.
 
 ### Changed
 
+- **The switch image builds FreeSWITCH v1.11.4, up from v1.11.3** (#709).
+  Upstream describes the release as security fixes and stability
+  improvements; among them is a fix for a crash on mod_lua's concurrent first
+  run, and mod_lua renders the directory and `callcenter.conf` and runs every
+  call's dialplan actions. sofia-sip moves to its v1.13.19 tag, which v1.11.4
+  requires, and the image installs Debian's miniupnpc and libnatpmp libraries,
+  which v1.11.4 no longer bundles. The module set is unchanged. The
+  configuration tree takes upstream's two comment-only changes
+  (`sip_profiles/internal.xml`, `autoload_configs/verto.conf.xml`), so a switch
+  installed natively needs no file copied in for this.
 - Newer `golang.org/x/net` (v0.62.0) and `github.com/klauspost/compress`
   (v1.20.2), past three advisories the vuln scan lists at module level; none
   of them is in code the server calls (#548).
