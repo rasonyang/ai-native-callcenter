@@ -858,8 +858,8 @@ the term too, so the sweep alone does not show the term at work. The case that d
 every callee answers, where each ringing leg is one session to come and the rules are exact: with
 the term, at every window, the bot never reaches into the inbound reserve, nothing overflows and no
 start is refused; without it, at every window, the bot went into its reserve and starts were
-refused. The simulation's rings are whole seconds, so a 50 ms and a 200 ms window order events
-alike. Unit tests on the in-memory store walk the term through every ending and message order, the
+refused. The simulation's rings are whole seconds, so a fixed 50 ms and a fixed 200 ms window
+order events alike. Unit tests on the in-memory store walk the term through every ending and message order, the
 bot rule from the answer to the counted start, a start waiting in the gate, and a restart.
 
 ### 6.4 Take a slot on answer; wait briefly if there is none
