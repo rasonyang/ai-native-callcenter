@@ -201,6 +201,20 @@ type Node struct {
 	// It renders {slots.name} exactly as Instruction does, and it is optional:
 	// most phases leave the wording to the model.
 	Announce Text `json:"announce,omitempty"`
+	// Farewell is the short goodbye a terminal phase declares apart from its
+	// announce (#568): the last sentence or two of the closing line, owed to
+	// the caller on its own. A long announce carries the instructions the call
+	// ends on ("your repair is booked for Thursday"), and a caller who talks
+	// over it gets their question answered and then hears the farewell — the
+	// closing line is re-asked as the farewell alone, and the accounting of
+	// what the caller has heard covers the farewell, so the call still ends on
+	// the goodbye it promised rather than on the model's last answer.
+	//
+	// It is spoken as the tail of the phase's own line: on the wire the
+	// announce and the farewell are one line, the farewell last. Only a
+	// terminal phase may declare one, and only beside an announce — a goodbye
+	// with nothing before it is simply the announce.
+	Farewell Text `json:"farewell,omitempty"`
 	// Tools is the allowlist for this phase. "*" allows everything; empty
 	// allows only the flow's always-available tools.
 	Tools       []string     `json:"tools,omitempty"`

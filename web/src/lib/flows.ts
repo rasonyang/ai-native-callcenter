@@ -67,6 +67,12 @@ export interface FlowNode {
    * it improvises from. Optional: most phases leave the words to the model.
    */
   announce?: FlowText
+  /**
+   * On a terminal phase with an announce: the short goodbye the closing line
+   * ends in, declared apart so a caller who talks over the announce's
+   * instructions is owed only this, not the whole line (#568).
+   */
+  farewell?: FlowText
   tools?: string[]
   transitions?: FlowTransition[]
   isTerminal?: boolean

@@ -166,6 +166,20 @@ carries the one-line installer's files.
   enough, that other columns are ignored unless the flow reads them, and that
   a file edited in Excel can be saved as `.xlsx` and imported as it is.
 
+### Added
+
+- **A terminal phase may split its closing line into an `announce` and a
+  `farewell`** (#568). With only an `announce`, a caller who talked over a long
+  closing line twice got their question answered and the call ended with no
+  goodbye at all: the whole announce was the line they were owed, and the
+  second interruption counted it as said. A terminal phase may now declare a
+  short `farewell` beside its `announce` — the phase speaks the two as one
+  line, announce then farewell, and the farewell alone is what the caller is
+  owed: a cut inside the instructions leaves it owed and it is re-asked on its
+  own, short enough to be heard before the next interruption ends the call.
+  Load rejects a `farewell` on a non-terminal phase or beside no announce, and
+  flows that declare none are unchanged.
+
 ### Changed
 
 - **The switch image builds FreeSWITCH v1.11.4, up from v1.11.3** (#709).

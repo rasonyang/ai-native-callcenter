@@ -588,7 +588,7 @@ func sessionConfigFor(spec *flow.Spec, runtime *flow.Runtime, language string) p
 		Temperature: spec.Global.Temperature,
 		Turn:        provider.DefaultTurnDetection(),
 		Tools:       runtime.Tools(),
-		OpeningText: runtime.Announce(),
+		OpeningText: runtime.TerminalLine(),
 	}
 }
 
@@ -1170,7 +1170,7 @@ func (o *Orchestrator) answerToolCall(ctx context.Context, event Event, batch *t
 	// line replaces it, in the language the line is written in. The phase's
 	// instruction still reaches the model, as the standing instructions.
 	output = provider.MergeHint(output,
-		provider.SayExactly(runtime.Announce(), runtime.Engine().Lang()))
+		provider.SayExactly(runtime.TerminalLine(), runtime.Engine().Lang()))
 	recorder.toolResult(event.ToolName, output, moved)
 
 	// Before the answer, both of them. The instructions first, so the turn the
@@ -1407,6 +1407,9 @@ func (o *Orchestrator) sayPhaseLine(session *Session, runtime *flow.Runtime,
 	log *slog.Logger) bool {
 
 	line := runtime.Announce()
+	if runtime.Engine().IsTerminal() {
+		line = runtime.TerminalLine()
+	}
 	if line == "" {
 		return false
 	}
@@ -1542,8 +1545,8 @@ func (o *Orchestrator) enterPhase(moved string, session *Session,
 		// that says something else, from ending the call
 		// (callActions.expectClosingLine). Doubao says its line itself and is
 		// not asked to.
-		if runtime.Announce() != "" && !o.cfg.Profile.RequiresTerminalAnnounce {
-			actions.expectClosingLine(runtime.Announce())
+		if runtime.OwedLine() != "" && !o.cfg.Profile.RequiresTerminalAnnounce {
+			actions.expectClosingLine(runtime.OwedLine(), runtime.TerminalLine())
 		}
 	}
 }
