@@ -175,7 +175,7 @@ func (r *termRig) term() (n, want int) {
 	if err := r.d.run(context.Background(), func(context.Context) {
 		n = r.d.unstarted
 		for _, f := range r.d.flights {
-			if f.isAnswered && !f.sessionCounted {
+			if f.isAnswered && !f.isSessionCounted {
 				want++
 			}
 		}

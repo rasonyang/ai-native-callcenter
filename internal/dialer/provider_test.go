@@ -323,12 +323,12 @@ type providerScenario struct {
 	isGated, isStartGated bool
 	// startWindow is how long an answered leg stands between the answer and
 	// its counted session start (#640); hangupInWindow is the share of
-	// answered calls whose callee hangs up inside it; jitterWindow draws each
+	// answered calls whose callee hangs up inside it; isWindowJittered draws each
 	// call's span in [startWindow/2, 3·startWindow/2) instead of fixing it.
-	startWindow    time.Duration
-	hangupInWindow float64
-	jitterWindow   bool
-	warmUp, d      time.Duration
+	startWindow      time.Duration
+	hangupInWindow   float64
+	isWindowJittered bool
+	warmUp, d        time.Duration
 }
 
 func runAgainstProvider(t *testing.T, isGated bool, prov simProvider, capacity, sessionRPM, tokenRPM int, warmUp, d time.Duration) providerRun {
@@ -345,7 +345,7 @@ func runScenario(t *testing.T, sc providerScenario) providerRun {
 		isGated: sc.isGated, isStartGated: sc.isStartGated,
 		sessionLimit: sc.quota.sessionLimit, sessionPeriod: sc.quota.sessionPeriod,
 		tokenLimit: sc.quota.tokenLimit, tokenPeriod: sc.quota.tokenPeriod,
-		startWindow: sc.startWindow, hangupInWindow: sc.hangupInWindow, jitterWindow: sc.jitterWindow})
+		startWindow: sc.startWindow, hangupInWindow: sc.hangupInWindow, isWindowJittered: sc.isWindowJittered})
 	p.measureFrom = s.start.Add(sc.warmUp)
 	s.run(sc.d)
 	s.checkTerm()
@@ -381,98 +381,6 @@ func runScenario(t *testing.T, sc providerScenario) providerRun {
 // the share they leave is chance unless the run holds many starts: scaled down
 // to 20 connects a minute for 15 minutes, 9 seeds in 100 went over 2%; at the
 // documented rate for half an hour, none of 300 did (#604).
-// The window of #640 between an answer and its counted session start — the
-// reservation, the INVITE, +OK, the provider session: production's dialer
-// hears of the answer first, and for that span the leg was in none of the
-// counts either rule read. With the unstarted term covering it, the
-// connect-rate gate keeps refusals within the windowless bound at every
-// window a deployment measures, callees hanging up inside it included; the
-// rate is still used.
-func TestTheConnectRateGateHoldsAcrossTheSessionStartWindow(t *testing.T) {
-	const rate, capacity, minutes = 60, 160, 8
-	for _, window := range []time.Duration{0, 50 * time.Millisecond, 200 * time.Millisecond, time.Second} {
-		hang := 0.0
-		if window > 0 {
-			hang = 0.15
-		}
-		for _, jit := range []bool{false, true} {
-			if window == 0 && jit {
-				continue
-			}
-			for _, seed := range []int64{21, 42, 77} {
-				run := runScenario(t, providerScenario{seed: seed, prov: simProvider{connectLimit: rate},
-					capacity: capacity, quota: perMinute(rate, 0), isGated: true,
-					startWindow: window, hangupInWindow: hang, jitterWindow: jit, d: minutes * time.Minute})
-				t.Logf("window %4s jitter=%v seed %d: %d starts, %d refused", window, jit, seed, run.starts, run.refusals)
-				if run.refusals*50 > run.starts {
-					t.Errorf("window %s jitter=%v seed %d: %d of %d starts were refused, want at most 2%%",
-						window, jit, seed, run.refusals, run.starts)
-				}
-				if run.starts < minutes*rate/2 {
-					t.Errorf("window %s jitter=%v seed %d: only %d starts in %d minutes: the connect rate of %d a minute is left unused",
-						window, jit, seed, run.starts, minutes, rate)
-				}
-			}
-		}
-	}
-}
-
-// The window of #640 where the rules are exact: every callee answers, so the
-// answer-rate bound stays 1 and each ringing leg is one session to come. A leg
-// in the window that no count saw would let admission place one call more
-// than the bot or the provider can take, at every answer. With the term, at
-// every window, fixed or jittered, with callees hanging up inside it, the bot
-// never reaches into the inbound reserve, nothing overflows and no start is
-// refused, as with no window, and both are still used. Without the term the
-// same runs took the bot into its reserve and had starts refused at every
-// window.
-func TestWithEveryCalleeAnsweringTheWindowAdmitsNoCallTheRulesCannotHold(t *testing.T) {
-	const capacity, reserve, rate, minutes = 60, 6, 20, 10
-	for _, window := range []time.Duration{0, 50 * time.Millisecond, 200 * time.Millisecond, time.Second} {
-		hang := 0.0
-		if window > 0 {
-			hang = 0.15
-		}
-		for _, jit := range []bool{false, true} {
-			if window == 0 && jit {
-				continue
-			}
-			name := fmt.Sprintf("window %s jitter=%v", window, jit)
-			bot := newSim(t, simSpec{capacity: capacity, inboundReserve: reserve, campaigns: 1, seed: 1, maxConcurrent: 1000,
-				rates:       []func(time.Duration) float64{constRate(1)},
-				startWindow: window, hangupInWindow: hang, jitterWindow: jit})
-			bot.run(2 * minutes * time.Minute)
-			bot.checkTerm()
-			overflows := bot.store.count(bot.store.camps[0].ID, campaign.OutcomeOverflow)
-			t.Logf("%s, bot rule: %d calls, peak %d sessions, %d overflowed", name, bot.placements, bot.peakInUse, overflows)
-			if overflows != 0 || bot.peakInUse > capacity-reserve {
-				t.Errorf("%s: %d calls overflowed and the bot peaked at %d sessions, want none and at most %d",
-					name, overflows, bot.peakInUse, capacity-reserve)
-			}
-			if bot.placements < 500 {
-				t.Errorf("%s: only %d calls placed in %d minutes: the bot is left unused", name, bot.placements, 2*minutes)
-			}
-
-			p := simProvider{connectLimit: rate}
-			prov := newSim(t, simSpec{capacity: 400, inboundReserve: 4, campaigns: 1, seed: 1, maxConcurrent: 1000,
-				rates: []func(time.Duration) float64{constRate(1)}, provider: &p,
-				isGated: true, sessionLimit: rate, sessionPeriod: time.Minute,
-				startWindow: window, hangupInWindow: hang, jitterWindow: jit})
-			prov.run(minutes * time.Minute)
-			prov.checkTerm()
-			starts := p.accepted + p.refuse
-			t.Logf("%s, provider rule: %d starts, %d refused", name, starts, p.refuse)
-			if p.refuse != 0 {
-				t.Errorf("%s: %d of %d starts were refused, want none", name, p.refuse, starts)
-			}
-			if starts*5 < minutes*rate*4 {
-				t.Errorf("%s: only %d starts in %d minutes: the connect rate of %d a minute is left unused",
-					name, starts, minutes, rate)
-			}
-		}
-	}
-}
-
 func TestTheConnectRateGateKeepsRefusalsNearZero(t *testing.T) {
 	const rate, capacity, minutes = 60, 160, 30
 	prov := simProvider{connectLimit: rate}
@@ -570,5 +478,99 @@ func TestTheStartGateKeepsRefusalsNearZeroOverShortPeriods(t *testing.T) {
 	}
 	if gated.longestWait > ratemeter.StartWaitBound {
 		t.Errorf("a start waited %s, past the bound of %s", gated.longestWait, ratemeter.StartWaitBound)
+	}
+}
+
+// The window of #640 between an answer and its counted session start — the
+// reservation, the INVITE, +OK, the provider session: production's dialer
+// hears of the answer first, and for that span the leg was in none of the
+// counts either rule read. With the unstarted term covering it, the
+// connect-rate gate keeps refusals within the windowless bound at every
+// window a deployment measures, callees hanging up inside it included; the
+// rate is still used. Over these runs it passes without the term as well, so
+// it guards the window from making things worse; the test below is the one
+// the term is needed for.
+func TestTheConnectRateGateHoldsAcrossTheSessionStartWindow(t *testing.T) {
+	const rate, capacity, minutes = 60, 160, 8
+	for _, window := range []time.Duration{0, 50 * time.Millisecond, 200 * time.Millisecond, time.Second} {
+		hang := 0.0
+		if window > 0 {
+			hang = 0.15
+		}
+		for _, jit := range []bool{false, true} {
+			if window == 0 && jit {
+				continue
+			}
+			for _, seed := range []int64{21, 42, 77} {
+				run := runScenario(t, providerScenario{seed: seed, prov: simProvider{connectLimit: rate},
+					capacity: capacity, quota: perMinute(rate, 0), isGated: true,
+					startWindow: window, hangupInWindow: hang, isWindowJittered: jit, d: minutes * time.Minute})
+				t.Logf("window %4s jitter=%v seed %d: %d starts, %d refused", window, jit, seed, run.starts, run.refusals)
+				if run.refusals*50 > run.starts {
+					t.Errorf("window %s jitter=%v seed %d: %d of %d starts were refused, want at most 2%%",
+						window, jit, seed, run.refusals, run.starts)
+				}
+				if run.starts < minutes*rate/2 {
+					t.Errorf("window %s jitter=%v seed %d: only %d starts in %d minutes: the connect rate of %d a minute is left unused",
+						window, jit, seed, run.starts, minutes, rate)
+				}
+			}
+		}
+	}
+}
+
+// The window of #640 where the rules are exact: every callee answers, so the
+// answer-rate bound stays 1 and each ringing leg is one session to come. A leg
+// in the window that no count saw would let admission place one call more
+// than the bot or the provider can take, at every answer. With the term, at
+// every window, fixed or jittered, with callees hanging up inside it, the bot
+// never reaches into the inbound reserve, nothing overflows and no start is
+// refused, as with no window, and both are still used. Without the term the
+// same runs took the bot into its reserve and had starts refused at every
+// window.
+func TestWithEveryCalleeAnsweringTheWindowAdmitsNoCallTheRulesCannotHold(t *testing.T) {
+	const capacity, reserve, rate, minutes = 60, 6, 20, 10
+	for _, window := range []time.Duration{0, 50 * time.Millisecond, 200 * time.Millisecond, time.Second} {
+		hang := 0.0
+		if window > 0 {
+			hang = 0.15
+		}
+		for _, jit := range []bool{false, true} {
+			if window == 0 && jit {
+				continue
+			}
+			name := fmt.Sprintf("window %s jitter=%v", window, jit)
+			bot := newSim(t, simSpec{capacity: capacity, inboundReserve: reserve, campaigns: 1, seed: 1, maxConcurrent: 1000,
+				rates:       []func(time.Duration) float64{constRate(1)},
+				startWindow: window, hangupInWindow: hang, isWindowJittered: jit})
+			bot.run(2 * minutes * time.Minute)
+			bot.checkTerm()
+			overflows := bot.store.count(bot.store.camps[0].ID, campaign.OutcomeOverflow)
+			t.Logf("%s, bot rule: %d calls, peak %d sessions, %d overflowed", name, bot.placements, bot.peakInUse, overflows)
+			if overflows != 0 || bot.peakInUse > capacity-reserve {
+				t.Errorf("%s: %d calls overflowed and the bot peaked at %d sessions, want none and at most %d",
+					name, overflows, bot.peakInUse, capacity-reserve)
+			}
+			if bot.placements < 500 {
+				t.Errorf("%s: only %d calls placed in %d minutes: the bot is left unused", name, bot.placements, 2*minutes)
+			}
+
+			p := simProvider{connectLimit: rate}
+			prov := newSim(t, simSpec{capacity: 400, inboundReserve: 4, campaigns: 1, seed: 1, maxConcurrent: 1000,
+				rates: []func(time.Duration) float64{constRate(1)}, provider: &p,
+				isGated: true, sessionLimit: rate, sessionPeriod: time.Minute,
+				startWindow: window, hangupInWindow: hang, isWindowJittered: jit})
+			prov.run(minutes * time.Minute)
+			prov.checkTerm()
+			starts := p.accepted + p.refuse
+			t.Logf("%s, provider rule: %d starts, %d refused", name, starts, p.refuse)
+			if p.refuse != 0 {
+				t.Errorf("%s: %d of %d starts were refused, want none", name, p.refuse, starts)
+			}
+			if starts*5 < minutes*rate*4 {
+				t.Errorf("%s: only %d starts in %d minutes: the connect rate of %d a minute is left unused",
+					name, starts, minutes, rate)
+			}
+		}
 	}
 }

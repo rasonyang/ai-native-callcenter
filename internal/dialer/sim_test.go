@@ -279,11 +279,11 @@ type sim struct {
 	inbound int
 	hold    time.Duration
 	// startWindow and hangupInWindow model the production window between an
-	// answer and the leg's counted session start (#640); jitterWindow draws
+	// answer and the leg's counted session start (#640); isWindowJittered draws
 	// each call's span instead of fixing it.
-	startWindow    time.Duration
-	hangupInWindow float64
-	jitterWindow   bool
+	startWindow      time.Duration
+	hangupInWindow   float64
+	isWindowJittered bool
 
 	// accounting
 	lastAt        time.Time
@@ -382,9 +382,9 @@ type simSpec struct {
 	// hangs up inside it.
 	startWindow    time.Duration
 	hangupInWindow float64
-	// jitterWindow draws each answered call's window uniformly in
+	// isWindowJittered draws each answered call's window uniformly in
 	// [startWindow/2, 3·startWindow/2) instead of the fixed span.
-	jitterWindow bool
+	isWindowJittered bool
 }
 
 func newSim(t *testing.T, sp simSpec) *sim {
@@ -441,7 +441,7 @@ func newSim(t *testing.T, sp simSpec) *sim {
 	s.prov = sp.provider
 	s.startWindow = sp.startWindow
 	s.hangupInWindow = sp.hangupInWindow
-	s.jitterWindow = sp.jitterWindow
+	s.isWindowJittered = sp.isWindowJittered
 	meterCfg := ratemeter.Config{SessionPeriod: sp.sessionPeriod, TokenPeriod: sp.tokenPeriod, AfterFunc: s.afterFunc}
 	if sp.isStartGated {
 		meterCfg.SessionLimit = sp.sessionLimit
@@ -559,7 +559,7 @@ func (s *sim) step(until time.Time) bool {
 			// applied.
 			s.mu.Lock()
 			w := s.startWindow
-			if s.jitterWindow {
+			if s.isWindowJittered {
 				w = w/2 + time.Duration(s.rng.Int63n(int64(w)))
 			}
 			if s.hangupInWindow > 0 && s.rng.Float64() < s.hangupInWindow {
@@ -782,7 +782,7 @@ func (s *sim) checkTerm() {
 	s.t.Helper()
 	want := 0
 	for _, f := range s.d.flights {
-		if f.isAnswered && !f.sessionCounted {
+		if f.isAnswered && !f.isSessionCounted {
 			want++
 		}
 	}

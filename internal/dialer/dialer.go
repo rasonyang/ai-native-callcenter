@@ -333,11 +333,11 @@ type flight struct {
 	ring       time.Duration
 	nextCheck  time.Time
 	isAnswered bool
-	// sessionCounted is set when the leg's provider session start was
+	// isSessionCounted is set when the leg's provider session start was
 	// counted on the rate meter (#640): until then the leg stands in the
 	// dialer's unstarted term, since it is in none of the counts
 	// voice.Usage offers admission.
-	sessionCounted bool
+	isSessionCounted bool
 }
 
 // New builds the dialer; Run starts it.
@@ -659,8 +659,8 @@ func (d *Dialer) handle(ctx context.Context, m any) {
 			d.isDirty = true // a leg that stopped ringing frees a place in the ringing cap
 		}
 	case sessionCountedMsg:
-		if f := d.flights[uuid.UUID(m)]; f != nil && f.isAnswered && !f.sessionCounted {
-			f.sessionCounted = true
+		if f := d.flights[uuid.UUID(m)]; f != nil && f.isAnswered && !f.isSessionCounted {
+			f.isSessionCounted = true
 			d.unstarted--
 			// A leg whose slot is taken counted in InUse and here: the bot
 			// rule has a place again, and no other event may come to say so.

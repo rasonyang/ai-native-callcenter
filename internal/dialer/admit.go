@@ -684,7 +684,7 @@ func (d *Dialer) drop(callID uuid.UUID) *flight {
 	}
 	if f.isAnswered {
 		d.talking--
-		if !f.sessionCounted {
+		if !f.isSessionCounted {
 			d.unstarted--
 		}
 		obsInFlight(true, -1)
