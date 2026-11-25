@@ -243,6 +243,7 @@ func init() {
 			"lead guard judged them before they ran, by reason and provider. Refused: "+
 			"OPENING_UNHEARD (the caller's words began before they had heard the opening to "+
 			"its final clause), DECLINED (the final transcript was only refusal phrases), "+
+			"LINE_CHECK_ANSWER (the caller's words answered a line-check question), "+
 			"NO_FINAL (none within the wait), BLANK_FINAL, NO_CALLER_TURN (the caller had "+
 			"said nothing), MACHINE_WORDING (the call is marked as answered by a machine, "+
 			"#409; over an ending under way it runs and counts the same). Ran: WORDS (any "+
@@ -775,6 +776,9 @@ const (
 	// LeadGuardMachineWording: the call is marked as answered by a machine
 	// (#409); refused, unless the call's ending is under way.
 	LeadGuardMachineWording = "MACHINE_WORDING"
+	// LeadGuardLineCheck: the caller's words answered a line-check question
+	// (#715); refused.
+	LeadGuardLineCheck = "LINE_CHECK_ANSWER"
 )
 
 // The kinds of machine whose wording marks a call as answered by one

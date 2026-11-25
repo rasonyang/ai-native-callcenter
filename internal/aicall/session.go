@@ -1659,6 +1659,9 @@ func (s *Session) beginTurn(isSpokenLine, isLineAskedAgain bool) {
 		s.isReplayOwed = false
 		s.replayTurn = s.turnSeq
 	}
+	if s.isOpeningTurnLocked(s.turnSeq) {
+		s.ct.setLastBotLine(botLineOffer)
+	}
 	switch {
 	case s.isAsideOwed:
 		s.isAsideOwed = false
@@ -1750,6 +1753,10 @@ func (s *Session) noteBotWords(text string, isFinal bool) {
 		text = text[:room]
 	}
 	s.turnText = append(s.turnText, text...)
+	if !s.isOpeningTurnLocked(s.turnSeq) && s.mutedTurn != s.turnSeq &&
+		isLineCheckLine(s.cfg.Session.Language, string(s.turnText)) {
+		s.ct.setLastBotLine(botLineLineCheck)
+	}
 }
 
 // turnWords is the words of the turn in progress so far.
@@ -1848,15 +1855,27 @@ func (s *Session) finishTurn(isAbandoned bool) (hasAudio bool) {
 	s.drainGeneration++
 	s.logMuted()
 	hasAudio = s.framesQueued > 0
+	var lineKind botLineKind
 	if hasAudio {
 		s.audioTurns++
 		s.lastAudioTurn = s.turnSeq
+		if s.mutedTurn != s.turnSeq {
+			switch {
+			case s.isOpeningTurnLocked(s.turnSeq):
+				lineKind = botLineOffer
+			case isLineCheckLine(s.cfg.Session.Language, string(s.turnText)):
+				lineKind = botLineLineCheck
+			default:
+				lineKind = botLineOther
+			}
+			s.ct.setLastBotLine(lineKind)
+		}
 	}
 	if isAbandoned && !hasAudio {
 		s.timer.onResponseAbandoned()
 	}
 	marker := playbackMarker{generation: s.drainGeneration, turn: s.turnSeq, hasAudio: hasAudio,
-		isAside: s.asideTurn != 0 && s.turnSeq == s.asideTurn}
+		isAside: s.asideTurn != 0 && s.turnSeq == s.asideTurn, lineKind: lineKind}
 	s.mu.Unlock()
 
 	select {
@@ -1875,6 +1894,8 @@ type playbackMarker struct {
 	hasAudio bool
 	// isAside says the turn said an aside (SpeakAside).
 	isAside bool
+	// lineKind is what the turn said, for the lead guard (#715).
+	lineKind botLineKind
 }
 
 //
@@ -1910,7 +1931,7 @@ func (s *Session) watchPlayback() {
 		if !drained {
 			continue
 		}
-		s.noteOpeningHeard(marker.turn, marker.hasAudio)
+		s.noteOpeningHeard(marker.turn, marker.hasAudio, marker.lineKind)
 		s.emit(Event{Type: EventTypePlaybackDone, Turn: marker.turn, HasAudio: marker.hasAudio,
 			IsAside: marker.isAside})
 		if s.afterPlaybackDone != nil {

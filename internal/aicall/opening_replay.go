@@ -222,12 +222,14 @@ func (s *Session) clearOpeningOwed() {
 }
 
 // noteOpeningHeard is told that a turn finished playing to the caller in full.
-// A turn after the cut that made the opening owed, with audio, not muted,
-// clears it: the caller has been answered since.
-func (s *Session) noteOpeningHeard(turn int, hasAudio bool) {
-	if !hasAudio || s.isMutedTurn(turn) {
+// A turn after the cut that made the opening owed, with audio, not muted, and
+// not a line-check line (#715), marks the offer as heard and clears
+// isOpeningOwed: the caller has heard the offer or been answered since.
+func (s *Session) noteOpeningHeard(turn int, hasAudio bool, lineKind botLineKind) {
+	if !hasAudio || s.isMutedTurn(turn) || lineKind == botLineLineCheck {
 		return
 	}
+	s.ct.setOfferHeard(true)
 	s.bc.mu.Lock()
 	if s.bc.isOpeningOwed && turn > s.bc.owedAfterTurn {
 		s.bc.isOpeningOwed = false

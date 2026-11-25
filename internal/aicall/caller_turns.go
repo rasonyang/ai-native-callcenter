@@ -40,6 +40,15 @@ const maxCallerTurns = 8
 // caller and reports the speech after it, in the same moment.
 const openingCutWindow = time.Second
 
+// botLineKind names what the bot's turn said, for the lead guard (#715).
+type botLineKind string
+
+const (
+	botLineOffer     botLineKind = "OFFER"
+	botLineLineCheck botLineKind = "LINE_CHECK"
+	botLineOther     botLineKind = "OTHER"
+)
+
 // callerTurn is one caller utterance as the lead guard knows it. Its fields
 // are guarded by callerTurns.mu; seq and done never change.
 type callerTurn struct {
@@ -57,6 +66,9 @@ type callerTurn struct {
 	// or while a cut opening was owed, before the caller had heard the
 	// opening's final clause (isOverUnheardOpening, noteOpeningCut).
 	isOpeningUnheard bool
+	// answeredLineKind is what the bot had last said when this utterance began
+	// (OFFER, LINE_CHECK, OTHER).
+	answeredLineKind botLineKind
 	// The final transcript, when it came, and when.
 	isFinal bool
 	text    string
@@ -82,6 +94,70 @@ type callerTurns struct {
 	// as answered by one (obs.Machine*, machine_wording.go), empty while it is
 	// not marked. Set once and never cleared.
 	machineCategory string
+	// offerHeard says the opening's offer has been heard to its final clause
+	// (or a non-line-check turn finished playing after a cut). Reset on a cut
+	// before the opening's final clause; never set by a line-check line (#715).
+	offerHeard bool
+	// lastBotLine is the kind of the latest audible bot turn (OFFER,
+	// LINE_CHECK, OTHER).
+	lastBotLine botLineKind
+}
+
+// setLastBotLine records the kind of the latest bot line.
+func (c *callerTurns) setLastBotLine(kind botLineKind) {
+	c.mu.Lock()
+	c.lastBotLine = kind
+	c.mu.Unlock()
+}
+
+// setOfferHeard records whether the offer has been heard.
+func (c *callerTurns) setOfferHeard(heard bool) {
+	c.mu.Lock()
+	c.offerHeard = heard
+	c.mu.Unlock()
+}
+
+// isOfferHeard reports whether the caller has heard the offer: always true
+// when the call has no opening line.
+func (s *Session) isOfferHeard() bool {
+	if s.cfg.Session.OpeningText == "" {
+		return true
+	}
+	s.ct.mu.Lock()
+	heard := s.ct.offerHeard
+	s.ct.mu.Unlock()
+	if heard {
+		return true
+	}
+	s.mu.Lock()
+	isDone := s.isOpeningTurnLocked(s.turnSeq) && !s.isResponding && !s.isBotSpeaking &&
+		s.framesQueued > 0 && s.leg.Pending() == 0
+	s.mu.Unlock()
+	if !isDone {
+		return false
+	}
+	s.bc.mu.Lock()
+	isOwed := s.bc.isOpeningOwed
+	s.bc.mu.Unlock()
+	if isOwed {
+		return false
+	}
+	s.ct.setOfferHeard(true)
+	return true
+}
+
+// callerLineKind reports what bot line kind the given caller turn answered, or
+// the session's latest bot line kind when t is nil.
+func (s *Session) callerLineKind(t *callerTurn) botLineKind {
+	s.ct.mu.Lock()
+	defer s.ct.mu.Unlock()
+	if t != nil && t.answeredLineKind != "" {
+		return t.answeredLineKind
+	}
+	if s.ct.lastBotLine != "" {
+		return s.ct.lastBotLine
+	}
+	return botLineOther
 }
 
 // noteCallerStarted records a caller utterance starting. It is called before
@@ -95,9 +171,13 @@ func (s *Session) noteCallerStarted(itemID string) {
 		isUnheard = isUnheard || now.Sub(s.ct.openingCutAt) <= openingCutWindow
 		s.ct.openingCutAt = time.Time{}
 	}
+	lineKind := s.ct.lastBotLine
+	if lineKind == "" {
+		lineKind = botLineOther
+	}
 	s.ct.seq++
 	s.ct.add(&callerTurn{seq: s.ct.seq, itemID: itemID, isOpeningUnheard: isUnheard,
-		done: make(chan struct{})})
+		answeredLineKind: lineKind, done: make(chan struct{})})
 }
 
 // isOverUnheardOpening reports whether caller speech starting now begins
@@ -128,14 +208,26 @@ func (s *Session) isOverUnheardOpening() bool {
 			return true
 		}
 		_, isHeard := cutInFinalClause(s.cfg.Session.OpeningText, played, unplayed)
+		if isHeard {
+			s.ct.setOfferHeard(true)
+		}
 		return !isHeard
 	}
 	if s.isHolding() {
 		return false
 	}
 	s.bc.mu.Lock()
-	defer s.bc.mu.Unlock()
-	return s.bc.isOpeningOwed
+	isOwed := s.bc.isOpeningOwed
+	s.bc.mu.Unlock()
+	if !isOwed && isLine && pending == 0 {
+		s.mu.Lock()
+		finished := !s.isResponding && !s.isBotSpeaking && s.framesQueued > 0
+		s.mu.Unlock()
+		if finished {
+			s.ct.setOfferHeard(true)
+		}
+	}
+	return isOwed
 }
 
 // noteOpeningCut is told of a cut over the opening (openCut, an engine that
@@ -146,8 +238,10 @@ func (s *Session) isOverUnheardOpening() bool {
 // is marked (openingCutWindow).
 func (s *Session) noteOpeningCut(cut *openCut) {
 	if _, isHeard := s.openingHeardToItsEnd(cut); isHeard {
+		s.ct.setOfferHeard(true)
 		return
 	}
+	s.ct.setOfferHeard(false)
 	s.ct.mu.Lock()
 	defer s.ct.mu.Unlock()
 	if n := len(s.ct.list); n > 0 && !s.ct.list[n-1].isStopped {
@@ -181,8 +275,13 @@ func (s *Session) noteCallerAnswerAsked(itemID string) {
 		t = s.ct.oldest(func(t *callerTurn) bool { return !t.isAnswerAsked && !t.isDeclined })
 	}
 	if t == nil {
+		lineKind := s.ct.lastBotLine
+		if lineKind == "" {
+			lineKind = botLineOther
+		}
 		s.ct.seq++
-		t = &callerTurn{seq: s.ct.seq, itemID: itemID, done: make(chan struct{})}
+		t = &callerTurn{seq: s.ct.seq, itemID: itemID, answeredLineKind: lineKind,
+			done: make(chan struct{})}
 		s.ct.add(t)
 	}
 	t.isStopped, t.isAnswerAsked = true, true
@@ -220,9 +319,13 @@ func (s *Session) noteCallerFinal(itemID, text string, isDeclined bool) {
 		t = s.ct.oldest(func(t *callerTurn) bool { return !t.isFinal })
 	}
 	if t == nil {
+		lineKind := s.ct.lastBotLine
+		if lineKind == "" {
+			lineKind = botLineOther
+		}
 		s.ct.seq++
 		t = &callerTurn{seq: s.ct.seq, itemID: itemID, isStopped: true, isAnswerAsked: !isDeclined,
-			done: make(chan struct{})}
+			answeredLineKind: lineKind, done: make(chan struct{})}
 		s.ct.add(t)
 	}
 	t.isFinal, t.text, t.finalAt = true, text, time.Now()

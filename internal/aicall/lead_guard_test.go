@@ -1466,3 +1466,195 @@ func TestTheRefusalClassifier(t *testing.T) {
 		}
 	}
 }
+
+// #715: a cut of the opening followed by a line-check line and a line
+// confirmation must not record a lead, because the callee has not heard the
+// offer and only confirmed the line.
+func TestLineCheckAfterCutRefusesAgreementAndRecordsNoLead(t *testing.T) {
+	r := newLeadRig(t, leadRigOptions{opening: heldOpeningLine})
+	r.openingGenerated(t)
+	r.heard(170) // 3.4 s into the 11 s opening, before the final clause
+	r.speechStarted("u1")
+	waitFor(t, "the cut", func() bool {
+		r.session.bc.mu.Lock()
+		defer r.session.bc.mu.Unlock()
+		return r.session.bc.cut != nil
+	})
+	r.leg.holdFrames(0)
+	r.speechStopped("u1")
+	r.started()
+	r.final("u1", "喂？")
+	// Bot says a line-check line in full.
+	r.speaks("喂，能听到吗？")
+	r.ended()
+	waitFor(t, "the line-check playback", func() bool {
+		r.session.mu.Lock()
+		defer r.session.mu.Unlock()
+		return !r.session.isBotSpeaking && r.session.leg.Pending() == 0
+	})
+
+	// Callee confirms the line; model calls the agreement tool.
+	r.callerSpoke("u2")
+	r.final("u2", "听得到。")
+	r.started()
+	r.agree("fc_line_check")
+	r.ended()
+
+	out := r.result(t, 1)
+	if strings.Contains(out, `"ok":"1"`) {
+		t.Fatalf("agreement tool ran on a line-check answer: %s", out)
+	}
+	if got := r.leads.intents(); len(got) != 0 {
+		t.Errorf("leads written = %v, want none", got)
+	}
+	r.assertLine(t, 1, "isRefused=true", "offerHeard=false", "lastBotLineKind=LINE_CHECK")
+}
+
+// #715: opening cut at 3.1 s, replayed, cut again, followed by a line-check
+// line and a line confirmation: agreement must still be refused.
+func TestLineCheckAfterReplayedOpeningCutRefusesAgreement(t *testing.T) {
+	r := newLeadRig(t, leadRigOptions{opening: heldOpeningLine})
+	frameBytes := r.openingGenerated(t)
+	r.heard(155) // 3.1 s
+	r.speechStarted("u1")
+	waitFor(t, "the cut", func() bool {
+		r.session.bc.mu.Lock()
+		defer r.session.bc.mu.Unlock()
+		return r.session.bc.cut != nil
+	})
+	r.leg.holdFrames(0)
+	r.speechStopped("u1")
+	r.started()
+	r.final("u1", "好吧。")
+	r.agree("fc_1")
+	r.result(t, 1)
+	waitFor(t, "the opening to be said again", func() bool { return len(r.model.spokenLines()) >= 1 })
+	r.ended()
+
+	// Replay is cut again before its final clause.
+	r.leg.holdFrames(40)
+	r.send(provider.Event{Type: provider.EventTypeResponseStarted, IsSpokenLine: true})
+	r.send(provider.Event{Type: provider.EventTypeAudioDelta, Audio: make([]byte, 50*frameBytes)})
+	r.send(provider.Event{Type: provider.EventTypeInterrupted, InterruptedBy: provider.InterruptReasonSpeech})
+	waitFor(t, "the cut of the replay", func() bool {
+		r.session.bc.mu.Lock()
+		defer r.session.bc.mu.Unlock()
+		return r.session.bc.cut != nil && r.session.bc.cut.event.Turn == 3 && r.session.bc.cut.isOpening
+	})
+	r.leg.holdFrames(0)
+	r.callerSpoke("u2")
+	r.final("u2", "喂？")
+	r.started()
+	r.speaks("喂，能听清吗？")
+	r.ended()
+
+	// Callee confirms the line; model calls the agreement tool.
+	r.callerSpoke("u3")
+	r.final("u3", "可以听到。")
+	r.started()
+	r.agree("fc_2")
+	r.ended()
+
+	out := r.result(t, 2)
+	if strings.Contains(out, `"ok":"1"`) {
+		t.Fatalf("agreement tool ran on a line-check answer after replayed cut: %s", out)
+	}
+	if got := r.leads.intents(); len(got) != 0 {
+		t.Errorf("leads written = %v, want none", got)
+	}
+	r.assertLine(t, 2, "isRefused=true", "offerHeard=false", "lastBotLineKind=LINE_CHECK")
+}
+
+// #715: opening cut at 4.5 s with an incomplete fragment; the model calls the
+// agreement tool with a value not in the fragment. Expected: refused, no lead.
+func TestFragmentOverUnheardOpeningRefusesAgreement(t *testing.T) {
+	r := newLeadRig(t, leadRigOptions{opening: heldOpeningLine})
+	r.cutOpeningWithWords(t, 225, "我那个") // 4.5 s into the 11 s opening
+	r.agree("fc_frag")
+	r.ended()
+	out := r.result(t, 1)
+	if strings.Contains(out, `"ok":"1"`) {
+		t.Fatalf("agreement tool ran on an incomplete fragment over unheard opening: %s", out)
+	}
+	if got := r.leads.intents(); len(got) != 0 {
+		t.Errorf("leads written = %v, want none", got)
+	}
+	r.assertLine(t, 1, "guard=A", "verdict=OPENING_UNHEARD", "isRefused=true", "offerHeard=false")
+}
+
+// #715: even after the opening has been heard in full, an answer to a
+// line-check line must not record a lead.
+func TestLineCheckAfterFullOpeningStillRefusesAgreement(t *testing.T) {
+	r := newLeadRig(t, leadRigOptions{opening: heldOpeningLine})
+	r.openingGenerated(t)
+	r.heard(heldOpeningFrames)
+	r.leg.holdFrames(0)
+	waitFor(t, "opening playback done", func() bool {
+		return r.session.isOfferHeard()
+	})
+
+	// Bot later asks a line-check question.
+	r.started()
+	r.speaks("喂，能听到我说话吗？")
+	r.ended()
+	r.callerSpoke("u1")
+	r.final("u1", "能听到。")
+	r.started()
+	r.agree("fc_1")
+	r.ended()
+
+	out := r.result(t, 1)
+	if strings.Contains(out, `"ok":"1"`) {
+		t.Fatalf("agreement tool ran on a line-check answer: %s", out)
+	}
+	if got := r.leads.intents(); len(got) != 0 {
+		t.Errorf("leads written = %v, want none", got)
+	}
+	r.assertLine(t, 1, "verdict=LINE_CHECK_ANSWER", "isRefused=true", "offerHeard=true", "lastBotLineKind=LINE_CHECK")
+}
+
+// #715 control: the opening plays in full, then the callee agrees. Expected:
+// the tool runs and records a HIGH lead.
+func TestControlOpeningInFullThenCalleeAgreesRecordsLead(t *testing.T) {
+	r := newLeadRig(t, leadRigOptions{opening: heldOpeningLine})
+	r.openingGenerated(t)
+	r.heard(heldOpeningFrames)
+	r.leg.holdFrames(0)
+	waitFor(t, "opening playback done", func() bool {
+		return r.session.isOfferHeard()
+	})
+
+	r.callerSpoke("u1")
+	r.final("u1", "好的，我要续约。")
+	r.started()
+	r.agree("fc_1")
+	r.ended()
+
+	r.assertAgreed(t, r.result(t, 1))
+	r.assertLine(t, 1, "verdict=WORDS", "isRefused=false", "offerHeard=true", "lastBotLineKind=OFFER")
+}
+
+func TestTheLineCheckClassifier(t *testing.T) {
+	for _, tc := range []struct {
+		language, text string
+		want           bool
+	}{
+		{"zh", "喂，能听到吗？", true},
+		{"zh", "能听清吗？", true},
+		{"zh", "听得到吗", true},
+		{"zh", "喂，您在吗？", true},
+		{"zh", "喂？", true},
+		{"zh", "您好，能听到我说话吗？", true},
+		{"en", "Can you hear me?", true},
+		{"en", "Hello, can you hear me clearly?", true},
+		{"en", "Are you still there?", true},
+		{"en", "Hello?", true},
+		{"zh", "我们续约可以打八折，您需要吗？", false},
+		{"zh", "好的，谢谢。", false},
+		{"en", "Our renewal plan is twenty percent off, would you like to sign up?", false},
+	} {
+		if got := isLineCheckLine(tc.language, tc.text); got != tc.want {
+			t.Errorf("isLineCheckLine(%q, %q) = %v, want %v", tc.language, tc.text, got, tc.want)
+		}
+	}
+}

@@ -618,6 +618,21 @@ func (r *Runtime) RefuseAsMachine(name string) string {
 	return Failed(reason, r.phasePreamble()+r.engine.Instruction()).asToolOutput()
 }
 
+// RefuseAsLineCheck is the answer to a tool that would record the
+// customer's interest when the caller's words answered a line-check question
+// ("can you hear me?", #715): confirming the line is not agreeing to an offer.
+// A refusal as a conversation, ok=0, with the phase's instruction as the way
+// on; nothing runs and no lead is written.
+func (r *Runtime) RefuseAsLineCheck(name string) string {
+	reason := "the caller's last words only answered a line-check question (confirming they can hear), " +
+		"not an offer, so " + name + " was not carried out. Present the offer and wait for their answer to it"
+	if r.engine.Lang() == LangZH {
+		reason = "来电者刚才只是在确认能否听清通话(线路确认),还没有对产品或方案表态,所以没有执行 " + name +
+			"。请说明具体内容后再等对方明确表态"
+	}
+	return Failed(reason, r.phasePreamble()+r.engine.Instruction()).asToolOutput()
+}
+
 // RefuseAsUnconfirmed is the answer to a tool that would record the customer's
 // interest when nothing the caller said confirms it: the words it answered were
 // not caught (no final transcript in time, a blank one, or no caller words at

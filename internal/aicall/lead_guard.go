@@ -105,6 +105,9 @@ const (
 	// interestMachine: the call is marked as answered by a machine (#409);
 	// refused every time, except over an ending under way.
 	interestMachine
+	// interestLineCheck: the caller's words answered a line-check question
+	// ("can you hear me?", #715); refused.
+	interestLineCheck
 )
 
 // reason is the verdict as the log and the count name it.
@@ -122,6 +125,8 @@ func (v interestVerdict) reason() string {
 		return obs.LeadGuardNoCallerTurn
 	case interestMachine:
 		return obs.LeadGuardMachineWording
+	case interestLineCheck:
+		return obs.LeadGuardLineCheck
 	}
 	return obs.LeadGuardWords
 }
@@ -162,6 +167,8 @@ func (o *Orchestrator) refusesInterest(event Event, g *interestGuard, session *S
 	if answered != nil {
 		seq = answered.seq
 	}
+	offerHeard := session.isOfferHeard()
+	lineKind := session.callerLineKind(answered)
 	var verdict interestVerdict
 	isSameResponse := g.last.isSet && g.last.turn == event.Turn && g.last.seq == seq
 	isSaidAgain := false
@@ -172,7 +179,7 @@ func (o *Orchestrator) refusesInterest(event Event, g *interestGuard, session *S
 	case answered == nil:
 		verdict = interestNoCallerTurn
 	default:
-		if _, _, _, isUnheard := session.callerFinal(answered); isUnheard {
+		if _, _, _, isUnheard := session.callerFinal(answered); isUnheard || !offerHeard {
 			verdict = interestOpeningUnheard
 			break
 		}
@@ -188,6 +195,8 @@ func (o *Orchestrator) refusesInterest(event Event, g *interestGuard, session *S
 			verdict = interestBlankFinal
 		case isRefusalOnly(session.cfg.Session.Language, text):
 			verdict = interestDeclined
+		case lineKind == botLineLineCheck:
+			verdict = interestLineCheck
 		}
 	}
 
@@ -205,7 +214,7 @@ func (o *Orchestrator) refusesInterest(event Event, g *interestGuard, session *S
 		case verdict == interestOpeningUnheard:
 			isRefused = true
 			isSaidAgain = o.canSayOpeningAgain(session, runtime, actions)
-		case verdict == interestDeclined:
+		case verdict == interestDeclined, verdict == interestLineCheck:
 			isRefused = true
 		case verdict == interestMachine:
 			isRefused = !isEndingNear
@@ -242,7 +251,8 @@ func (o *Orchestrator) refusesInterest(event Event, g *interestGuard, session *S
 		"tool", event.ToolName, "turn", event.Turn, "callerTurn", seq, "guard", guardName,
 		"verdict", verdict.reason(), "isRefused", isRefused, "final", final,
 		"waitedMs", waited.Milliseconds(), "isOpeningSaidAgain", isSaidAgain,
-		"isSameResponse", isSameResponse, "isEndingUnderway", isEndingNear)
+		"isSameResponse", isSameResponse, "isEndingUnderway", isEndingNear,
+		"offerHeard", offerHeard, "lastBotLineKind", string(lineKind))
 	obs.RecordLeadGuard(reason, o.cfg.Profile.Name)
 	if !isRefused {
 		return "", nil, false
@@ -262,6 +272,8 @@ func (o *Orchestrator) refusesInterest(event Event, g *interestGuard, session *S
 		}
 	case interestDeclined:
 		output = runtime.RefuseAsDeclined(event.ToolName)
+	case interestLineCheck:
+		output = runtime.RefuseAsLineCheck(event.ToolName)
 	case interestMachine:
 		output = runtime.RefuseAsMachine(event.ToolName)
 	default:
@@ -341,6 +353,39 @@ func isRefusalRun(refusals, companions []string, s string, max int, hasRefusal b
 	}
 	for _, word := range companions {
 		if strings.HasPrefix(s, word) && isRefusalRun(refusals, companions, s[len(word):], max-1, hasRefusal) {
+			return true
+		}
+	}
+	return false
+}
+
+// isLineCheckLine reports whether a bot's spoken line is a line-check
+// question asking whether the caller can hear or is still on the line (#715).
+// Pure; runs off the frame path.
+func isLineCheckLine(language, text string) bool {
+	compact := compactAck(text)
+	if compact == "" {
+		return false
+	}
+	switch flow.Lang(language) {
+	case flow.LangZH:
+		for _, sub := range []string{"能听到", "听得到", "听得见", "能听见", "能听清", "听得清", "听清楚", "听不清"} {
+			if strings.Contains(compact, sub) {
+				return true
+			}
+		}
+		for _, exact := range []string{"喂", "喂喂", "在吗", "您在吗", "您还在吗", "还在吗", "喂在吗", "喂您在吗"} {
+			if compact == exact {
+				return true
+			}
+		}
+	case flow.LangEN:
+		for _, sub := range []string{"canyouhearme", "doyouhearme", "areyouthere", "areyoustillthere", "isthelineclear"} {
+			if strings.Contains(compact, sub) {
+				return true
+			}
+		}
+		if compact == "hello" {
 			return true
 		}
 	}
