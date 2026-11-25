@@ -39,10 +39,11 @@ func TestTheNumberFilterMatchesEitherEndOfACall(t *testing.T) {
 
 	list := func(f CDRFilter) []uuid.UUID {
 		t.Helper()
-		rows, total, err := ledger.ListCDRs(ctx, f)
+		page, err := ledger.ListCDRs(ctx, f)
 		if err != nil {
 			t.Fatalf("ListCDRs(%+v): %v", f, err)
 		}
+		rows, total := page.Items, page.Total
 		if total != int64(len(rows)) {
 			t.Errorf("filter %+v: count %d disagrees with the %d rows listed", f, total, len(rows))
 		}

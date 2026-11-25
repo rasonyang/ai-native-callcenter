@@ -444,6 +444,20 @@ func (s *Server) router() chi.Router {
 			})
 		})
 
+		// A download: authenticated, authorised by the contract and mounted
+		// through the wrapper like every operation above, without their
+		// 30-second bound. The file streams for as long as the client takes to
+		// read it, and the bound would cut a two-month export short in the
+		// middle of a row. It holds no database connection between batches
+		// (LedgerStore.ExportCDRs), so a slow reader costs a goroutine.
+		v1.Group(func(download chi.Router) {
+			download.Use(s.authenticate)
+			download.Use(s.auditTrail)
+			if s.ledger != nil {
+				download.Get("/cdrs/export", op.ExportCDRs)
+			}
+		})
+
 		// Long-lived stream: no timeout, it ends with the client connection.
 		//
 		// The one route that does not go through the wrapper. Binding the

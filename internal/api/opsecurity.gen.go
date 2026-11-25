@@ -233,6 +233,11 @@ var OperationSecurityByRoute = map[string]OperationSecurity{
 		SessionScopes: []string{"history:read:all"},
 		KeyScopes:     []string{"history:read:all"},
 	},
+	"GET /cdrs/export": {
+		OperationID:   "exportCDRs",
+		SessionScopes: []string{"history:read:all"},
+		KeyScopes:     []string{"history:read:all"},
+	},
 	"GET /cdrs/mine": {
 		OperationID:   "listMyCDRs",
 		SessionScopes: []string{"history:read:own"},

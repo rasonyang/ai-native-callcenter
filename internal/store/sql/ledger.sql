@@ -92,6 +92,13 @@ SELECT * FROM cdrs WHERE call_id = $1;
 -- An open time bound is coalesced to ±infinity rather than OR-ed with IS NULL,
 -- so it stays an Index Cond under a generic plan as well as a custom one.
 -- CountCDRs and the two audit-log queries bound their time the same way.
+--
+-- The page and the export read the same rows through this one statement: the
+-- page by offset, the export (LedgerStore.ExportCDRs) a batch at a time after
+-- the last row it read, (before_started_at, before_call_id), newest first. The
+-- call id breaks a tie of started_at, so the order is total and the two agree
+-- row for row. CountCDRs carries the same filter, word for word up to the
+-- cursor (TestTheCDRCountFiltersAsTheListDoes).
 SELECT * FROM cdrs
 WHERE started_at >= coalesce(sqlc.narg('from_at')::timestamptz, '-infinity'::timestamptz)
   AND started_at <  coalesce(sqlc.narg('to_at')::timestamptz,   'infinity'::timestamptz)
@@ -102,13 +109,20 @@ WHERE started_at >= coalesce(sqlc.narg('from_at')::timestamptz, '-infinity'::tim
   AND (sqlc.arg('status')::text = '' OR status = sqlc.arg('status'))
   AND (sqlc.arg('did')::text = '' OR did = sqlc.arg('did'))
   AND (sqlc.arg('from_number')::text = '' OR from_number LIKE '%' || sqlc.arg('from_number') || '%')
+  AND (sqlc.arg('to_number')::text = '' OR to_number LIKE '%' || sqlc.arg('to_number') || '%')
   AND (sqlc.arg('number')::text = '' OR from_number LIKE '%' || sqlc.arg('number') || '%'
        OR to_number LIKE '%' || sqlc.arg('number') || '%')
-ORDER BY started_at DESC
+  AND (sqlc.narg('bill_sec_min')::int IS NULL OR bill_sec >= sqlc.narg('bill_sec_min'))
+  AND (sqlc.narg('bill_sec_max')::int IS NULL OR bill_sec <= sqlc.narg('bill_sec_max'))
+  AND (sqlc.narg('before_call_id')::uuid IS NULL
+       OR (started_at, call_id) < (sqlc.narg('before_started_at')::timestamptz, sqlc.narg('before_call_id')))
+ORDER BY started_at DESC, call_id DESC
 LIMIT sqlc.arg('page_limit') OFFSET sqlc.arg('page_offset');
 
 -- name: CountCDRs :one
-SELECT count(*) FROM cdrs
+-- How many calls the listing's filter selects and the seconds they were billed
+-- for, over all of them rather than a page.
+SELECT count(*) AS total, coalesce(sum(bill_sec), 0)::bigint AS bill_sec_total FROM cdrs
 WHERE started_at >= coalesce(sqlc.narg('from_at')::timestamptz, '-infinity'::timestamptz)
   AND started_at <  coalesce(sqlc.narg('to_at')::timestamptz,   'infinity'::timestamptz)
   AND (sqlc.narg('queue_id')::uuid IS NULL OR queue_id = sqlc.narg('queue_id'))
@@ -118,8 +132,11 @@ WHERE started_at >= coalesce(sqlc.narg('from_at')::timestamptz, '-infinity'::tim
   AND (sqlc.arg('status')::text = '' OR status = sqlc.arg('status'))
   AND (sqlc.arg('did')::text = '' OR did = sqlc.arg('did'))
   AND (sqlc.arg('from_number')::text = '' OR from_number LIKE '%' || sqlc.arg('from_number') || '%')
+  AND (sqlc.arg('to_number')::text = '' OR to_number LIKE '%' || sqlc.arg('to_number') || '%')
   AND (sqlc.arg('number')::text = '' OR from_number LIKE '%' || sqlc.arg('number') || '%'
-       OR to_number LIKE '%' || sqlc.arg('number') || '%');
+       OR to_number LIKE '%' || sqlc.arg('number') || '%')
+  AND (sqlc.narg('bill_sec_min')::int IS NULL OR bill_sec >= sqlc.narg('bill_sec_min'))
+  AND (sqlc.narg('bill_sec_max')::int IS NULL OR bill_sec <= sqlc.narg('bill_sec_max'));
 
 -- InsertTranscriptLine writes one line as it is spoken. The conflict target is
 -- the partial idempotency index, so a redelivered final is dropped rather than

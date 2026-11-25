@@ -87,12 +87,12 @@ func TestACDRNamesItsCampaignAndTheFiltersFollow(t *testing.T) {
 		t.Errorf("hook on B holds %d deliveries after B's call, want 1", got)
 	}
 
-	items, total, err := e.ledger.ListCDRs(ctx, CDRFilter{CampaignID: &a.ID})
-	if err != nil || total != 1 || len(items) != 1 || items[0].CallID != attA.CallID {
-		t.Errorf("listing for A = %d items, total %d, %v", len(items), total, err)
+	forA, err := e.ledger.ListCDRs(ctx, CDRFilter{CampaignID: &a.ID})
+	if err != nil || forA.Total != 1 || len(forA.Items) != 1 || forA.Items[0].CallID != attA.CallID {
+		t.Errorf("listing for A = %d items, total %d, %v", len(forA.Items), forA.Total, err)
 	}
-	if _, total, _ := e.ledger.ListCDRs(ctx, CDRFilter{}); total != 3 {
-		t.Errorf("unfiltered total = %d, want 3", total)
+	if all, _ := e.ledger.ListCDRs(ctx, CDRFilter{}); all.Total != 3 {
+		t.Errorf("unfiltered total = %d, want 3", all.Total)
 	}
 }
 

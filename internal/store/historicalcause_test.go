@@ -64,13 +64,14 @@ func TestRowsEndedByTheRemovedSessionExpiredCauseStillRead(t *testing.T) {
 	got := map[string]int{}
 	seen := map[uuid.UUID]bool{}
 	for offset := 0; ; offset += 100 {
-		page, count, err := e.ledger.ListCDRs(ctx, CDRFilter{
+		listed, err := e.ledger.ListCDRs(ctx, CDRFilter{
 			From: origin.Add(-time.Hour), To: origin.Add(time.Hour),
 			CampaignID: &c.ID, Limit: 100, Offset: offset,
 		})
 		if err != nil {
 			t.Fatalf("ListCDRs offset %d: %v", offset, err)
 		}
+		page, count := listed.Items, listed.Total
 		if count != total {
 			t.Fatalf("ListCDRs total = %d, want %d", count, total)
 		}
@@ -93,11 +94,11 @@ func TestRowsEndedByTheRemovedSessionExpiredCauseStillRead(t *testing.T) {
 			t.Errorf("CDR listing holds %d rows with cause %s, want %d", got[cause], cause, want)
 		}
 	}
-	failed, count, err := e.ledger.ListCDRs(ctx, CDRFilter{
+	failed, err := e.ledger.ListCDRs(ctx, CDRFilter{
 		From: origin.Add(-time.Hour), To: origin.Add(time.Hour), Status: CDRStatusFailed, Limit: 200,
 	})
-	if err != nil || int(count) != total/3 || len(failed) != total/3 {
-		t.Errorf("failed listing = %d rows, total %d, err %v; want %d", len(failed), count, err, total/3)
+	if err != nil || int(failed.Total) != total/3 || len(failed.Items) != total/3 {
+		t.Errorf("failed listing = %d rows, total %d, err %v; want %d", len(failed.Items), failed.Total, err, total/3)
 	}
 
 	// The campaign's attempt listing keeps the cause, and the attempts were

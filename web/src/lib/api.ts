@@ -47,15 +47,15 @@ const BASE = '/api/v1'
 /** Mutations must carry this header; see docs/design/04-api-sse.md §2. */
 const CSRF_HEADER = 'X-AICC-Csrf'
 
-export async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+/** Sends one request with the session's credentials; the answer is not read yet. */
+async function send(path: string, init: RequestInit): Promise<Response> {
   const method = init.method ?? 'GET'
   const headers = new Headers(init.headers)
   if (init.body !== undefined) headers.set('Content-Type', 'application/json')
   if (method !== 'GET' && method !== 'HEAD') headers.set(CSRF_HEADER, '1')
 
-  let response: Response
   try {
-    response = await fetch(`${BASE}${path}`, {
+    return await fetch(`${BASE}${path}`, {
       ...init,
       method,
       headers,
@@ -67,6 +67,16 @@ export async function request<T>(path: string, init: RequestInit = {}): Promise<
     if (error instanceof DOMException && error.name === 'AbortError') throw error
     throw new NetworkError(error)
   }
+}
+
+/** The refusal a failed answer carries, from its error envelope. */
+function refusalOf(response: Response, payload: unknown): ApiError {
+  const body = (payload as { error?: ApiErrorBody } | null)?.error
+  return new ApiError(response.status, body ?? { code: 'INTERNAL', message: response.statusText })
+}
+
+export async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const response = await send(path, init)
 
   if (response.status === 204) return undefined as T
 
@@ -81,14 +91,61 @@ export async function request<T>(path: string, init: RequestInit = {}): Promise<
     if (response.ok) throw error
   }
 
-  if (!response.ok) {
-    const body = (payload as { error?: ApiErrorBody } | null)?.error
-    throw new ApiError(
-      response.status,
-      body ?? { code: 'INTERNAL', message: response.statusText },
-    )
-  }
+  if (!response.ok) throw refusalOf(response, payload)
   return payload as T
+}
+
+/** A file the server made, and the name it gave the file, if it named one. */
+export interface ServerFile {
+  blob: Blob
+  fileName?: string
+}
+
+/**
+ * Fetches a file the server makes (an export), with the same credentials as
+ * any request. A refusal is the usual error envelope and is thrown as the
+ * same ApiError, so an error body is never handed over as the file.
+ */
+export async function requestFile(path: string, init: RequestInit = {}): Promise<ServerFile> {
+  const response = await send(path, init)
+  if (!response.ok) {
+    const text = await response.text()
+    let payload: unknown = null
+    try {
+      payload = text ? JSON.parse(text) : null
+    } catch {
+      // An HTML error page from a proxy: the status says it all.
+    }
+    throw refusalOf(response, payload)
+  }
+  return {
+    blob: await response.blob(),
+    fileName: fileNameOf(response.headers.get('Content-Disposition')),
+  }
+}
+
+/**
+ * The file name in a Content-Disposition header: the RFC 5987 `filename*`
+ * form when present, else the plain `filename`. Only the last path segment is
+ * kept, so a name can never point somewhere else.
+ */
+export function fileNameOf(header: string | null): string | undefined {
+  if (!header) return undefined
+  let name: string | undefined
+  const extended = /filename\*\s*=\s*(?:UTF-8|utf-8)''([^;]+)/.exec(header)
+  if (extended) {
+    try {
+      name = decodeURIComponent(extended[1].trim())
+    } catch {
+      name = undefined
+    }
+  }
+  if (!name) {
+    const plain = /filename\s*=\s*(?:"((?:[^"\\]|\\.)*)"|([^;\s]+))/.exec(header)
+    name = plain ? (plain[1]?.replace(/\\(.)/g, '$1') ?? plain[2]) : undefined
+  }
+  const base = name?.split(/[/\\]/).pop()?.trim()
+  return base || undefined
 }
 
 export const api = {

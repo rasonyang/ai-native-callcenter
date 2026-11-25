@@ -2,7 +2,7 @@ import { queryOptions, useMutation, useQuery, useQueryClient } from '@tanstack/r
 
 import type { components, operations } from '@/generated/api'
 
-import { ApiError, request } from './api'
+import { ApiError, request, requestFile } from './api'
 
 /**
  * The finished-call ledger: CDRs, transcripts, recordings, callbacks and the
@@ -59,8 +59,23 @@ export interface AuditFilter {
   offset?: number
 }
 
+/**
+ * One page of the ledger, the number of calls the filter selects and the
+ * seconds they were billed for, and the deployment's time zone, in which the
+ * screen dates calls and turns a calendar day into a window.
+ */
+export type CDRList = components['schemas']['CDRList']
+
 /** The query of GET /cdrs, as the contract declares it (status comes from a free-form select). */
 export type CDRFilter = Omit<NonNullable<operations['listCDRs']['parameters']['query']>, 'status'> & {
+  status?: string
+}
+
+/**
+ * The query of GET /cdrs/export: the listing's filters without paging, the
+ * window required, and the language of the file's header row.
+ */
+export type CDRExportFilter = Omit<operations['exportCDRs']['parameters']['query'], 'status'> & {
   status?: string
 }
 
@@ -80,12 +95,18 @@ function query(params: Record<string, string | number | undefined>): string {
 }
 
 export const ledgerApi = {
-  cdrs: (filter: CDRFilter) =>
-    request<{ items: CDR[]; total: number }>(`/cdrs${query({ ...filter })}`),
+  cdrs: (filter: CDRFilter) => request<CDRList>(`/cdrs${query({ ...filter })}`),
+
+  /**
+   * Every call the filter selects as one CSV file, made by the server (the
+   * filter's whole set, not a page). A refusal, such as a window longer than
+   * the export allows, is thrown as an ApiError before any file exists.
+   */
+  exportCDRs: (filter: CDRExportFilter, signal?: AbortSignal) =>
+    requestFile(`/cdrs/export${query({ ...filter })}`, { signal }),
 
   /** The caller's own finished calls. The agent is the session, not a filter. */
-  myCDRs: (filter: CDRFilter) =>
-    request<{ items: CDR[]; total: number }>(`/cdrs/mine${query({ ...filter })}`),
+  myCDRs: (filter: CDRFilter) => request<CDRList>(`/cdrs/mine${query({ ...filter })}`),
 
   /** The audit trail. ADMIN only; the server draws that line. */
   auditLogs: (filter: AuditFilter) =>

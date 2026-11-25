@@ -18,14 +18,29 @@ import (
 
 // ListCDRs pages the ledger with filters.
 func (s *Server) ListCDRs(w http.ResponseWriter, r *http.Request, params api.ListCDRsParams) {
+	page, err := s.ledger.ListCDRs(r.Context(), cdrFilterOf(params))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, CodeStorageDown, "cannot list calls", nil)
+		return
+	}
+	writeJSON(w, http.StatusOK, s.cdrList(page))
+}
+
+// cdrFilterOf is the ledger filter of listCDRs. exportCDRs reads the same one,
+// through its parameters converted to these, so a page and a file cannot
+// select different calls.
+func cdrFilterOf(params api.ListCDRsParams) store.CDRFilter {
 	filter := store.CDRFilter{
 		Status:     stringOr(params.Status),
 		DID:        stringOr(params.DID),
 		FromNumber: stringOr(params.FromNumber),
+		ToNumber:   stringOr(params.ToNumber),
 		Number:     stringOr(params.Number),
 		QueueID:    params.QueueID,
 		CampaignID: params.CampaignID,
 		AgentID:    params.AgentID,
+		BillSecMin: params.BillSecMin,
+		BillSecMax: params.BillSecMax,
 		Limit:      intOr(params.Limit, 50),
 		Offset:     intOr(params.Offset, 0),
 	}
@@ -35,13 +50,76 @@ func (s *Server) ListCDRs(w http.ResponseWriter, r *http.Request, params api.Lis
 	if params.To != nil {
 		filter.To = *params.To
 	}
+	return filter
+}
 
-	items, total, err := s.ledger.ListCDRs(r.Context(), filter)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, CodeStorageDown, "cannot list calls", nil)
+// cdrList is a page of the ledger as CDRList carries it: the totals over the
+// whole filter, and the deployment's zone, so a client dates calls and picks
+// a day's window as the export does.
+func (s *Server) cdrList(page store.CDRPage) map[string]any {
+	return map[string]any{
+		"items":        page.Items,
+		"total":        page.Total,
+		"billSecTotal": page.BillSecTotal,
+		"timeZone":     s.cfg.Location().String(),
+	}
+}
+
+// ExportCDRs writes every call the filters select as one CSV file.
+//
+// The window is checked before anything is written, so a refusal is the
+// envelope and never a short file; the first batch is read before the status
+// line for the same reason. After that the file streams a batch at a time and
+// nothing is buffered beyond one batch. A batch that cannot be read once the
+// file has begun aborts the response: the client sees a download that failed,
+// which it can tell from a complete one, where a status written after the
+// first byte would be lost.
+func (s *Server) ExportCDRs(w http.ResponseWriter, r *http.Request, params api.ExportCDRsParams) {
+	zone := s.cfg.Location()
+	if params.To.After(params.From.In(zone).AddDate(0, cdrExportMaxMonths, 0)) {
+		writeError(w, http.StatusBadRequest, CodeValidationFailed,
+			"an export covers at most two calendar months",
+			map[string]any{"field": "to", "rule": "EXPORT_WINDOW_TOO_LONG", "maxMonths": cdrExportMaxMonths})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": items, "total": total})
+
+	export := s.ledger.ExportCDRs(cdrFilterOf(api.ListCDRsParams{
+		Status:     params.Status,
+		DID:        params.DID,
+		Number:     params.Number,
+		FromNumber: params.FromNumber,
+		ToNumber:   params.ToNumber,
+		From:       &params.From,
+		To:         &params.To,
+		QueueID:    params.QueueID,
+		CampaignID: params.CampaignID,
+		AgentID:    params.AgentID,
+		BillSecMin: params.BillSecMin,
+		BillSecMax: params.BillSecMax,
+	}))
+	batch, err := export.Next(r.Context())
+	if err != nil {
+		slog.ErrorContext(r.Context(), "cannot export calls", "error", err)
+		writeError(w, http.StatusInternalServerError, CodeStorageDown, "cannot export calls", nil)
+		return
+	}
+
+	file := newCDRExportFile(w, cdrExportLanguage(params), zone, s.cfg.DefaultCountryCode)
+	file.begin(cdrExportFileName(params.From, params.To, zone))
+	rows := 0
+	for len(batch) > 0 {
+		if err := file.write(batch); err != nil {
+			// The client went away; there is nobody left to tell.
+			return
+		}
+		rows += len(batch)
+		if batch, err = export.Next(r.Context()); err != nil {
+			slog.ErrorContext(r.Context(), "cannot finish a call-record export; aborting the download",
+				"error", err, "rowsWritten", rows)
+			panic(http.ErrAbortHandler)
+		}
+	}
+	_ = file.end()
 }
 
 // ListMyCDRs pages the caller's own finished calls.
@@ -70,13 +148,13 @@ func (s *Server) ListMyCDRs(w http.ResponseWriter, r *http.Request, params api.L
 		filter.To = *params.To
 	}
 
-	items, total, err := s.ledger.ListCDRs(r.Context(), filter)
+	page, err := s.ledger.ListCDRs(r.Context(), filter)
 	if err != nil {
 		slog.ErrorContext(r.Context(), "cannot list an agent's calls", "error", err, "agentId", agentID)
 		writeError(w, http.StatusInternalServerError, CodeStorageDown, "cannot list calls", nil)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": items, "total": total})
+	writeJSON(w, http.StatusOK, s.cdrList(page))
 }
 
 // ListDispositions serves the after-call-work vocabulary.

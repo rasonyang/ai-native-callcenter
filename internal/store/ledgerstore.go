@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"net/netip"
 	"time"
 
@@ -428,47 +429,87 @@ type CDRFilter struct {
 	DID     string
 	// FromNumber matches as a substring, for finding a caller.
 	FromNumber string
+	// ToNumber matches as a substring of the called number, as FromNumber
+	// does of the caller's.
+	ToNumber string
 	// Number matches as a substring of either end, whichever way the call went.
 	Number string
-	Limit  int
-	Offset int
+	// BillSecMin and BillSecMax bound the billed seconds, both inclusive; nil
+	// is no bound.
+	BillSecMin *int
+	BillSecMax *int
+	Limit      int
+	Offset     int
 }
 
-// ListCDRs pages through the ledger, newest first, with the total for paging.
-func (l *LedgerStore) ListCDRs(ctx context.Context, filter CDRFilter) ([]CDR, int64, error) {
+// listParams is the filter as the listing statement takes it, with no page
+// and no cursor. The page, the count and the export all start from it, so
+// what one of them selects the others select too.
+func (f CDRFilter) listParams() queries.ListCDRsParams {
+	return queries.ListCDRsParams{
+		FromAt:     stamp(f.From),
+		ToAt:       stamp(f.To),
+		QueueID:    f.QueueID,
+		CampaignID: f.CampaignID,
+		AgentID:    f.AgentID,
+		Status:     f.Status,
+		Did:        f.DID,
+		FromNumber: f.FromNumber,
+		ToNumber:   f.ToNumber,
+		Number:     f.Number,
+		BillSecMin: seconds32(f.BillSecMin),
+		BillSecMax: seconds32(f.BillSecMax),
+	}
+}
+
+// seconds32 narrows a bound to the column's int, saturating: a bound past
+// what the column can hold bounds nothing more than its largest value does.
+func seconds32(v *int) *int32 {
+	if v == nil {
+		return nil
+	}
+	n := int32(min(max(*v, math.MinInt32), math.MaxInt32))
+	return &n
+}
+
+// CDRPage is one page of the ledger, with what the whole filter selects.
+type CDRPage struct {
+	Items []CDR
+	// Total is how many calls the filter selects and BillSecTotal the seconds
+	// they were billed for: both over every one of them, not over the page.
+	Total        int64
+	BillSecTotal int64
+}
+
+// ListCDRs pages through the ledger, newest first, with the totals for paging.
+func (l *LedgerStore) ListCDRs(ctx context.Context, filter CDRFilter) (CDRPage, error) {
 	if filter.Limit <= 0 || filter.Limit > 200 {
 		filter.Limit = 50
 	}
 
-	rows, err := l.q.ListCDRs(ctx, queries.ListCDRsParams{
-		FromAt:     stamp(filter.From),
-		ToAt:       stamp(filter.To),
-		QueueID:    filter.QueueID,
-		CampaignID: filter.CampaignID,
-		AgentID:    filter.AgentID,
-		Status:     filter.Status,
-		Did:        filter.DID,
-		FromNumber: filter.FromNumber,
-		Number:     filter.Number,
-		PageLimit:  int32(filter.Limit),
-		PageOffset: int32(filter.Offset),
-	})
+	params := filter.listParams()
+	params.PageLimit = int32(filter.Limit)
+	params.PageOffset = int32(filter.Offset)
+	rows, err := l.q.ListCDRs(ctx, params)
 	if err != nil {
-		return nil, 0, err
+		return CDRPage{}, err
 	}
-	total, err := l.q.CountCDRs(ctx, queries.CountCDRsParams{
-		FromAt:     stamp(filter.From),
-		ToAt:       stamp(filter.To),
-		QueueID:    filter.QueueID,
-		CampaignID: filter.CampaignID,
-		AgentID:    filter.AgentID,
-		Status:     filter.Status,
-		Did:        filter.DID,
-		FromNumber: filter.FromNumber,
-		Number:     filter.Number,
+	totals, err := l.q.CountCDRs(ctx, queries.CountCDRsParams{
+		FromAt:     params.FromAt,
+		ToAt:       params.ToAt,
+		QueueID:    params.QueueID,
+		CampaignID: params.CampaignID,
+		AgentID:    params.AgentID,
+		Status:     params.Status,
+		Did:        params.Did,
+		FromNumber: params.FromNumber,
+		ToNumber:   params.ToNumber,
+		Number:     params.Number,
+		BillSecMin: params.BillSecMin,
+		BillSecMax: params.BillSecMax,
 	})
 	if err != nil {
-		return nil, 0, err
+		return CDRPage{}, err
 	}
 
 	out := make([]CDR, 0, len(rows))
@@ -476,12 +517,75 @@ func (l *LedgerStore) ListCDRs(ctx context.Context, filter CDRFilter) ([]CDR, in
 		out = append(out, fromRow(row))
 	}
 	if err := l.attachWrapUps(ctx, out, filter.AgentID); err != nil {
-		return nil, 0, err
+		return CDRPage{}, err
 	}
 	if err := attachLeads(ctx, l.q, out); err != nil {
-		return nil, 0, err
+		return CDRPage{}, err
 	}
-	return out, total, nil
+	return CDRPage{Items: out, Total: totals.Total, BillSecTotal: totals.BillSecTotal}, nil
+}
+
+// cdrExportBatch is how many calls the export reads per statement.
+const cdrExportBatch = 1000
+
+// CDRExport reads every call a filter selects, newest first, a batch at a
+// time; see ExportCDRs.
+type CDRExport struct {
+	q      *queries.Queries
+	params queries.ListCDRsParams
+	isDone bool
+}
+
+// ExportCDRs reads every call the filter selects, in the order ListCDRs pages
+// through them, with no page bound. The filter's Limit and Offset are ignored.
+//
+// It reads through the listing's own statement, one batch after the last row
+// read rather than at an offset, so a batch costs the same at the end of a
+// large window as at its start, and no statement or connection is held between
+// batches: a reader that stops reading holds nothing in the database. Each
+// batch is a statement of its own, so a call written while the export runs is
+// in the file when it is older than the batches still to be read, not
+// otherwise. A row carries its campaign lead (LeadIntent) and no wrap-up.
+func (l *LedgerStore) ExportCDRs(filter CDRFilter) *CDRExport {
+	params := filter.listParams()
+	params.PageLimit = cdrExportBatch
+	return &CDRExport{q: l.q, params: params}
+}
+
+// Next returns the next batch, newest first, and an empty one once every call
+// the filter selects has been read.
+func (e *CDRExport) Next(ctx context.Context) ([]CDR, error) {
+	if e.isDone {
+		return nil, nil
+	}
+	rows, err := e.q.ListCDRs(ctx, e.params)
+	if err != nil {
+		return nil, err
+	}
+	if len(rows) < int(e.params.PageLimit) {
+		e.isDone = true
+	}
+	if len(rows) == 0 {
+		return nil, nil
+	}
+	out := make([]CDR, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, fromRow(row))
+	}
+	if err := attachLeads(ctx, e.q, out); err != nil {
+		return nil, err
+	}
+
+	// The next batch starts after the last row read. The window's end moves
+	// down to that row as well, one microsecond (the column's resolution)
+	// past it so the rows that share its started_at stay in: the time bound
+	// is what the index scan starts from, the cursor only orders the tie.
+	last := rows[len(rows)-1]
+	callID := last.CallID
+	e.params.BeforeCallID = &callID
+	e.params.BeforeStartedAt = last.StartedAt
+	e.params.ToAt = pgtype.Timestamptz{Time: last.StartedAt.Time.Add(time.Microsecond), Valid: true}
+	return out, nil
 }
 
 // attachWrapUps puts the wrap-up filed against each call on its row: the

@@ -994,9 +994,35 @@ export interface paths {
         };
         /**
          * Page the ledger
-         * @description Finished calls, newest first, with filters. Unparseable filter values are ignored rather than rejected.
+         * @description Finished calls, newest first (ties by `callId`, newest first), with filters. Unparseable filter values are ignored rather than rejected. `total` and `billSecTotal` are over every call the filters select, not over the page.
          */
         get: operations["listCDRs"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/cdrs/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Export the ledger as a CSV file
+         * @description Every finished call the filters select, as one CSV file: the calls listCDRs pages through for the same filters, in the same order (newest first, ties by `callId`), with no page bound. The window is required and covers at most two calendar months in the deployment's time zone; anything wider is refused before a byte of the file is sent, never cut short.
+         *
+         *     The file is UTF-8 with a byte order mark, so a spreadsheet opens Chinese text as UTF-8, and CRLF line ends. One header row, then one row per call, in these columns: callId, start date, start time, callType, fromNumber, toNumber, status, hangupCause, ringSec, talkSec, billSec, totalSec, campaignId, leadIntent. The start date (YYYY-MM-DD) and start time (HH:MM:SS) are `startedAt` in the deployment's time zone (`CDRList.timeZone`), which their two header names state. Durations are whole seconds as recorded. An absent field is an empty cell.
+         *
+         *     Numbers are written as an operator reads them: a canonical E.164 number of the deployment's default country code is written in national form, without the country code (a Chinese landline with its trunk 0), and every other number as recorded. A number cell starts with a tab, which a spreadsheet keeps as text, so a leading 0 and a long number survive; a cell that would start like a formula (=, +, -, @, a tab or a carriage return) and is not a number gets a leading apostrophe instead. A field holding a comma, a quote or a line break is quoted.
+         *
+         *     The file is streamed as it is read. A failure after the first byte aborts the transfer, so a client sees an incomplete download rather than a shorter file. Needs history:read:all, as listCDRs does.
+         */
+        get: operations["exportCDRs"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2820,6 +2846,10 @@ export interface components {
             items: components["schemas"]["CDR"][];
             /** @description Total rows matching the filter, for paging. */
             total: number;
+            /** @description Sum of `billSec` over every call the filter selects, all `total` of them, not over this page. Seconds as recorded; 0 when none was billed. */
+            billSecTotal: number;
+            /** @description The deployment's time zone, an IANA name such as Asia/Shanghai (AICC_TIME_ZONE; UTC when unset). The same on every answer: the export (exportCDRs) writes each call's start date and time in it, and a client that filters by calendar day turns the day into `from` and `to` in this zone, never its own, so a filtered day and the file exported from it hold the same calls. */
+            timeZone: string;
         };
         /** @enum {string} */
         TranscriptKind: "TEXT" | "TOOL_CALL" | "TOOL_RESULT";
@@ -5790,15 +5820,22 @@ export interface operations {
                 did?: string;
                 /** @description Substring of either end's number: a call matches when `fromNumber` or `toNumber` contains it, whichever way it went. */
                 number?: string;
+                /** @description Substring of the caller's number: a call matches when its `fromNumber` contains it. */
                 fromNumber?: string;
-                /** @description RFC 3339 window start. */
+                /** @description Substring of the called number: a call matches when its `toNumber` contains it. A call this platform placed is stored from the line it went out on to the customer, so the customer's number is its `toNumber`; on an inbound call `toNumber` is the number dialled. */
+                toNumber?: string;
+                /** @description RFC 3339 window start, inclusive: calls that started at or after it. A client that filters by calendar day takes the day's midnight in the deployment's time zone (`CDRList.timeZone`), as the export does. */
                 from?: string;
-                /** @description RFC 3339 window end. */
+                /** @description RFC 3339 window end, exclusive: calls that started before it. */
                 to?: string;
                 queueId?: string;
                 /** @description Only calls placed for this campaign. */
                 campaignId?: string;
                 agentId?: string;
+                /** @description Only calls whose `billSec` is at least this many seconds (inclusive). `billSecMin=1` keeps the calls that were billed at all. */
+                billSecMin?: number;
+                /** @description Only calls whose `billSec` is at most this many seconds (inclusive). */
+                billSecMax?: number;
                 limit?: number;
                 offset?: number;
             };
@@ -5815,6 +5852,66 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CDRList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    exportCDRs: {
+        parameters: {
+            query: {
+                status?: components["schemas"]["CDRStatus"];
+                did?: string;
+                /** @description Substring of either end's number: a call matches when `fromNumber` or `toNumber` contains it, whichever way it went. */
+                number?: string;
+                /** @description Substring of the caller's number: a call matches when its `fromNumber` contains it. */
+                fromNumber?: string;
+                /** @description Substring of the called number: a call matches when its `toNumber` contains it. A call this platform placed is stored from the line it went out on to the customer, so the customer's number is its `toNumber`; on an inbound call `toNumber` is the number dialled. */
+                toNumber?: string;
+                /** @description RFC 3339 window start, inclusive. Required. A calendar day starts at its midnight in the deployment's time zone (`CDRList.timeZone`). */
+                from: string;
+                /** @description RFC 3339 window end, exclusive. Required, and at most two calendar months after `from` in the deployment's time zone: `from` 2026-12-01T00:00:00+08:00 in Asia/Shanghai allows `to` up to 2027-02-01T00:00:00+08:00. */
+                to: string;
+                queueId?: string;
+                /** @description Only calls placed for this campaign. */
+                campaignId?: string;
+                agentId?: string;
+                /** @description Only calls whose `billSec` is at least this many seconds (inclusive). `billSecMin=1` keeps the calls that were billed at all. */
+                billSecMin?: number;
+                /** @description Only calls whose `billSec` is at most this many seconds (inclusive). */
+                billSecMax?: number;
+                /** @description The language of the header row. When absent, the first of en or zh that `Accept-Language` prefers; en otherwise. Only the header row is translated: enum values are written as the API sends them. */
+                language?: "en" | "zh";
+            };
+            header?: {
+                /** @description Read only when `language` is absent: the tag with the highest quality whose primary subtag is en or zh decides the header row's language. */
+                "Accept-Language"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The file, named `calls-YYYYMMDD-YYYYMMDD.csv` in `Content-Disposition`: the window's first day and the last day it reaches, in the deployment's time zone, so a window of whole days names the days it holds. */
+            200: {
+                headers: {
+                    /** @description attachment, with the file name. */
+                    "Content-Disposition"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/csv": string;
+                };
+            };
+            /** @description Answered before any of the file is sent. Code VALIDATION_FAILED: params.field names `from` or `to` when a bound is missing or unparseable; a window longer than two calendar months in the deployment's time zone has params.field `to`, params.rule EXPORT_WINDOW_TOO_LONG and params.maxMonths 2. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
             401: components["responses"]["Unauthorized"];
