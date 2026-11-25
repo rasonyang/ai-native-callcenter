@@ -35,7 +35,7 @@ export interface paths {
         put?: never;
         /**
          * Sign out
-         * @description Revokes the session and clears the cookie. Always succeeds for an authenticated caller.
+         * @description Revokes the session and clears the cookie. Always succeeds for an authenticated caller. For an agent, signing out of the site also signs the agent out of their phone: presence moves to LOGGED_OUT, the queues are told, and the browser phone's credential is revoked — whichever of the agent's sessions asked, including one that was not the session the phone was signed in from.
          */
         post: operations["logout"];
         delete?: never;

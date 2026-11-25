@@ -77,7 +77,10 @@ allowing the stack's ports ([Ports and firewall](#ports-and-firewall)).
   `AICC_SEED_PASSWORD` are generated (32 random characters each) and written
   to `<dir>/.env`, mode 0600 — root-owned on Linux, so only `sudo` reads it;
   the operator's own file on macOS. With the demo seed (the default), the
-  installer prints the admin password once, on the first install; afterwards
+  installer prints the admin password once, when the first install completes
+  — a run that fails earlier (for example on `docker compose pull`) resumes
+  where it stopped, and the run that finishes is still the first install;
+  afterwards
   it is `AICC_SEED_PASSWORD` in that file, and the installer prints the
   command that reads it: `sudo grep AICC_SEED_PASSWORD /opt/aicc/.env` on
   Linux, `grep AICC_SEED_PASSWORD ~/.aicc/.env` on macOS. An install made with
