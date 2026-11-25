@@ -130,6 +130,10 @@ func (c *capturingStore) InsertTranscriptLine(_ context.Context, _ uuid.UUID, l 
 	return nil
 }
 
+func (c *capturingStore) MarkTranscriptHeard(_ context.Context, _ uuid.UUID, _ int, _ string, _ *int32) error {
+	return nil
+}
+
 func (c *capturingStore) all() []store.TranscriptLine {
 	c.mu.Lock()
 	defer c.mu.Unlock()
