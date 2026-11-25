@@ -14,6 +14,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -325,12 +326,18 @@ type Config struct {
 	IsWrapUpDraftEnabled bool
 	// IsLeadJudgeEnabled turns the judging of campaign leads on or off when
 	// the text model is configured (design 10 section 11.1): after a campaign
-	// call the bot handled alone ends with a HIGH or MEDIUM lead, the model
-	// reads its transcript and its verdict decides the lead, and the call's
-	// webhook delivery waits for it. It needs the caller's words in the bot
-	// phase's transcript, so it is off too when AICC_PROVIDER_TRANSCRIBE_MODEL
-	// is "off"; it does not need live transcription of the human phase.
+	// call the bot handled alone ends with a lead LeadJudgeIntents lists, the
+	// model reads its transcript and its verdict decides the lead, and the
+	// call's webhook delivery waits for it. It needs the caller's words in the
+	// bot phase's transcript, so it is off too when
+	// AICC_PROVIDER_TRANSCRIBE_MODEL is "off"; it does not need live
+	// transcription of the human phase.
 	IsLeadJudgeEnabled bool
+	// LeadJudgeIntents (AICC_LEAD_JUDGE_INTENTS) are the declared leads the
+	// judge reads: HIGH, MEDIUM or both, in the order written. A call whose
+	// lead is not listed is finished as with the judge off. HIGH unless set.
+	LeadJudgeIntents    []string
+	leadJudgeIntentsErr error
 
 	// Recordings. Backend FS keeps files where the switch wrote them;
 	// S3 uploads them to any S3-compatible store and clears the local spool.
@@ -512,6 +519,7 @@ func Load() (Config, error) {
 	outboundHeaders, outboundHeadersErr := ParseOutboundSIPHeaders(env(outboundHeadersVar, ""))
 	outboundHours, outboundHoursErr := ParseOutboundHours(env("AICC_OUTBOUND_HOURS", DefaultOutboundHours))
 	timeZone, timeZoneErr := ParseTimeZone(env("AICC_TIME_ZONE", DefaultTimeZone))
+	leadJudgeIntents, leadJudgeIntentsErr := ParseLeadJudgeIntents(env("AICC_LEAD_JUDGE_INTENTS", DefaultLeadJudgeIntents))
 	sessionLimit, sessionPeriod, sessionFrom, sessionErrs := envProviderLimit("SESSION")
 	tokenLimit, tokenPeriod, tokenFrom, tokenErrs := envProviderLimit("TOKEN")
 	c := Config{
@@ -573,6 +581,8 @@ func Load() (Config, error) {
 		TextLLMContextChars:           envInt("AICC_TEXT_LLM_CONTEXT_CHARS", DefaultTextLLMContextChars),
 		IsWrapUpDraftEnabled:          envBool("AICC_WRAPUP_DRAFT_ENABLED", true),
 		IsLeadJudgeEnabled:            envBool("AICC_LEAD_JUDGE_ENABLED", true),
+		LeadJudgeIntents:              leadJudgeIntents,
+		leadJudgeIntentsErr:           leadJudgeIntentsErr,
 		IsPostCallTranscribeEnabled:   envBool("AICC_POSTCALL_TRANSCRIBE_ENABLED", false),
 		PostCallTranscribeEndpoint:    env("AICC_POSTCALL_TRANSCRIBE_ENDPOINT", ""),
 		PostCallTranscribeModel:       env("AICC_POSTCALL_TRANSCRIBE_MODEL", "qwen-audio-3.1-asr-flash"),
@@ -832,6 +842,12 @@ func (c Config) validate() error {
 	}
 	if c.timeZoneErr != nil {
 		errs = append(errs, c.timeZoneErr)
+	}
+	// Refused whether or not the judge is on: a list that does not parse must
+	// not fall back to the default, or a deployment that meant to judge MEDIUM
+	// too would judge HIGH alone with nothing to say so.
+	if c.leadJudgeIntentsErr != nil {
+		errs = append(errs, c.leadJudgeIntentsErr)
 	}
 	if c.outboundDialFormErr != nil {
 		errs = append(errs, c.outboundDialFormErr)
@@ -1141,6 +1157,45 @@ func (c Config) TranscribeProviderName() string {
 		return c.TranscribeProvider
 	}
 	return c.Provider
+}
+
+// DefaultLeadJudgeIntents is AICC_LEAD_JUDGE_INTENTS when it is unset: the
+// judge reads HIGH leads alone. HIGH,MEDIUM is what v0.9.2 judged.
+const DefaultLeadJudgeIntents = "HIGH"
+
+// LeadJudgeableIntents are the values AICC_LEAD_JUDGE_INTENTS accepts: the
+// declared leads a text model can read at all. They mirror campaign.LeadHigh
+// and campaign.LeadMedium (campaign.IsLeadJudgeable); config does not import
+// campaign.
+func LeadJudgeableIntents() []string { return []string{"HIGH", "MEDIUM"} }
+
+// ParseLeadJudgeIntents reads AICC_LEAD_JUDGE_INTENTS: a comma-separated list
+// of HIGH and MEDIUM, each at most once, written in capitals as the API writes
+// a lead intent. Whitespace around an item is ignored and the order written is
+// kept. A list with no item, an empty item (a leading, trailing or doubled
+// comma), an unknown value and a repeated one are each an error: the judge is
+// turned off with AICC_LEAD_JUDGE_ENABLED=false, not with an empty list.
+func ParseLeadJudgeIntents(raw string) ([]string, error) {
+	const name = "AICC_LEAD_JUDGE_INTENTS"
+	accepted := LeadJudgeableIntents()
+	if strings.TrimSpace(raw) == "" {
+		return nil, fmt.Errorf("%s must list HIGH, MEDIUM or both, got %q; "+
+			"AICC_LEAD_JUDGE_ENABLED=false turns the judge off", name, raw)
+	}
+	var out []string
+	for item := range strings.SplitSeq(raw, ",") {
+		item = strings.TrimSpace(item)
+		switch {
+		case item == "":
+			return nil, fmt.Errorf("%s has an empty item in %q (a leading, trailing or doubled comma)", name, raw)
+		case !slices.Contains(accepted, item):
+			return nil, fmt.Errorf("%s must list HIGH, MEDIUM or both, got %q in %q", name, item, raw)
+		case slices.Contains(out, item):
+			return nil, fmt.Errorf("%s names %s twice in %q", name, item, raw)
+		}
+		out = append(out, item)
+	}
+	return out, nil
 }
 
 // DefaultTimeZone is AICC_TIME_ZONE when it is unset.

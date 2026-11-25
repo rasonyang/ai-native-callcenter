@@ -5,6 +5,42 @@ under one tag, `rasonyang/ai-native-callcenter` and `rasonyang/freeswitch-aicc`;
 run them together. From v0.2.0 on, the GitHub release of the same tag also
 carries the one-line installer's files.
 
+## Unreleased
+
+### Upgrade notes
+
+- **`MEDIUM` campaign leads are no longer judged unless you ask for it**
+  (#723). The lead judge of v0.9.2 (#661) read every campaign call the bot
+  handled alone that ended `HIGH` or `MEDIUM`; it now reads the leads
+  `AICC_LEAD_JUDGE_INTENTS` lists, and that defaults to `HIGH`. With nothing
+  set, a call that ends `MEDIUM` is recorded and delivered as with the judge
+  off: its webhook delivery goes out at once, it carries no `leadVerdict` or
+  `declaredLeadIntent`, and its `leadIntent` is the one the flow recorded, so
+  the judge no longer turns any `MEDIUM` lead into `NONE`. Set
+  `AICC_LEAD_JUDGE_INTENTS=HIGH,MEDIUM` to keep v0.9.2's behaviour. `HIGH`
+  leads are judged as before. A deployment with no text model, or with
+  `AICC_LEAD_JUDGE_ENABLED=false`, sees no change.
+- A `MEDIUM` attempt that v0.9.2 left awaiting its verdict when it stopped is
+  settled when this release starts (at its deadline, as before, where this
+  release has no text model): `NOT_JUDGED`, the `MEDIUM` lead standing, and
+  its held webhook delivery sent then, with no text-model request (#723).
+- One setting added: `AICC_LEAD_JUDGE_INTENTS` (default `HIGH`, #723), above.
+  An unknown value, a repeated one or an empty item refuses startup. None
+  removed. No API contract change and no migration.
+
+### Changed
+
+- **The lead judge reads the declared leads a deployment lists** (#723).
+  `AICC_LEAD_JUDGE_INTENTS` is a comma-separated list of `HIGH` and `MEDIUM`;
+  `HIGH`, the default, judges `HIGH` leads alone, and `HIGH,MEDIUM` judges both
+  as v0.9.2 did. A verdict can only take a `MEDIUM` lead away (`REFUSED`,
+  `MACHINE` and `NO_EVIDENCE` leave no lead), so a deployment that uses
+  `MEDIUM` as a wide net keeps it whole, and spends no text-model request and
+  no webhook hold on it. A call whose lead is not listed is finished exactly
+  as with the judge off. The startup line `campaign leads are judged` names
+  the intents. `docs/flow-authoring.md` section 2.7.1 says what it means for a
+  flow.
+
 ## v0.9.2 - 2026-11-25
 
 ### Upgrade notes

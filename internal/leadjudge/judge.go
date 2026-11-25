@@ -4,8 +4,9 @@
 // (docs/design/10-campaigns.md section 11.1).
 //
 // The lead a campaign call records is the realtime model's hearing of one
-// moment of audio. After a call the bot handled alone ends with a HIGH or
-// MEDIUM lead, the CDR's transaction marks a judgement owed (PENDING, with a
+// moment of audio. After a call the bot handled alone ends with a lead the
+// deployment judges (AICC_LEAD_JUDGE_INTENTS: HIGH unless it lists MEDIUM
+// too), the CDR's transaction marks a judgement owed (PENDING, with a
 // deadline) and holds the call's webhook deliveries; this package then makes
 // one text-model request over the transcript and writes the verdict, which
 // decides the lead and releases the deliveries. It never runs during a call.
@@ -24,6 +25,7 @@ package leadjudge
 import (
 	"context"
 	"log/slog"
+	"slices"
 	"sync"
 	"time"
 
@@ -80,6 +82,11 @@ type Config struct {
 	// BudgetChars is the most runes the prompt may total
 	// (AICC_TEXT_LLM_CONTEXT_CHARS).
 	BudgetChars int
+	// Intents are the declared leads the service judges
+	// (AICC_LEAD_JUDGE_INTENTS). A judgement owed for any other lead, which
+	// only a run with a wider list can have left, is settled NOT_JUDGED
+	// without a request. Empty, nothing is judged.
+	Intents campaign.LeadJudgeIntents
 }
 
 // Service runs the judgements.
@@ -129,9 +136,19 @@ func New(st Store, llm textllm.Client, cfg Config, log *slog.Logger) *Service {
 	}
 }
 
-// IsJudging reports whether the service has a text model to judge with. The
-// store marks judgements owed only when it does (store.Store.IsLeadJudgeEnabled).
-func (s *Service) IsJudging() bool { return s != nil && s.llm != nil }
+// IsJudging reports whether the service has a text model to judge with and a
+// lead to judge.
+func (s *Service) IsJudging() bool { return s != nil && s.llm != nil && len(s.cfg.Intents) > 0 }
+
+// JudgedIntents are the declared leads the service judges, none when it does
+// not judge. The store marks a judgement owed only for these
+// (store.Store.LeadJudgeIntents).
+func (s *Service) JudgedIntents() campaign.LeadJudgeIntents {
+	if !s.IsJudging() {
+		return nil
+	}
+	return slices.Clone(s.cfg.Intents)
+}
 
 // Start sweeps once (settling expired judgements and picking up owed ones),
 // then keeps sweeping on a slow ticker until Stop. Safe on a nil service.
@@ -269,6 +286,16 @@ func (s *Service) run(callID uuid.UUID, readAt time.Time) {
 	if j.Verdict != campaign.VerdictPending {
 		return
 	}
+	if !s.cfg.Intents.IsJudged(j.DeclaredLeadIntent) {
+		// A judgement owed by a run that judged this lead is settled here, at
+		// once and with no request, as a model that gave no answer would
+		// leave it: the declared lead stands and the held delivery goes out
+		// now. Only a restart that narrowed AICC_LEAD_JUDGE_INTENTS gets here.
+		log.Info("campaign lead not judged: AICC_LEAD_JUDGE_INTENTS no longer lists its declared lead",
+			"declaredLeadIntent", j.DeclaredLeadIntent, "intents", s.cfg.Intents)
+		s.write(log, j, campaign.VerdictNotJudged, "", 0)
+		return
+	}
 
 	ctx, cancel := context.WithDeadline(s.ctx, j.DeadlineAt.Add(-s.margin))
 	defer cancel()
@@ -291,10 +318,14 @@ func (s *Service) run(callID uuid.UUID, readAt time.Time) {
 		// Stopping: leave it owed for the next start or the deadline.
 		return
 	}
+	s.write(log, j, verdict, reason, requests)
+}
 
+// write applies a verdict to the judgement and logs what it left.
+func (s *Service) write(log *slog.Logger, j store.LeadJudgement, verdict campaign.LeadVerdict, reason string, requests int) {
 	wctx, cancelWrite := context.WithTimeout(s.ctx, writeTimeout)
 	defer cancelWrite()
-	lead, applied, err := s.store.ApplyLeadVerdict(wctx, callID, verdict, reason)
+	lead, applied, err := s.store.ApplyLeadVerdict(wctx, j.CallID, verdict, reason)
 	if err != nil {
 		log.Error("campaign lead judgement failed", "stage", "write the verdict", "verdict", verdict, "error", err)
 		return

@@ -110,8 +110,8 @@ func TestEvalSetIsWellFormed(t *testing.T) {
 			t.Errorf("%s: language %q is neither zh nor en", c.ID, c.Lang)
 			continue
 		}
-		if !campaign.IsLeadJudged(c.Lead.Intent) {
-			t.Errorf("%s: lead %q is not one that is judged", c.ID, c.Lead.Intent)
+		if !campaign.IsLeadJudgeable(c.Lead.Intent) {
+			t.Errorf("%s: lead %q is not one a judge reads", c.ID, c.Lead.Intent)
 		}
 		valid := false
 		for _, v := range modelVerdicts {

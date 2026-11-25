@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -144,9 +145,13 @@ func callee(s string) store.TranscriptLine { return text(store.SpeakerCustomer, 
 
 func quiet() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }
 
-// newTestService is a service that reads at once and keeps a short margin.
+// bothLeads is v0.9.2's list, which judges every lead a judge can read.
+var bothLeads = campaign.LeadJudgeIntents{campaign.LeadHigh, campaign.LeadMedium}
+
+// newTestService is a service that judges HIGH and MEDIUM, reads at once and
+// keeps a short margin.
 func newTestService(st Store, llm textllm.Client) *Service {
-	s := New(st, llm, Config{Timeout: 10 * time.Second, BudgetChars: DefaultBudgetChars}, quiet())
+	s := New(st, llm, Config{Timeout: 10 * time.Second, BudgetChars: DefaultBudgetChars, Intents: bothLeads}, quiet())
 	s.settle, s.margin = 0, 50*time.Millisecond
 	return s
 }
@@ -502,6 +507,85 @@ func TestStartPicksUpWhatIsOwedAndSettlesWhatIsLate(t *testing.T) {
 	s.Stop()
 	if _, lead, _ := late.state(); lead != campaign.LeadHigh {
 		t.Errorf("lead %s, want the declared HIGH", lead)
+	}
+}
+
+// A restart onto a narrower AICC_LEAD_JUDGE_INTENTS (v0.9.2 judged HIGH and
+// MEDIUM; unset, the list is now HIGH alone) finds judgements the run before
+// left owed for a lead it no longer judges. Each is settled NOT_JUDGED at once,
+// with no request and long before its deadline: the declared lead stands and
+// nothing waits on it. A lead the list still names is judged as before.
+func TestARestartThatNarrowsTheListSettlesWhatItNoLongerJudges(t *testing.T) {
+	t.Parallel()
+	high := campaign.LeadJudgeIntents{campaign.LeadHigh}
+	for _, c := range []struct {
+		name     string
+		intents  campaign.LeadJudgeIntents
+		declared campaign.LeadIntent
+		verdict  campaign.LeadVerdict
+		requests int
+	}{
+		{"a MEDIUM lead under the default HIGH", high, campaign.LeadMedium, campaign.VerdictNotJudged, 0},
+		{"a HIGH lead under MEDIUM alone", campaign.LeadJudgeIntents{campaign.LeadMedium}, campaign.LeadHigh, campaign.VerdictNotJudged, 0},
+		{"a HIGH lead under the default HIGH", high, campaign.LeadHigh, campaign.VerdictRefused, 1},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			// Owed by the run before, its whole deadline still ahead.
+			st := newFakeStore(c.declared, "en", campaign.LeadJudgeDeadline, acceptedCall...)
+			llm := &fakeLLM{replies: []func(context.Context) (string, error){says(`{"verdict":"REFUSED","reason":"Declined."}`)}}
+			s := newTestService(st, llm)
+			s.cfg.Intents = c.intents
+			s.Start()
+			select {
+			case v := <-st.applied:
+				if v != c.verdict {
+					t.Errorf("verdict %s, want %s", v, c.verdict)
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatal("the owed judgement was not settled, so it waits for its deadline")
+			}
+			s.Stop()
+			verdict, lead, reason := st.state()
+			if want := campaign.LeadAfterVerdict(c.declared, c.verdict); verdict != c.verdict || lead != want {
+				t.Errorf("verdict %s lead %s, want %s %s", verdict, lead, c.verdict, want)
+			}
+			if c.verdict == campaign.VerdictNotJudged && reason != "" {
+				t.Errorf("reason %q, want none for a lead that was not judged", reason)
+			}
+			if n := len(llm.requests()); n != c.requests {
+				t.Errorf("%d requests, want %d", n, c.requests)
+			}
+		})
+	}
+}
+
+// The service tells the store which leads to owe a judgement for: the list it
+// was given while it can judge, and none when it cannot.
+func TestTheJudgedIntentsAreTheListOnlyWhileJudging(t *testing.T) {
+	t.Parallel()
+	llm := &fakeLLM{replies: []func(context.Context) (string, error){says(`{"verdict":"CONFIRMED"}`)}}
+	high := campaign.LeadJudgeIntents{campaign.LeadHigh}
+	for _, c := range []struct {
+		name    string
+		llm     textllm.Client
+		intents campaign.LeadJudgeIntents
+		want    campaign.LeadJudgeIntents
+	}{
+		{"a model and HIGH", llm, high, high},
+		{"a model and both", llm, bothLeads, bothLeads},
+		{"no model", nil, bothLeads, nil},
+		{"no lead listed", llm, nil, nil},
+	} {
+		s := New(newFakeStore(campaign.LeadHigh, "en", time.Second), c.llm, Config{Intents: c.intents}, quiet())
+		got := s.JudgedIntents()
+		if !slices.Equal(got, c.want) || s.IsJudging() != (len(c.want) > 0) {
+			t.Errorf("%s: judged %v judging %v, want %v", c.name, got, s.IsJudging(), c.want)
+		}
+	}
+	var none *Service
+	if none.IsJudging() || none.JudgedIntents() != nil {
+		t.Error("a nil service judges")
 	}
 }
 

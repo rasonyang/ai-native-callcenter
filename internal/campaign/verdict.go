@@ -56,9 +56,21 @@ const (
 	LeadJudgeHold     = 35 * time.Second
 )
 
-// IsLeadJudged reports whether a call's lead is one the text model reads:
-// HIGH and MEDIUM, the two that record the customer's interest.
-func IsLeadJudged(i LeadIntent) bool { return i == LeadHigh || i == LeadMedium }
+// IsLeadJudgeable reports whether a declared lead is one a text model can read
+// at all: HIGH and MEDIUM, the two that record the customer's interest. Which
+// of them a deployment reads is its LeadJudgeIntents.
+func IsLeadJudgeable(i LeadIntent) bool { return i == LeadHigh || i == LeadMedium }
+
+// LeadJudgeIntents are the declared leads a deployment's text model reads
+// (AICC_LEAD_JUDGE_INTENTS, design 10 section 11.1): HIGH, MEDIUM or both. A
+// call that declared a lead left out of them is finished as if the judge were
+// off. Empty, nothing is judged: the judge is off.
+type LeadJudgeIntents []LeadIntent
+
+// IsJudged reports whether a call that declared the lead i is judged.
+func (s LeadJudgeIntents) IsJudged(i LeadIntent) bool {
+	return IsLeadJudgeable(i) && slices.Contains(s, i)
+}
 
 // LeadAfterVerdict is the effective lead a verdict leaves of the one the flow
 // declared (owner decision, 2026-11-24): CONFIRMED keeps it; UNDECIDED lowers

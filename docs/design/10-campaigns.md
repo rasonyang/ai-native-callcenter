@@ -1401,7 +1401,8 @@ The model judges; code records.
 ### 11.1 A text model reads the finished call and decides the lead (#661)
 
 The lead above is the realtime model's hearing of one moment of audio. After a campaign call
-**the bot handled alone** ends with a `HIGH` or `MEDIUM` lead, one text-model job
+**the bot handled alone** ends with a lead the deployment judges (`HIGH` by default, `MEDIUM`
+too where `AICC_LEAD_JUDGE_INTENTS` lists it, #723), one text-model job
 (`internal/leadjudge`, the `AICC_TEXT_LLM_*` model, not the voice provider) reads the transcript
 and gives a verdict, and the verdict decides the lead. Nobody reviews it. The rules come from
 the two offline runs posted on the issue; the owner's decisions of 2026-11-24 fixed the rest.
@@ -1417,15 +1418,15 @@ the two offline runs posted on the issue; the owner's decisions of 2026-11-24 fi
   stays the effective lead, so every consumer of it (contacts, the summary, exports) needed no
   change.
 - **Owed inside the CDR's transaction.** `attemptFinisher.fromCDR` marks the attempt `PENDING`
-  with a deadline 30 s from the database's clock when the store judges leads
-  (`Store.IsLeadJudgeEnabled`, set from wiring), the lead is `HIGH` or `MEDIUM`, and the CDR is
-  answered, more than a placement failure, has a bot, and reached no queue and no agent
+  with a deadline 30 s from the database's clock when the store judges the call's lead
+  (`Store.LeadJudgeIntents`, set from wiring: `campaign.LeadJudgeIntents.IsJudged`), and the CDR
+  is answered, more than a placement failure, has a bot, and reached no queue and no agent
   (`isJudgedCall`). The call's webhook deliveries are queued in the same transaction, held
   35 s, with a payload that already says `leadVerdict: NOT_JUDGED` and the declared lead: if
   nothing ever acts, the delivery goes out by itself at the bound and is correct as it stands.
   A fuller CDR while the judgement is owed keeps the hold. Every other call (no lead, `LOW`,
-  `NONE`, `DO_NOT_CALL`, unanswered, handed to an agent, not a campaign's) is untouched and
-  delivered at once, with no text-model request.
+  `NONE`, `DO_NOT_CALL`, a lead the deployment does not judge, unanswered, handed to an agent,
+  not a campaign's) is untouched and delivered at once, with no text-model request.
 - **The callback waits.** While the attempt is `PENDING`, `leadSideEffects` files no callback
   for `HIGH`; the verdict files it when the lead it leaves is still `HIGH`, `NOT_JUDGED` at the
   deadline included. `DO_NOT_CALL` is never judged and goes on the list as before. Retry and
@@ -1453,7 +1454,22 @@ the two offline runs posted on the issue; the owner's decisions of 2026-11-24 fi
   a key. It does not need live transcription of the human phase, but it does need the caller's
   words in the bot phase's transcript, so `AICC_PROVIDER_TRANSCRIBE_MODEL=off` turns it off:
   every lead would be `NO_EVIDENCE`. `aicc_campaign_lead_verdicts_total{verdict}` counts what is
-  written.
+  written. The startup line `campaign leads are judged` names the model and the intents.
+- **Which leads** (#723). `AICC_LEAD_JUDGE_INTENTS` lists the declared leads that are judged:
+  `HIGH`, `MEDIUM` or both, in capitals; an unknown value, a repeat or an empty item refuses
+  startup. The default is `HIGH` (owner decision, 2026-11-25): a verdict can only take a `MEDIUM`
+  lead away, and a deployment that uses `MEDIUM` as a wide net keeps it whole; `HIGH,MEDIUM` is
+  #661's behaviour. `config.ParseLeadJudgeIntents` reads it, the judge hands it to the store
+  (`leadjudge.Service.JudgedIntents`, none while the judge cannot judge), and the store owes a
+  judgement only for those. A call whose lead is not listed is finished exactly as with the
+  judge off: no `declared_lead_intent`, no verdict, no deadline, delivered at once.
+- **A restart that narrows the list.** Judgements a run with a wider list left `PENDING` for a
+  lead the new list leaves out (the upgrade from v0.9.2 to the default: `MEDIUM` attempts still
+  awaiting a verdict) are settled by the job that picks them up at start, at once and with no
+  request: `NOT_JUDGED`, the declared lead standing, the held delivery rebuilt and released,
+  as a model that gave no answer leaves it. The row keeps its `declaredLeadIntent` and verdict,
+  which say what was owed; one past its deadline is the sweep's, as before. A restart with the
+  judge off still settles them only at their deadline.
 - **Known gaps.** The transcript rows carry no acknowledgement or cut flag, so the judge cannot
   be shown them. A plain affirmative to a one-breath pitch cannot be told from a lead by text
   alone; it is `UNDECIDED`, kept visible rather than dropped. `GET /cdrs` shows `PENDING` while
