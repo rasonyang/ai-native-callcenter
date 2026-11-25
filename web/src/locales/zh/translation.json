@@ -508,7 +508,10 @@
       "HUMAN_AGENT": "坐席"
     },
     "noRecord": "没有通话记录",
-    "noRecordHint": "账本中没有这通电话的记录。从未到达交换机的呼叫（例如被跳过的号码）不会留下记录。"
+    "noRecordHint": "账本中没有这通电话的记录。从未到达交换机的呼叫（例如被跳过的号码）不会留下记录。",
+    "callIdCopyFailed": "通话 ID 未复制：请打开该通话后复制",
+    "callNotFound": "没有 ID 为 {{callId}} 的通话。下方列表并未按它筛选。",
+    "callLookupFailed": "无法查找通话 {{callId}}：{{reason}}"
   },
   "callbacks": {
     "hint": "机器人在电话里承诺的回访。回拨前先认领。",

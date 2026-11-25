@@ -1,6 +1,7 @@
 import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 
+import i18n from '@/lib/i18n'
 import type { CDR } from '@/lib/ledger'
 import { renderApp, waitForRows } from '@/test/app'
 import { asciiRun, chineseRun, digits, longUrl, mixedNote } from '@/test/hostile'
@@ -75,8 +76,18 @@ function enumRows(): CDR[] {
 
 function render(rows: CDR[], total = rows.length) {
   return renderApp('/admin/cdr', {
-    handle: ({ path, method }) =>
-      method === 'GET' && path.startsWith('/cdrs?') ? { items: rows, total } : undefined,
+    handle: ({ path, method }) => {
+      if (method !== 'GET') return undefined
+      if (path.startsWith('/cdrs?')) return { items: rows, total }
+      // One call by id, as a pasted id asks for it: none of these is on file.
+      if (path.startsWith('/cdrs/')) {
+        return new Response(JSON.stringify({ error: { code: 'NOT_FOUND', message: 'cdr not found' } }), {
+          status: 404,
+          headers: { 'content-type': 'application/json' },
+        })
+      }
+      return undefined
+    },
   })
 }
 
@@ -110,6 +121,30 @@ describe('CDR explorer with every enum cell at its widest', () => {
   // contract allows each, and the journey and status columns are text.
   layoutTest('cdr (widest enum cells)', async (ctx) => {
     render(enumRows())
+    await waitForRows(5)
+    await expectLayout(ctx)
+  })
+})
+
+describe('CDR explorer with the copy-id button on every row', () => {
+  // The id has no column (#714): each row carries an icon button beside the
+  // play button, with a recording and without one, and the widest enum cells
+  // leave it the least room.
+  layoutTest('cdr (copy-id buttons)', async (ctx) => {
+    render(enumRows())
+    await waitForRows(5)
+    expect(screen.getAllByRole('button', { name: i18n.t('agent.copyCallId') })).toHaveLength(5)
+    await expectLayout(ctx)
+  })
+
+  // A pasted id that names no call says so above the table, which stays.
+  layoutTest('cdr (a pasted id no call has)', async (ctx) => {
+    render(enumRows())
+    await waitForRows(5)
+    fireEvent.change(screen.getByPlaceholderText(i18n.t('cdr.filterNumber')), {
+      target: { value: '019ac2e4-7b10-7c3e-9a51-0f6d2b8e4aff' },
+    })
+    await screen.findByRole('alert')
     await waitForRows(5)
     await expectLayout(ctx)
   })

@@ -1,4 +1,4 @@
-import { screen } from '@testing-library/react'
+import { screen, within } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 
 import i18n from '@/lib/i18n'
@@ -96,10 +96,42 @@ function render(
   })
 }
 
-/** The page has drawn the call (its Facts and transcript headings are there). */
+/** The page has drawn the call (its id and transcript heading are there). */
 async function drawn() {
-  await screen.findByText(CALL_ID, { exact: false })
+  // Within the page: the top bar's breadcrumb ends in the id too.
+  await within(await screen.findByRole('main')).findByText(CALL_ID)
   await screen.findByText(i18n.t('cdr.transcript'))
+}
+
+/**
+ * The call id in the page header is whole and on one line, whatever the title
+ * beside it holds: never cut, and never squeezed into a column of one
+ * character per line (#714).
+ */
+async function expectIdOnOneLine(ctx: LayoutContext) {
+  await settle()
+  const main = document.querySelector('main')
+  const id = [...(main?.querySelectorAll('code') ?? [])].find((el) => el.textContent === CALL_ID)
+  if (!main || !id) throw new Error('the call id is not on the page as an item of its own')
+  const tops = new Set<number>()
+  const range = document.createRange()
+  range.selectNodeContents(id)
+  for (const rect of range.getClientRects()) if (rect.width > 0) tops.add(Math.round(rect.top))
+  const problems: string[] = []
+  if (tops.size !== 1) problems.push(`wraps onto ${tops.size} lines`)
+  if (id.scrollWidth > id.clientWidth + 1) {
+    problems.push(`is cut: needs ${id.scrollWidth}px, has ${id.clientWidth}px`)
+  }
+  const box = id.getBoundingClientRect()
+  const page = main.getBoundingClientRect()
+  if (box.left < page.left - 1 || box.right > page.right + 1) {
+    problems.push(`lies at ${Math.round(box.left)}..${Math.round(box.right)}, outside the page ${Math.round(page.left)}..${Math.round(page.right)}`)
+  }
+  if (problems.length > 0) {
+    throw new LayoutViolation(
+      `${ctx.screen} @ ${ctx.viewport.width}x${ctx.viewport.height} [${ctx.lang}]: the call id ${problems.join('; ')}`,
+    )
+  }
 }
 
 /** No card on the page has content wider than itself. */
@@ -127,6 +159,7 @@ async function expectCardsContain(ctx: LayoutContext) {
 async function check(ctx: LayoutContext) {
   await expectLayout(ctx)
   await expectCardsContain(ctx)
+  await expectIdOnOneLine(ctx)
 }
 
 

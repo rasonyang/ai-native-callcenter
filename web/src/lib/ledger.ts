@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { queryOptions, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import type { components, operations } from '@/generated/api'
 
@@ -195,14 +195,22 @@ export function useMyDay(enabled: boolean) {
   })
 }
 
-export function useCDR(callId: string) {
-  return useQuery({
+/**
+ * One call's record as a query, so the page that shows it and the list's
+ * lookup by pasted id (which opens that page) share one cache entry.
+ */
+export function cdrQuery(callId: string) {
+  return queryOptions({
     queryKey: [...CDRS_KEY, callId],
     queryFn: () => ledgerApi.cdr(callId),
     // A call with no record answers 404 at once and will go on doing so; the
     // default retry would hold the page on "Loading" for seconds first.
     retry: (count, error) => !(error instanceof ApiError && error.status === 404) && count < 1,
   })
+}
+
+export function useCDR(callId: string) {
+  return useQuery(cdrQuery(callId))
 }
 
 /**
