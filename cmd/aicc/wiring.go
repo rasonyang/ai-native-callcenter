@@ -733,6 +733,7 @@ func botConfig(
 	countryCode string,
 	dialForm phonenum.DialForm,
 	quotaMeter *ratemeter.Meter,
+	sessionCounted func(callID uuid.UUID),
 ) aicall.OrchestratorConfig {
 	return aicall.OrchestratorConfig{
 		UAS: uas,
@@ -740,17 +741,20 @@ func botConfig(
 		// meter, which campaign admission reads (#604), and every start is
 		// counted on it, a campaign call's after waiting for room in the
 		// provider's session window (#644).
-		Sessions:           voiceSessions(quotaMeter),
-		SessionStarts:      quotaMeter,
-		Catalog:            catalogSvc,
-		Flows:              flows,
-		Switch:             sw,
-		Ledger:             ledger,
-		Transcripts:        transcripts,
-		Backend:            backend,
-		Profile:            profile,
-		AnnounceCallback:   announce,
-		AnnounceBotSession: announceBot,
+		Sessions:      voiceSessions(quotaMeter),
+		SessionStarts: quotaMeter,
+		// ...and campaign admission hears each counted start, so an answered
+		// leg's stay in the dialer's unstarted term ends here (#640).
+		OnProviderSessionCounted: sessionCounted,
+		Catalog:                  catalogSvc,
+		Flows:                    flows,
+		Switch:                   sw,
+		Ledger:                   ledger,
+		Transcripts:              transcripts,
+		Backend:                  backend,
+		Profile:                  profile,
+		AnnounceCallback:         announce,
+		AnnounceBotSession:       announceBot,
 		// A call the bot finishes alone writes the only ledger row it will
 		// ever have, so the business data has to reach the bot too.
 		CallData: callData,

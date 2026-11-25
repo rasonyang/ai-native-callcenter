@@ -57,7 +57,7 @@ func (q providerQuota) backoff() time.Duration {
 //	now >= lastQuotaRefusal + backoff
 //	starts_W + n <= sessionLimit x W / sessionPeriod               when sessionLimit > 0
 //	tokens_T + n x tokens_T / max(1, active) <= tokenLimit         when tokenLimit > 0
-//	where n = pending + waiting + E + 1
+//	where n = max(pending + waiting, unstarted) + E + 1
 //
 // W is ratemeter.AdmissionWindow of the session period: the period, or ten
 // seconds when the period is shorter, with the limit scaled to it, because
@@ -65,12 +65,22 @@ func (q providerQuota) backoff() time.Duration {
 // (ratemeter.Meter.Pace) keeps every shorter period inside the limit. A
 // per-minute limit is judged over its minute, as in v0.9.0. T is the token
 // period: tokens are spent all along by the sessions in progress, so their
-// period is the vendor's own. starts_W and tokens_T are the meter's. E is the sum over campaigns of p_c x ringing_c, the answers the
-// ringing legs are expected to bring, each of which opens a session at the
-// answer. pending is the answered legs that hold or wait for a bot slot and
-// have not opened their session yet (voice.Usage.Reserved + Waiting), counted
-// for the reason they are in the bot rule, and waiting the answered legs
-// whose start waits in the gate. active is the bot sessions in use, so
+// period is the vendor's own. starts_W and tokens_T are the meter's. E is the
+// sum over campaigns of p_c x ringing_c, the answers the ringing legs are
+// expected to bring, each of which opens a session at the answer.
+//
+// The first term is the answered legs whose session start is not counted
+// yet, each once. pending is those that hold or wait for a bot slot
+// (voice.Usage.Reserved + Waiting) and waiting those whose start waits in the
+// gate (the meter's StartsWaiting); unstarted is the dialer's own count of its
+// answered flights whose start is not counted (Dialer.unstarted, #640), which
+// also sees the legs neither of the others does: between the answer and the
+// reservation, and between the slot being taken and the start reaching the
+// gate. The two overlap, since a campaign leg that is reserved, waiting or in
+// the gate is also one of those flights, so they are not added: the larger
+// holds. The max keeps the legs that are no flight's counted, an AI call
+// placed through the API holding a reserved slot, or a leg whose answer this
+// dialer never heard. active is the bot sessions in use, so
 // tokens_T / active is what a session has cost over the token period; with no
 // tokens yet the token rule admits, and the session rule is what guards a cold
 // burst. backoff is providerQuota.backoff.
@@ -82,11 +92,11 @@ func (q providerQuota) backoff() time.Duration {
 // condition can next change by time alone (the backoff ending, the oldest
 // start or token entry leaving its window); zero when only an event can
 // change it.
-func providerHold(r ratemeter.Reading, q providerQuota, pending, expected float64, active int) (string, time.Time) {
+func providerHold(r ratemeter.Reading, q providerQuota, pending, unstarted, expected float64, active int) (string, time.Time) {
 	if backoff := q.backoff(); !r.LastQuotaRefusal.IsZero() && r.At.Before(r.LastQuotaRefusal.Add(backoff)) {
 		return obs.DialerBlockedProviderBackoff, r.LastQuotaRefusal.Add(backoff)
 	}
-	n := pending + float64(r.StartsWaiting) + expected + 1
+	n := max(pending+float64(r.StartsWaiting), unstarted) + expected + 1
 	if q.sessionLimit > 0 {
 		period := max(q.sessionPeriod, time.Nanosecond)
 		limit := float64(q.sessionLimit) * float64(ratemeter.AdmissionWindow(period)) / float64(period)
@@ -110,7 +120,7 @@ func providerHold(r ratemeter.Reading, q providerQuota, pending, expected float6
 func (d *Dialer) providerLimit(u voice.Usage, expected float64) string {
 	r := d.pr.Read()
 	reason, until := providerHold(r, d.cfg.providerQuota(),
-		float64(u.Reserved+u.Waiting), expected, u.InUse)
+		float64(u.Reserved+u.Waiting), float64(d.unstarted), expected, u.InUse)
 	if reason != "" && !until.IsZero() && (d.rateWake.IsZero() || until.Before(d.rateWake)) {
 		d.rateWake = until
 	}

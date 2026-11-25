@@ -315,10 +315,18 @@ func (d *Dialer) admitOne(ctx context.Context, c campaign.Campaign, b *bucket, n
 //	botInUse + sum over campaigns (p_c x ringing_c) + 1 <= cap - inboundReserve
 //	the provider's quota, each limit over its period (providerHold)
 //
-// botInUse counts the slots in use, those reserved for answered legs that have
-// not bridged yet, and the answered legs waiting in the overflow hold for one.
-// p_c is the campaign's answer-rate bound (CapacityStats.Bound). Inbound calls
-// are never held: this is campaign admission only.
+// botInUse counts the slots in use plus the larger of the slot counts for
+// answered legs (Usage.Reserved + Waiting) and unstarted: the answered legs
+// whose provider session start is not counted yet (Dialer.unstarted, #640).
+// A campaign leg that is reserved or waiting is also an answered, uncounted
+// dialer flight, so the two overlap and the larger holds; the max keeps the
+// answered legs that are no flight's counted (an AI call placed through the
+// API holding a reserved slot). unstarted adds the legs the slot counts cannot
+// see, between the answer and the reservation, and, from the slot being taken
+// until the start is counted (the start gate's wait included), one leg counted
+// twice rather than a leg counted not at all. p_c is the campaign's
+// answer-rate bound (CapacityStats.Bound).
+// Inbound calls are never held: this is campaign admission only.
 func (d *Dialer) limit(ctx context.Context, c campaign.Campaign) string {
 	if d.inflight[c.ID] >= c.MaxConcurrent {
 		return obs.DialerBlockedCampaign
@@ -341,7 +349,7 @@ func (d *Dialer) limit(ctx context.Context, c campaign.Campaign) string {
 	expected := d.expectedAnswers(ctx)
 	if d.sl != nil {
 		reserve := max(d.cfg.InboundReserve, u.InboundReserve)
-		held := float64(u.InUse + u.Reserved + u.Waiting)
+		held := float64(u.InUse + max(u.Reserved+u.Waiting, d.unstarted))
 		if held+expected+1 > float64(u.Cap-reserve)+1e-9 {
 			return obs.DialerBlockedBot
 		}
@@ -676,6 +684,9 @@ func (d *Dialer) drop(callID uuid.UUID) *flight {
 	}
 	if f.isAnswered {
 		d.talking--
+		if !f.isSessionCounted {
+			d.unstarted--
+		}
 		obsInFlight(true, -1)
 	} else {
 		d.ringing--

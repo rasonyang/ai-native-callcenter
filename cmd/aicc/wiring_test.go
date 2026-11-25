@@ -304,7 +304,7 @@ func TestEverySessionStartIsCountedOnceOnTheMeter(t *testing.T) {
 		t.Errorf("the factory counted %d starts on the meter, want none: the orchestrator counts them", got)
 	}
 	cfg := botConfig(botUAS(config.Config{}, nil), nil, nil, nil, nil, nil, nil, provider.Profile{},
-		nil, nil, nil, nil, nil, false, 0, 0, 0, "", false, "", phonenum.FormE164, meter)
+		nil, nil, nil, nil, nil, false, 0, 0, 0, "", false, "", phonenum.FormE164, meter, nil)
 	if cfg.SessionStarts != aicall.SessionStarts(meter) {
 		t.Errorf("the orchestrator counts starts on %v, want the process's meter", cfg.SessionStarts)
 	}

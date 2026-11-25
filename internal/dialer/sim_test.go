@@ -193,6 +193,12 @@ const (
 	evRingOut
 	evTalkEnd
 	evHoldExpire
+	// evSessionStart is the window's end (startWindow): the leg's slot is
+	// taken, its provider session is counted, and the dialer is told.
+	evSessionStart
+	// evWindowHangup is a callee hanging up inside the window (#640): no
+	// slot, no session, the unstarted term releases as the leg ends.
+	evWindowHangup
 	// evTurn is a provider session reporting what one turn cost (#604).
 	evTurn
 	// evTick moves the clock on by a second when nothing else would: a hold
@@ -272,6 +278,12 @@ type sim struct {
 	// inbound is the bot sessions inbound calls hold, set by the test.
 	inbound int
 	hold    time.Duration
+	// startWindow and hangupInWindow model the production window between an
+	// answer and the leg's counted session start (#640); isWindowJittered draws
+	// each call's span instead of fixing it.
+	startWindow      time.Duration
+	hangupInWindow   float64
+	isWindowJittered bool
 
 	// accounting
 	lastAt        time.Time
@@ -286,11 +298,14 @@ type sim struct {
 	// process's account of it that admission reads; nil: every session
 	// starts and nothing is metered. isStartGated makes an answered call's
 	// session start wait in the meter's start gate (#644), and startWaits
-	// records how each of those starts went.
+	// records how each of those starts went. counted is the calls whose
+	// session start was counted in the event being applied, told to the
+	// dialer when it is whole.
 	prov         *simProvider
 	meter        *ratemeter.Meter
 	isStartGated bool
 	startWaits   []ratemeter.Start
+	counted      []uuid.UUID
 }
 
 // simLines is the DID line account as the dialer sees it.
@@ -360,6 +375,16 @@ type simSpec struct {
 	sessionLimit, tokenLimit   int
 	sessionPeriod, tokenPeriod time.Duration
 	isStartGated               bool
+	// startWindow is how long an answered leg stands between the answer and
+	// its provider session's counted start — in production the reservation,
+	// the INVITE, +OK and the session take a little while; 0 is no window
+	// (#640). hangupInWindow is the share of answered calls whose callee
+	// hangs up inside it.
+	startWindow    time.Duration
+	hangupInWindow float64
+	// isWindowJittered draws each answered call's window uniformly in
+	// [startWindow/2, 3·startWindow/2) instead of the fixed span.
+	isWindowJittered bool
 }
 
 func newSim(t *testing.T, sp simSpec) *sim {
@@ -414,6 +439,9 @@ func newSim(t *testing.T, sp simSpec) *sim {
 		IsLive: s.isLive, Log: slog.New(slog.DiscardHandler), OnChange: sp.onChange,
 	}
 	s.prov = sp.provider
+	s.startWindow = sp.startWindow
+	s.hangupInWindow = sp.hangupInWindow
+	s.isWindowJittered = sp.isWindowJittered
 	meterCfg := ratemeter.Config{SessionPeriod: sp.sessionPeriod, TokenPeriod: sp.tokenPeriod, AfterFunc: s.afterFunc}
 	if sp.isStartGated {
 		meterCfg.SessionLimit = sp.sessionLimit
@@ -521,14 +549,43 @@ func (s *sim) step(until time.Time) bool {
 
 	switch ev.kind {
 	case evAnswer:
-		// The dialer hears of the answer once the call has its slot and its
-		// session has started, which here take no time, so no pass finds a
-		// leg that has stopped ringing and is in neither Usage nor the meter.
-		// In production it hears first (outbound's onAnswer, then the
-		// reservation, the INVITE and the session); that window is not
-		// modelled.
-		s.bridge(ev.at, ev.call)
-		s.d.Answered(ev.call)
+		if s.startWindow > 0 {
+			// The production order (outbound's onAnswer wakes the dialer,
+			// then the reservation, the INVITE and the session take the
+			// window, #640): the leg stands in the unstarted term until its
+			// counted start or its end, whichever comes first. The window's
+			// events are pushed before the dialer is told, because posting
+			// wakes it and a pass must never run while an event is half
+			// applied.
+			s.mu.Lock()
+			w := s.startWindow
+			if s.isWindowJittered {
+				w = w/2 + time.Duration(s.rng.Int63n(int64(w)))
+			}
+			if s.hangupInWindow > 0 && s.rng.Float64() < s.hangupInWindow {
+				s.push(ev.at.Add(w/2), evWindowHangup, ev.call)
+			} else {
+				s.push(ev.at.Add(w), evSessionStart, ev.call)
+			}
+			s.mu.Unlock()
+			s.d.Answered(ev.call)
+		} else {
+			// The dialer hears of the answer once the call has its slot and
+			// its session has started, which here take no time, so no pass
+			// finds a leg that has stopped ringing and is in neither Usage
+			// nor the meter.
+			s.bridge(ev.at, ev.call)
+			s.d.Answered(ev.call)
+		}
+	case evSessionStart:
+		s.mu.Lock()
+		_, alive := s.calls[ev.call]
+		s.mu.Unlock()
+		if alive {
+			s.bridge(ev.at, ev.call)
+		}
+	case evWindowHangup:
+		s.end(ev.call, campaign.OutcomeAnswered)
 	case evRingOut:
 		s.end(ev.call, campaign.OutcomeNoAnswer)
 	case evTalkEnd:
@@ -574,6 +631,13 @@ func (s *sim) step(until time.Time) bool {
 			s.push(ev.at.Add(s.prov.turnEvery), evTurn, ev.call)
 		}
 		s.mu.Unlock()
+	}
+	s.mu.Lock()
+	counted := s.counted
+	s.counted = nil
+	s.mu.Unlock()
+	for _, id := range counted {
+		s.d.SessionCounted(id)
 	}
 	s.d.Wake()
 	if err := s.d.Sync(context.Background()); err != nil {
@@ -628,6 +692,9 @@ func (s *sim) serveParked(at time.Time) {
 func (s *sim) beginTalk(at time.Time, id uuid.UUID) {
 	if s.prov == nil {
 		s.push(at.Add(s.calls[id].talk), evTalkEnd, id)
+		// No meter, so the leg's start is counted nowhere: the unstarted
+		// term releases here.
+		s.counted = append(s.counted, id)
 		return
 	}
 	if !s.isStartGated {
@@ -646,6 +713,12 @@ func (s *sim) beginTalk(at time.Time, id uuid.UUID) {
 // openSession dials the provider now. A session the provider refuses is hung
 // up a second later. Called with s.mu held.
 func (s *sim) openSession(id uuid.UUID) {
+	// The start the gate just granted is counted on the meter, so the leg
+	// leaves the unstarted term — even when the provider then refuses it,
+	// as in production the refusal follows the counted start. The message
+	// goes out at the step's end (counted): a post wakes the dialer, and a
+	// pass must never run while an event is half applied.
+	s.counted = append(s.counted, id)
 	at := s.clock.Now()
 	call := s.calls[id]
 	if !s.prov.start(at) {
@@ -698,6 +771,23 @@ func (s *sim) run(d time.Duration) {
 	s.settle()
 	end := s.start.Add(d)
 	for s.step(end) {
+	}
+}
+
+// checkTerm fails the test unless the dialer's unstarted term (#640) is the
+// answered legs still in flight whose start was never counted: a leg counted
+// twice, or taken and never released, shows here. Called after run, when the
+// dialer's goroutine has stopped.
+func (s *sim) checkTerm() {
+	s.t.Helper()
+	want := 0
+	for _, f := range s.d.flights {
+		if f.isAnswered && !f.isSessionCounted {
+			want++
+		}
+	}
+	if s.d.unstarted != want {
+		s.t.Errorf("the unstarted term is %d, want %d answered-but-uncounted legs in flight", s.d.unstarted, want)
 	}
 }
 

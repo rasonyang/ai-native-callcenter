@@ -776,9 +776,10 @@ deployment after a quota raise). Each limit is now a count and a period (`AICC_P
 and now ≥ lastQuotaRefusal + backoff
 and starts_W + n ≤ SessionLimit × W / SessionPeriod            -- when SessionLimit > 0
 and tokens_T + n × tokens_T / max(1, botSessionsInUse) ≤ TokenLimit   -- when TokenLimit > 0
-where n = pendingAnswered + startsWaiting + Σ_campaigns (p̂_c × ringing_c) + 1
+where n = max(pendingAnswered + startsWaiting, unstarted) + Σ_campaigns (p̂_c × ringing_c) + 1
       W = max(SessionPeriod, 10 s), T = TokenPeriod
       backoff = the longer period of the limits in force; 60 s when neither is
+      unstarted = the answered campaign legs whose start is not counted yet (#640, below)
 ```
 
 - The meter counts starts over `W` and tokens over `T`, and the drop times that wake the dialer
@@ -811,6 +812,55 @@ where n = pendingAnswered + startsWaiting + Σ_campaigns (p̂_c × ringing_c) + 
   the 2 % bound of the per-minute case. The rate admission reaches there is about a third of the
   quota: `n` counts each ringing leg at `p̂_c` against the 10 s window although a leg nobody answers
   rings for its whole timeout.
+
+**As built (#640): the window between the answer and the counted start is a term of its own.**
+Between the answer — when the outbound service's `onAnswer` wakes the dialer — and its bot slot's
+reservation, an answered leg stood in none of the counts either rule read: not ringing, not
+`Reserved`, not `Waiting`, not `InUse`, not `startsWaiting`, not `starts_W`; and from the slot
+being taken (`InUse`) until its start reached the start gate or the meter, in none the provider
+rule read. The dialer now keeps that leg as **unstarted** (`Dialer.unstarted`, one per flight):
+taken as the answer is handled, released when the orchestrator's `startSession` reports the
+counted start (`aicall.OrchestratorConfig.OnProviderSessionCounted` → `Dialer.SessionCounted`) or
+when the leg ends, whichever comes first (`drop`, so every ending releases it — a callee who hangs
+up inside the window, a parked leg whose hold expires, a refused or failed session). After a
+restart (§8.2) the count starts from zero and every live attempt is adopted as ringing, so none is
+in it then. A leg that still rings has its bridge to the bot re-armed by the outbound service, and
+its answer, reported to the new dialer, takes the term as any other does. An answer reported
+before the attempts were adopted finds no flight: that leg stays a ringing one, counted at `p̂_c`
+until it ends, and a counted start for it is ignored.
+
+Both rules use it:
+
+- The bot rule's `botInUse` is `InUse + max(Reserved + Waiting, unstarted)`. A campaign leg that
+  is reserved or waiting for a slot is also an answered, uncounted dialer flight, so the counts
+  overlap and the larger holds; the max keeps counted the answered legs that are no flight's (an
+  AI call placed through the API holding a reserved slot). The term adds the window the slot
+  counts cannot see, before the reservation. From the reservation being consumed until the start
+  is counted, the start gate's wait included (at most `ratemeter.StartWaitBound`), a leg counts in
+  both `InUse` and `unstarted`. That double count is deliberate: it holds at most one extra slot
+  per leg inside the window, the safe direction.
+- The provider rule's answered term is `max(Reserved + Waiting + startsWaiting, unstarted)`: each
+  answered leg whose start is not counted, once. A campaign leg that is reserved, waiting for a
+  slot or waiting in the start gate is also one of the dialer's unstarted flights, so the counts
+  overlap and are not added; adding `startsWaiting` to the max instead would count every leg in
+  the gate twice and leave the rate unused exactly when starts queue. `unstarted` adds the legs
+  none of the others sees (before the reservation; slot taken, start not yet in the gate), and the
+  max keeps the legs that are no flight's counted: an AI call placed through the API, a leg whose
+  answer the dialer never heard.
+
+The simulation's answer event now models the window (`startWindow`, fixed and jittered): the dialer
+hears `Answered` first and the slot, the counted start and `SessionCounted` follow by the span; a
+share of callees hang up inside it and release the term by ending. At 0 / 50 / 200 / 1000 ms the
+connect-rate gate keeps refusals within the windowless bound over three seeds each, the rate is
+still used, and the term returns to the legs actually uncounted at the run's end (`checkTerm`).
+That list answers half its calls, and over those runs its refusals stayed within the bound without
+the term too, so the sweep alone does not show the term at work. The case that does is a list whose
+every callee answers, where each ringing leg is one session to come and the rules are exact: with
+the term, at every window, the bot never reaches into the inbound reserve, nothing overflows and no
+start is refused; without it, at every window, the bot went into its reserve and starts were
+refused. The simulation's rings are whole seconds, so a fixed 50 ms and a fixed 200 ms window
+order events alike. Unit tests on the in-memory store walk the term through every ending and message order, the
+bot rule from the answer to the counted start, a start waiting in the gate, and a restart.
 
 ### 6.4 Take a slot on answer; wait briefly if there is none
 

@@ -568,6 +568,11 @@ func run() error {
 			cfg.DefaultCountryCode,
 			cfg.OutboundDialForm,
 			quotaMeter,
+			func(callID uuid.UUID) {
+				if d := campaignDialer.Load(); d != nil {
+					d.SessionCounted(callID)
+				}
+			},
 		))
 		if err != nil {
 			return fmt.Errorf("build ai voice leg: %w", err)

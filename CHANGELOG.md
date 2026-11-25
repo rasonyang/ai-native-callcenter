@@ -76,6 +76,19 @@ carries the one-line installer's files.
   scheduled from the end of the call as the switch stamped it. Attempts
   finished before the upgrade are not rewritten. The `CampaignAttempt`
   description in the API says which clock each stamp comes from.
+- **Campaign admission counts an answered call before its AI session has
+  started** (#640, #694; thanks @sanketpatel32). Between a callee's answer and
+  the moment the call's provider session start was counted, the call was in
+  none of the numbers the dialer reads to decide whether to place another:
+  no longer ringing, not yet holding a bot slot, not yet a start on the
+  provider's rate. Calls placed in that gap could take the bot past the
+  places kept for inbound callers, or start more sessions than the provider's
+  limit allows, and a session the provider refuses is an answered callee who
+  is hung up on and never redialled. The dialer now counts each such call
+  itself, from the answer until its start is counted or the call ends, in
+  both the bot-capacity rule and the provider-quota rule; a call waiting for
+  room in the provider's session window is counted once. Nothing to
+  configure, and inbound calls are, as before, counted and never held.
 - **A carrier that refuses campaign calls is a line fault, not callees
   declining** (#702). The switch reports a carrier's own refusal of an INVITE
   (402 Payment Required for an account out of credit, 401 or 407 for the

@@ -174,6 +174,11 @@ type OrchestratorConfig struct {
 	// because the model session is opened after that and can fail. Nil means
 	// nobody is watching.
 	AnnounceBotSession func(callID, flowID uuid.UUID)
+	// OnProviderSessionCounted tells campaign admission that a call's
+	// provider session start was just counted on the rate meter, so the leg
+	// leaves the dialer's unstarted term for the counts the rules already
+	// read (#640). Nil means nobody is watching.
+	OnProviderSessionCounted func(callID uuid.UUID)
 	// Backend runs flows' declarative HTTP tools: the deployment's base URL,
 	// its outbound host policy and its connection pool, shared by every call.
 	// Nil leaves those tools without a backend, so each call of one fails.
@@ -489,6 +494,9 @@ func (o *Orchestrator) runCall(ctx context.Context, dialog *voice.Dialog) error 
 		// there is nobody to rescue.
 		log.Info("the call ended while its session start waited for the provider's session window")
 		return nil
+	}
+	if counted := o.cfg.OnProviderSessionCounted; counted != nil {
+		counted(ledgerCallID)
 	}
 	model, err := o.cfg.Sessions(profile, log)
 	if err != nil {

@@ -5,6 +5,7 @@ package dialer
 import (
 	"cmp"
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -30,6 +31,7 @@ func TestTheProviderRuleArithmetic(t *testing.T) {
 		r                    ratemeter.Reading
 		sessionRPM, tokenRPM int
 		pending, expected    float64
+		unstarted            float64
 		active               int
 		want                 string
 		wantUntil            time.Time
@@ -44,6 +46,23 @@ func TestTheProviderRuleArithmetic(t *testing.T) {
 			want: obs.DialerBlockedProviderSessions, wantUntil: at(time.Second)},
 		{name: "expected answers alone can fill it", r: ratemeter.Reading{At: t0},
 			sessionRPM: 60, expected: 59.5, want: obs.DialerBlockedProviderSessions},
+		// The answered legs whose start is not counted, each once (#640):
+		// max(pending + startsWaiting, unstarted).
+		{name: "answered legs no slot count sees yet are starts to come", r: ratemeter.Reading{At: t0, Starts: 50, StartsDropAt: at(time.Second)},
+			sessionRPM: 60, unstarted: 3, expected: 6.5,
+			want: obs.DialerBlockedProviderSessions, wantUntil: at(time.Second)},
+		{name: "a leg in the gate is one start to come, not two", r: ratemeter.Reading{At: t0, Starts: 50, StartsWaiting: 3},
+			sessionRPM: 60, unstarted: 3, expected: 6},
+		{name: "and one more is over", r: ratemeter.Reading{At: t0, Starts: 50, StartsWaiting: 3, StartsDropAt: at(time.Second)},
+			sessionRPM: 60, unstarted: 3, expected: 6.5,
+			want: obs.DialerBlockedProviderSessions, wantUntil: at(time.Second)},
+		{name: "reserved, waiting and in the gate, all the dialer's", r: ratemeter.Reading{At: t0, Starts: 50, StartsWaiting: 1},
+			sessionRPM: 60, pending: 2, unstarted: 4, expected: 5},
+		{name: "legs that are no flight's still count", r: ratemeter.Reading{At: t0, Starts: 50, StartsWaiting: 2, StartsDropAt: at(time.Second)},
+			sessionRPM: 60, pending: 3, unstarted: 1, expected: 4.5,
+			want: obs.DialerBlockedProviderSessions, wantUntil: at(time.Second)},
+		{name: "on the token rule too", r: ratemeter.Reading{At: t0, Tokens: 80000, StartsWaiting: 1, TokensDropAt: at(2 * time.Second)},
+			tokenRPM: 100000, unstarted: 1, expected: 8, active: 40},
 		// tokens60 + n x tokens60/active <= TokenRPM, n = pending + E + 1
 		{name: "cold start admits on tokens", r: ratemeter.Reading{At: t0}, tokenRPM: 100000, expected: 500},
 		// 80000 + 10 x 80000/40 = 100000.
@@ -62,7 +81,7 @@ func TestTheProviderRuleArithmetic(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, until := providerHold(tt.r, perMinute(tt.sessionRPM, tt.tokenRPM), tt.pending, tt.expected, tt.active)
+			got, until := providerHold(tt.r, perMinute(tt.sessionRPM, tt.tokenRPM), tt.pending, tt.unstarted, tt.expected, tt.active)
 			if got != tt.want || !until.Equal(tt.wantUntil) {
 				t.Errorf("providerHold = %q until %v, want %q until %v", got, until, tt.want, tt.wantUntil)
 			}
@@ -86,7 +105,7 @@ func TestTheQuotaBackoffEndsAtExactlyOneMinute(t *testing.T) {
 			{2 * time.Minute, ""},
 		} {
 			r := ratemeter.Reading{At: refused.Add(tt.after), LastQuotaRefusal: refused}
-			if got, _ := providerHold(r, q, 0, 0, 0); got != tt.want {
+			if got, _ := providerHold(r, q, 0, 0, 0, 0); got != tt.want {
 				t.Errorf("%+v, %v after the refusal: %q, want %q", q, tt.after, got, tt.want)
 			}
 		}
@@ -104,6 +123,7 @@ func TestTheProviderRuleOverTheVendorsPeriods(t *testing.T) {
 		q                 providerQuota
 		r                 ratemeter.Reading
 		pending, expected float64
+		unstarted         float64
 		active            int
 		want              string
 		wantUntil         time.Time
@@ -118,6 +138,8 @@ func TestTheProviderRuleOverTheVendorsPeriods(t *testing.T) {
 		{name: "a start waiting in the gate is one about to be made", q: q,
 			r: ratemeter.Reading{At: t0, Starts: 20, StartsWaiting: 1, StartsDropAt: at(time.Second)}, pending: 2, expected: 7,
 			want: obs.DialerBlockedProviderSessions, wantUntil: at(time.Second)},
+		{name: "a gate waiting for the dialer's own legs counts them once", q: q,
+			r: ratemeter.Reading{At: t0, Starts: 20, StartsWaiting: 2}, pending: 1, unstarted: 3, expected: 6},
 		{name: "three starts in the last second alone do not hold admission", q: q,
 			r: ratemeter.Reading{At: t0, Starts: 3, StartsDropAt: at(9 * time.Second)}, expected: 2},
 		// Tokens are judged over their own 12 s: 50,000 + 4 x 50,000/40 = 55,000.
@@ -143,7 +165,7 @@ func TestTheProviderRuleOverTheVendorsPeriods(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, until := providerHold(tt.r, tt.q, tt.pending, tt.expected, tt.active)
+			got, until := providerHold(tt.r, tt.q, tt.pending, tt.unstarted, tt.expected, tt.active)
 			if got != tt.want || !until.Equal(tt.wantUntil) {
 				t.Errorf("providerHold = %q until %v, want %q until %v", got, until, tt.want, tt.wantUntil)
 			}
@@ -166,7 +188,7 @@ func TestTheQuotaBackoffEndsAfterTheLongerPeriod(t *testing.T) {
 		{12 * time.Second, ""},
 	} {
 		r := ratemeter.Reading{At: refused.Add(tt.after), LastQuotaRefusal: refused}
-		if got, _ := providerHold(r, q, 0, 0, 0); got != tt.want {
+		if got, _ := providerHold(r, q, 0, 0, 0, 0); got != tt.want {
 			t.Errorf("%v after the refusal: %q, want %q", tt.after, got, tt.want)
 		}
 	}
@@ -299,7 +321,14 @@ type providerScenario struct {
 	capacity              int
 	quota                 providerQuota
 	isGated, isStartGated bool
-	warmUp, d             time.Duration
+	// startWindow is how long an answered leg stands between the answer and
+	// its counted session start (#640); hangupInWindow is the share of
+	// answered calls whose callee hangs up inside it; isWindowJittered draws each
+	// call's span in [startWindow/2, 3·startWindow/2) instead of fixing it.
+	startWindow      time.Duration
+	hangupInWindow   float64
+	isWindowJittered bool
+	warmUp, d        time.Duration
 }
 
 func runAgainstProvider(t *testing.T, isGated bool, prov simProvider, capacity, sessionRPM, tokenRPM int, warmUp, d time.Duration) providerRun {
@@ -315,9 +344,11 @@ func runScenario(t *testing.T, sc providerScenario) providerRun {
 		rates: []func(time.Duration) float64{constRate(0.5)}, provider: &p,
 		isGated: sc.isGated, isStartGated: sc.isStartGated,
 		sessionLimit: sc.quota.sessionLimit, sessionPeriod: sc.quota.sessionPeriod,
-		tokenLimit: sc.quota.tokenLimit, tokenPeriod: sc.quota.tokenPeriod})
+		tokenLimit: sc.quota.tokenLimit, tokenPeriod: sc.quota.tokenPeriod,
+		startWindow: sc.startWindow, hangupInWindow: sc.hangupInWindow, isWindowJittered: sc.isWindowJittered})
 	p.measureFrom = s.start.Add(sc.warmUp)
 	s.run(sc.d)
+	s.checkTerm()
 	run := providerRun{
 		starts: p.accepted + p.refuse, refusals: p.refuse,
 		startsAfter: p.startedAfter, refusalsAfter: p.refusedAfter,
@@ -447,5 +478,99 @@ func TestTheStartGateKeepsRefusalsNearZeroOverShortPeriods(t *testing.T) {
 	}
 	if gated.longestWait > ratemeter.StartWaitBound {
 		t.Errorf("a start waited %s, past the bound of %s", gated.longestWait, ratemeter.StartWaitBound)
+	}
+}
+
+// The window of #640 between an answer and its counted session start — the
+// reservation, the INVITE, +OK, the provider session: production's dialer
+// hears of the answer first, and for that span the leg was in none of the
+// counts either rule read. With the unstarted term covering it, the
+// connect-rate gate keeps refusals within the windowless bound at every
+// window a deployment measures, callees hanging up inside it included; the
+// rate is still used. Over these runs it passes without the term as well, so
+// it guards the window from making things worse; the test below is the one
+// the term is needed for.
+func TestTheConnectRateGateHoldsAcrossTheSessionStartWindow(t *testing.T) {
+	const rate, capacity, minutes = 60, 160, 8
+	for _, window := range []time.Duration{0, 50 * time.Millisecond, 200 * time.Millisecond, time.Second} {
+		hang := 0.0
+		if window > 0 {
+			hang = 0.15
+		}
+		for _, jit := range []bool{false, true} {
+			if window == 0 && jit {
+				continue
+			}
+			for _, seed := range []int64{21, 42, 77} {
+				run := runScenario(t, providerScenario{seed: seed, prov: simProvider{connectLimit: rate},
+					capacity: capacity, quota: perMinute(rate, 0), isGated: true,
+					startWindow: window, hangupInWindow: hang, isWindowJittered: jit, d: minutes * time.Minute})
+				t.Logf("window %4s jitter=%v seed %d: %d starts, %d refused", window, jit, seed, run.starts, run.refusals)
+				if run.refusals*50 > run.starts {
+					t.Errorf("window %s jitter=%v seed %d: %d of %d starts were refused, want at most 2%%",
+						window, jit, seed, run.refusals, run.starts)
+				}
+				if run.starts < minutes*rate/2 {
+					t.Errorf("window %s jitter=%v seed %d: only %d starts in %d minutes: the connect rate of %d a minute is left unused",
+						window, jit, seed, run.starts, minutes, rate)
+				}
+			}
+		}
+	}
+}
+
+// The window of #640 where the rules are exact: every callee answers, so the
+// answer-rate bound stays 1 and each ringing leg is one session to come. A leg
+// in the window that no count saw would let admission place one call more
+// than the bot or the provider can take, at every answer. With the term, at
+// every window, fixed or jittered, with callees hanging up inside it, the bot
+// never reaches into the inbound reserve, nothing overflows and no start is
+// refused, as with no window, and both are still used. Without the term the
+// same runs took the bot into its reserve and had starts refused at every
+// window.
+func TestWithEveryCalleeAnsweringTheWindowAdmitsNoCallTheRulesCannotHold(t *testing.T) {
+	const capacity, reserve, rate, minutes = 60, 6, 20, 10
+	for _, window := range []time.Duration{0, 50 * time.Millisecond, 200 * time.Millisecond, time.Second} {
+		hang := 0.0
+		if window > 0 {
+			hang = 0.15
+		}
+		for _, jit := range []bool{false, true} {
+			if window == 0 && jit {
+				continue
+			}
+			name := fmt.Sprintf("window %s jitter=%v", window, jit)
+			bot := newSim(t, simSpec{capacity: capacity, inboundReserve: reserve, campaigns: 1, seed: 1, maxConcurrent: 1000,
+				rates:       []func(time.Duration) float64{constRate(1)},
+				startWindow: window, hangupInWindow: hang, isWindowJittered: jit})
+			bot.run(2 * minutes * time.Minute)
+			bot.checkTerm()
+			overflows := bot.store.count(bot.store.camps[0].ID, campaign.OutcomeOverflow)
+			t.Logf("%s, bot rule: %d calls, peak %d sessions, %d overflowed", name, bot.placements, bot.peakInUse, overflows)
+			if overflows != 0 || bot.peakInUse > capacity-reserve {
+				t.Errorf("%s: %d calls overflowed and the bot peaked at %d sessions, want none and at most %d",
+					name, overflows, bot.peakInUse, capacity-reserve)
+			}
+			if bot.placements < 500 {
+				t.Errorf("%s: only %d calls placed in %d minutes: the bot is left unused", name, bot.placements, 2*minutes)
+			}
+
+			p := simProvider{connectLimit: rate}
+			prov := newSim(t, simSpec{capacity: 400, inboundReserve: 4, campaigns: 1, seed: 1, maxConcurrent: 1000,
+				rates: []func(time.Duration) float64{constRate(1)}, provider: &p,
+				isGated: true, sessionLimit: rate, sessionPeriod: time.Minute,
+				startWindow: window, hangupInWindow: hang, isWindowJittered: jit})
+			prov.run(minutes * time.Minute)
+			prov.checkTerm()
+			starts := p.accepted + p.refuse
+			t.Logf("%s, provider rule: %d starts, %d refused", name, starts, p.refuse)
+			if p.refuse != 0 {
+				t.Errorf("%s: %d of %d starts were refused, want none", name, p.refuse, starts)
+			}
+			if starts*5 < minutes*rate*4 {
+				t.Errorf("%s: only %d starts in %d minutes: the connect rate of %d a minute is left unused",
+					name, starts, minutes, rate)
+			}
+		}
 	}
 }

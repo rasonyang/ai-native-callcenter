@@ -20,14 +20,24 @@ import (
 )
 
 // startLog is the order things happened in at a call's start: the meter's
-// count (COUNTED for an inbound call's, PACED for a campaign call's) and the
-// session being made (SESSION).
+// count (COUNTED for an inbound call's, PACED for a campaign call's), campaign
+// admission being told the start was counted (TOLD, with the call id in told)
+// and the session being made (SESSION).
 type startLog struct {
 	mu        sync.Mutex
 	events    []string
+	told      []uuid.UUID
 	maxWaits  []time.Duration
 	isBlocked bool
 	waiting   chan struct{}
+}
+
+// sessionCounted is OrchestratorConfig.OnProviderSessionCounted (#640).
+func (l *startLog) sessionCounted(callID uuid.UUID) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.events = append(l.events, "TOLD")
+	l.told = append(l.told, callID)
 }
 
 func (l *startLog) add(e string) {
@@ -62,8 +72,12 @@ func (l *startLog) AwaitStart(ctx context.Context, maxWait time.Duration) (ratem
 
 // A call's start is counted on the meter before its session is made, once:
 // an inbound or internal call's at once, a campaign call's through the start
-// gate, which waits at most ratemeter.StartWaitBound (#644). The session here
-// cannot be made ("no api key"), which ends each call right after the start.
+// gate, which waits at most ratemeter.StartWaitBound (#644). Campaign
+// admission is told once the start is counted and before the session is made,
+// with the call id the INVITE carried, the one the dialer placed the call
+// under (#640); every call tells it, and one that is no campaign's is no
+// flight of the dialer's, which ignores it. The session here cannot be made
+// ("no api key"), which ends each call right after the start.
 func TestOnlyACampaignCallsStartWaitsForTheSessionWindow(t *testing.T) {
 	spec, err := flow.Load([]byte(claimsFlow))
 	if err != nil {
@@ -75,11 +89,11 @@ func TestOnlyACampaignCallsStartWaitsForTheSessionWindow(t *testing.T) {
 		want          []string
 		wantWaitLine  bool
 	}{
-		{name: "inbound", want: []string{"COUNTED", "SESSION"}},
-		{name: "internal", headers: "X-Aicc-Call-Type: INTERNAL\r\n", want: []string{"COUNTED", "SESSION"}},
-		{name: "placed to a customer, not by a campaign", headers: placed, want: []string{"COUNTED", "SESSION"}},
+		{name: "inbound", want: []string{"COUNTED", "TOLD", "SESSION"}},
+		{name: "internal", headers: "X-Aicc-Call-Type: INTERNAL\r\n", want: []string{"COUNTED", "TOLD", "SESSION"}},
+		{name: "placed to a customer, not by a campaign", headers: placed, want: []string{"COUNTED", "TOLD", "SESSION"}},
 		{name: "a campaign call", headers: placed + "X-Aicc-Campaign-Id: c-1\r\nX-Aicc-Attempt-Id: a-1\r\n",
-			want: []string{"PACED", "SESSION"}, wantWaitLine: true},
+			want: []string{"PACED", "TOLD", "SESSION"}, wantWaitLine: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			starts := &startLog{}
@@ -88,6 +102,7 @@ func TestOnlyACampaignCallsStartWaitsForTheSessionWindow(t *testing.T) {
 				return nil, errors.New("no api key")
 			}}, spec)
 			rig.o.cfg.SessionStarts = starts
+			rig.o.cfg.OnProviderSessionCounted = starts.sessionCounted
 			if err := rig.o.Start(); err != nil {
 				t.Fatal(err)
 			}
@@ -101,6 +116,12 @@ func TestOnlyACampaignCallsStartWaitsForTheSessionWindow(t *testing.T) {
 
 			if got := starts.got(); !slices.Equal(got, tc.want) {
 				t.Errorf("start = %v, want %v", got, tc.want)
+			}
+			starts.mu.Lock()
+			told := slices.Clone(starts.told)
+			starts.mu.Unlock()
+			if !slices.Equal(told, []uuid.UUID{callID}) {
+				t.Errorf("admission told of %v, want the INVITE's call id %s", told, callID)
 			}
 			if tc.wantWaitLine {
 				starts.mu.Lock()
@@ -124,6 +145,8 @@ func TestOnlyACampaignCallsStartWaitsForTheSessionWindow(t *testing.T) {
 
 // A campaign call that ends while its start waits leaves the gate: no session
 // is made, and nothing is rescued, because there is nobody left to rescue.
+// Nothing was counted, so campaign admission is not told: its leg leaves the
+// dialer's unstarted term as it ends (#640).
 func TestACallThatEndsWhileItsStartWaitsMakesNoSession(t *testing.T) {
 	spec, err := flow.Load([]byte(claimsFlow))
 	if err != nil {
@@ -135,6 +158,7 @@ func TestACallThatEndsWhileItsStartWaitsMakesNoSession(t *testing.T) {
 		return newFakeModel(), nil
 	}}, spec)
 	rig.o.cfg.SessionStarts = starts
+	rig.o.cfg.OnProviderSessionCounted = starts.sessionCounted
 	if err := rig.o.Start(); err != nil {
 		t.Fatal(err)
 	}
@@ -156,7 +180,7 @@ func TestACallThatEndsWhileItsStartWaitsMakesNoSession(t *testing.T) {
 	awaitLogLine(t, rig.logs, "the conversation never started; the human path writes this call's row")
 
 	if got := starts.got(); !slices.Equal(got, []string{"PACED"}) {
-		t.Errorf("start = %v, want the wait alone, no session", got)
+		t.Errorf("start = %v, want the wait alone, no count told and no session", got)
 	}
 	for _, l := range parseLogLines(t, rig.logs) {
 		if l.msg() == "ai call could not run" {
