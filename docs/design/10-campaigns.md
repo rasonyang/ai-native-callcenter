@@ -822,8 +822,12 @@ rule read. The dialer now keeps that leg as **unstarted** (`Dialer.unstarted`, o
 taken as the answer is handled, released when the orchestrator's `startSession` reports the
 counted start (`aicall.OrchestratorConfig.OnProviderSessionCounted` → `Dialer.SessionCounted`) or
 when the leg ends, whichever comes first (`drop`, so every ending releases it — a callee who hangs
-up inside the window, a parked leg whose hold expires, a refused or failed session). A flight
-adopted after a restart is never in it, because the count and the meter are both new.
+up inside the window, a parked leg whose hold expires, a refused or failed session). After a
+restart (§8.2) the count starts from zero and every live attempt is adopted as ringing, so none is
+in it then. A leg that still rings has its bridge to the bot re-armed by the outbound service, and
+its answer, reported to the new dialer, takes the term as any other does. An answer reported
+before the attempts were adopted finds no flight: that leg stays a ringing one, counted at `p̂_c`
+until it ends, and a counted start for it is ignored.
 
 Both rules use it:
 

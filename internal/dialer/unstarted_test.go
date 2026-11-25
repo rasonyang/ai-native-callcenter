@@ -13,6 +13,7 @@ import (
 
 	"github.com/rasonyang/ai-native-callcenter/internal/campaign"
 	"github.com/rasonyang/ai-native-callcenter/internal/dayrange"
+	"github.com/rasonyang/ai-native-callcenter/internal/outbound"
 	"github.com/rasonyang/ai-native-callcenter/internal/provider/ratemeter"
 	"github.com/rasonyang/ai-native-callcenter/internal/voice"
 )
@@ -51,7 +52,8 @@ func (f *fakeRate) set(r ratemeter.Reading) {
 
 // newTermRig runs a dialer with one campaign placing at most maxConcurrent
 // calls, and the provider rule at sessionLimit starts a minute (0: none).
-func newTermRig(t *testing.T, sessionLimit, maxConcurrent int, u voice.Usage) *termRig {
+// edit, when given, changes the dialer's collaborators before it is built.
+func newTermRig(t *testing.T, sessionLimit, maxConcurrent int, u voice.Usage, edit ...func(*termRig, *Deps)) *termRig {
 	t.Helper()
 	clock := &fakeClock{now: ny(t, "2026-06-01 09:30")}
 	r := &termRig{t: t, clock: clock, st: newSimStore(), placer: newPlacer(clock),
@@ -66,14 +68,18 @@ func newTermRig(t *testing.T, sessionLimit, maxConcurrent int, u voice.Usage) *t
 	if err != nil {
 		t.Fatal(err)
 	}
+	deps := Deps{
+		Store: r.st, Placer: r.placer, Slots: r.slots, ProviderRate: r.rate, Clock: clock,
+		IsLive: r.placer.isLive, Log: slog.New(slog.DiscardHandler),
+	}
+	for _, e := range edit {
+		e(r, &deps)
+	}
 	r.d = New(Config{
 		MaxRinging: 1000, OutboundHours: outer, Frequency: 24 * time.Hour,
 		TrunkBreakerCount: 1 << 30, ProviderBreakerCount: 1 << 30, noOverdial: true,
 		ProviderSessionLimit: sessionLimit, ProviderSessionPeriod: time.Minute,
-	}, Deps{
-		Store: r.st, Placer: r.placer, Slots: r.slots, ProviderRate: r.rate, Clock: clock,
-		IsLive: r.placer.isLive, Log: slog.New(slog.DiscardHandler),
-	})
+	}, deps)
 	r.st.onFinish = r.d.AttemptFinished
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
@@ -102,16 +108,64 @@ func (r *termRig) setMax(n int) {
 	r.settle()
 }
 
+// stopAdmitting takes the campaign out of the running ones, so that no call is
+// placed when a leg ends and the counts are the legs already in flight.
+func (r *termRig) stopAdmitting() {
+	r.st.mu.Lock()
+	r.st.camps = nil
+	r.st.mu.Unlock()
+}
+
 // total is how many calls the dialer has placed so far.
 func (r *termRig) total() int { return r.placer.total() }
 
 // answer tells the dialer the callees of calls picked up.
-func (r *termRig) answer(calls ...placed) {
+func (r *termRig) answer(ids ...uuid.UUID) {
 	r.t.Helper()
-	for _, c := range calls {
-		r.d.Answered(c.Req.CallID)
+	for _, id := range ids {
+		r.d.Answered(id)
 	}
 	r.settle()
+}
+
+// callIDs is the call ids of calls, in their order.
+func callIDs(calls []placed) []uuid.UUID {
+	ids := make([]uuid.UUID, len(calls))
+	for i, c := range calls {
+		ids[i] = c.Req.CallID
+	}
+	return ids
+}
+
+// counted tells the dialer the session starts of calls were counted, as the
+// orchestrator does once the meter took each.
+func (r *termRig) counted(ids ...uuid.UUID) {
+	r.t.Helper()
+	for _, id := range ids {
+		r.d.SessionCounted(id)
+	}
+	r.settle()
+}
+
+// end is a call's attempt finishing with outcome, as its CDR would finish it.
+func (r *termRig) end(id uuid.UUID, outcome campaign.Outcome) {
+	r.t.Helper()
+	r.placer.drop(id)
+	if _, err := r.st.Finish(context.Background(), id, campaign.Ending{Outcome: outcome, EndedAt: r.clock.Now()}); err != nil {
+		r.t.Fatal(err)
+	}
+	r.settle()
+}
+
+// legs is the dialer's ringing and answered legs in flight, read on the actor.
+func (r *termRig) legs() (ringing, talking, flights int) {
+	r.t.Helper()
+	if err := r.d.run(context.Background(), func(context.Context) {
+		ringing, talking, flights = r.d.ringing, r.d.talking, len(r.d.flights)
+	}); err != nil {
+		r.t.Fatal(err)
+	}
+	return ringing, talking, flights
 }
 
 // term is the unstarted term and, read with it on the actor, the answered
@@ -155,7 +209,7 @@ func TestALegWaitingInTheStartGateCountsOnceInTheProviderRule(t *testing.T) {
 	// waits in the gate for room in the provider's window.
 	r.slots.set(voice.Usage{InUse: 4, Cap: 100})
 	r.rate.set(ratemeter.Reading{At: r.clock.Now(), Starts: 2, StartsWaiting: 4})
-	r.answer(calls...)
+	r.answer(callIDs(calls)...)
 	r.wantTerm(4, "four legs in the gate")
 
 	r.setMax(100)
@@ -238,4 +292,80 @@ func TestTheUnstartedTermIsTakenAtTheAnswerAndReleasedOnEveryEnd(t *testing.T) {
 		t.Fatalf("after a stranger's count unstarted = %d, want 0", n)
 	}
 	r.noViolations()
+}
+
+// adoptStore is the in-memory store with attempts left DIALING by a process
+// that died: what a restarted dialer reconciles (design 10 section 8.2).
+type adoptStore struct {
+	*simStore
+	dialing []campaign.DialingAttempt
+}
+
+func (s *adoptStore) Dialing(context.Context) ([]campaign.DialingAttempt, error) {
+	return s.dialing, nil
+}
+
+// A restart with legs in the window (design 10 section 8.2). The new dialer
+// adopts every live attempt as ringing, so none is in the term then. The
+// outbound service re-arms the bridge to the bot of a leg that still rings,
+// and that leg's answer, reported to the new dialer, takes the term like any
+// other; its counted start or its end releases it. An answer that arrives
+// before the attempts are adopted finds no flight: that leg stays a ringing
+// one until it ends, and a counted start for it is ignored. Nothing leaks
+// either way, the ringing and talking counts included.
+func TestALegAdoptedAfterARestartTakesTheTermOnlyWhenItsAnswerReachesTheDialer(t *testing.T) {
+	gate := make(chan struct{})
+	var stillRinging, hangsUp, answeredEarly uuid.UUID
+	r := newTermRig(t, 0, 3, voice.Usage{Cap: 100}, func(r *termRig, d *Deps) {
+		cam := r.st.camps[0]
+		var dialing []campaign.DialingAttempt
+		for _, id := range []*uuid.UUID{&stillRinging, &hangsUp, &answeredEarly} {
+			a := campaign.Attempt{
+				ID: uuid.Must(uuid.NewV7()), CampaignID: cam.ID, ContactID: uuid.Must(uuid.NewV7()),
+				CallID: uuid.Must(uuid.NewV7()), LegID: uuid.Must(uuid.NewV7()),
+				State: campaign.AttemptDialing, StartedAt: r.clock.Now().Add(-10 * time.Second),
+			}
+			*id = a.CallID
+			r.st.attempts[a.CallID] = a
+			r.placer.live[a.CallID] = placed{Req: outboundReqOf(a), At: a.StartedAt}
+			dialing = append(dialing, campaign.DialingAttempt{Attempt: a, RingTimeoutSec: cam.RingTimeoutSec})
+		}
+		d.Store = &adoptStore{simStore: r.st, dialing: dialing}
+		d.Reconciled = gate
+	})
+
+	// The switch reports one answer while the new process is still reading
+	// it, before the dialer has adopted anything.
+	r.answer(answeredEarly)
+	close(gate)
+	r.settle()
+	r.wantTerm(0, "adopted as ringing")
+	if ringing, talking, flights := r.legs(); ringing != 3 || talking != 0 || flights != 3 {
+		t.Fatalf("after adoption %d ringing, %d talking, %d flights, want 3, 0, 3", ringing, talking, flights)
+	}
+	if got := r.total(); got != 0 {
+		t.Fatalf("%d calls placed while the adopted legs fill the campaign", got)
+	}
+	// No new calls from here on: the counts below are the adopted legs' alone.
+	r.stopAdmitting()
+
+	r.answer(stillRinging, hangsUp)
+	r.wantTerm(2, "two re-armed legs answered after the restart")
+	r.counted(stillRinging, answeredEarly)
+	r.wantTerm(1, "one counted start, and one for a leg the dialer saw ring")
+	r.end(hangsUp, campaign.OutcomeAnswered)
+	r.wantTerm(0, "the callee hung up inside the window")
+
+	r.end(stillRinging, campaign.OutcomeAnswered)
+	r.end(answeredEarly, campaign.OutcomeAnswered)
+	r.wantTerm(0, "every adopted leg ended")
+	if ringing, talking, flights := r.legs(); ringing != 0 || talking != 0 || flights != 0 {
+		t.Errorf("after every leg ended %d ringing, %d talking, %d flights, want none", ringing, talking, flights)
+	}
+}
+
+// outboundReqOf is the placement of an attempt as the fake switch keeps it.
+func outboundReqOf(a campaign.Attempt) outbound.AIDialRequest {
+	return outbound.AIDialRequest{CallID: a.CallID, LegID: a.LegID, To: "+86139" + a.CallID.String()[:8],
+		CampaignID: a.CampaignID, AttemptID: a.ID}
 }
