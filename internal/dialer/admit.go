@@ -318,13 +318,14 @@ func (d *Dialer) admitOne(ctx context.Context, c campaign.Campaign, b *bucket, n
 // botInUse counts the slots in use plus the larger of the slot counts for
 // answered legs (Usage.Reserved + Waiting) and unstarted: the answered legs
 // whose provider session start is not counted yet (Dialer.unstarted, #640).
-// Every reserved or waiting leg is an answered, uncounted dialer flight, so
-// unstarted already covers them — the max only matters if the counter ever
-// reports answered legs that are no flight's — and unstarted adds the legs
-// the slot counts cannot see: the window between the answer and the
-// reservation, and, for the window between the slot being taken and the
-// start being counted, one leg counted twice rather than a leg counted not
-// at all. p_c is the campaign's answer-rate bound (CapacityStats.Bound).
+// A campaign leg that is reserved or waiting is also an answered, uncounted
+// dialer flight, so the two overlap and the larger holds; the max keeps the
+// answered legs that are no flight's counted (an AI call placed through the
+// API holding a reserved slot). unstarted adds the legs the slot counts cannot
+// see, between the answer and the reservation, and, from the slot being taken
+// until the start is counted (the start gate's wait included), one leg counted
+// twice rather than a leg counted not at all. p_c is the campaign's
+// answer-rate bound (CapacityStats.Bound).
 // Inbound calls are never held: this is campaign admission only.
 func (d *Dialer) limit(ctx context.Context, c campaign.Campaign) string {
 	if d.inflight[c.ID] >= c.MaxConcurrent {

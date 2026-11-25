@@ -776,9 +776,10 @@ deployment after a quota raise). Each limit is now a count and a period (`AICC_P
 and now ≥ lastQuotaRefusal + backoff
 and starts_W + n ≤ SessionLimit × W / SessionPeriod            -- when SessionLimit > 0
 and tokens_T + n × tokens_T / max(1, botSessionsInUse) ≤ TokenLimit   -- when TokenLimit > 0
-where n = pendingAnswered + startsWaiting + Σ_campaigns (p̂_c × ringing_c) + 1
+where n = max(pendingAnswered + startsWaiting, unstarted) + Σ_campaigns (p̂_c × ringing_c) + 1
       W = max(SessionPeriod, 10 s), T = TokenPeriod
       backoff = the longer period of the limits in force; 60 s when neither is
+      unstarted = the answered campaign legs whose start is not counted yet (#640, below)
 ```
 
 - The meter counts starts over `W` and tokens over `T`, and the drop times that wake the dialer
@@ -813,28 +814,35 @@ where n = pendingAnswered + startsWaiting + Σ_campaigns (p̂_c × ringing_c) + 
   rings for its whole timeout.
 
 **As built (#640): the window between the answer and the counted start is a term of its own.**
-Between the answer — when the outbound service's `onAnswer` wakes the dialer — and the moment the
-call's session start is counted on the rate meter, an answered leg stood in none of the counts
-either rule read: not ringing, not `Reserved`, not `Waiting`, not `InUse`, not `starts_W`. The
-dialer now keeps that leg as **unstarted** (`Dialer.unstarted`, one per flight): taken as the
-answer is handled, released when the orchestrator's `startSession` reports the counted start
-(`aicall.OrchestratorConfig.OnProviderSessionCounted` → `Dialer.SessionCounted`) or when the leg
-ends, whichever comes first (`drop`, so every ending releases it — a callee who hangs up inside
-the window, a parked leg whose hold expires, a refused or failed session). A flight adopted after
-a restart is never in it, because the count and the meter are both new.
+Between the answer — when the outbound service's `onAnswer` wakes the dialer — and its bot slot's
+reservation, an answered leg stood in none of the counts either rule read: not ringing, not
+`Reserved`, not `Waiting`, not `InUse`, not `startsWaiting`, not `starts_W`; and from the slot
+being taken (`InUse`) until its start reached the start gate or the meter, in none the provider
+rule read. The dialer now keeps that leg as **unstarted** (`Dialer.unstarted`, one per flight):
+taken as the answer is handled, released when the orchestrator's `startSession` reports the
+counted start (`aicall.OrchestratorConfig.OnProviderSessionCounted` → `Dialer.SessionCounted`) or
+when the leg ends, whichever comes first (`drop`, so every ending releases it — a callee who hangs
+up inside the window, a parked leg whose hold expires, a refused or failed session). A flight
+adopted after a restart is never in it, because the count and the meter are both new.
 
 Both rules use it:
 
-- The bot rule's `botInUse` is `InUse + max(Reserved + Waiting, unstarted)`. Every reserved or
-  waiting leg is an answered, uncounted dialer flight, so `unstarted` already covers them — the
-  max only matters if the counter ever reports answered legs that are no flight's — and the term
-  adds the windows the slot counts cannot see: before the reservation, and between the
-  reservation being consumed and the start being counted, where a leg counts briefly in both
-  `InUse` and `unstarted`. That one double-count is deliberate: it holds at most one extra slot
+- The bot rule's `botInUse` is `InUse + max(Reserved + Waiting, unstarted)`. A campaign leg that
+  is reserved or waiting for a slot is also an answered, uncounted dialer flight, so the counts
+  overlap and the larger holds; the max keeps counted the answered legs that are no flight's (an
+  AI call placed through the API holding a reserved slot). The term adds the window the slot
+  counts cannot see, before the reservation. From the reservation being consumed until the start
+  is counted, the start gate's wait included (at most `ratemeter.StartWaitBound`), a leg counts in
+  both `InUse` and `unstarted`. That double count is deliberate: it holds at most one extra slot
   per leg inside the window, the safe direction.
-- The provider rule's `pendingAnswered` is `max(Reserved + Waiting, unstarted)` — the same legs
-  the old term covered plus the two windows it could not see, including the leg whose slot is
-  already taken (`InUse`) but whose session start is not yet counted.
+- The provider rule's answered term is `max(Reserved + Waiting + startsWaiting, unstarted)`: each
+  answered leg whose start is not counted, once. A campaign leg that is reserved, waiting for a
+  slot or waiting in the start gate is also one of the dialer's unstarted flights, so the counts
+  overlap and are not added; adding `startsWaiting` to the max instead would count every leg in
+  the gate twice and leave the rate unused exactly when starts queue. `unstarted` adds the legs
+  none of the others sees (before the reservation; slot taken, start not yet in the gate), and the
+  max keeps the legs that are no flight's counted: an AI call placed through the API, a leg whose
+  answer the dialer never heard.
 
 The simulation's answer event now models the window (`startWindow`, fixed and jittered): the dialer
 hears `Answered` first and the slot, the counted start and `SessionCounted` follow by the span; a

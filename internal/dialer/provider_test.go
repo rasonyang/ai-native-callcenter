@@ -30,6 +30,7 @@ func TestTheProviderRuleArithmetic(t *testing.T) {
 		r                    ratemeter.Reading
 		sessionRPM, tokenRPM int
 		pending, expected    float64
+		unstarted            float64
 		active               int
 		want                 string
 		wantUntil            time.Time
@@ -44,6 +45,23 @@ func TestTheProviderRuleArithmetic(t *testing.T) {
 			want: obs.DialerBlockedProviderSessions, wantUntil: at(time.Second)},
 		{name: "expected answers alone can fill it", r: ratemeter.Reading{At: t0},
 			sessionRPM: 60, expected: 59.5, want: obs.DialerBlockedProviderSessions},
+		// The answered legs whose start is not counted, each once (#640):
+		// max(pending + startsWaiting, unstarted).
+		{name: "answered legs no slot count sees yet are starts to come", r: ratemeter.Reading{At: t0, Starts: 50, StartsDropAt: at(time.Second)},
+			sessionRPM: 60, unstarted: 3, expected: 6.5,
+			want: obs.DialerBlockedProviderSessions, wantUntil: at(time.Second)},
+		{name: "a leg in the gate is one start to come, not two", r: ratemeter.Reading{At: t0, Starts: 50, StartsWaiting: 3},
+			sessionRPM: 60, unstarted: 3, expected: 6},
+		{name: "and one more is over", r: ratemeter.Reading{At: t0, Starts: 50, StartsWaiting: 3, StartsDropAt: at(time.Second)},
+			sessionRPM: 60, unstarted: 3, expected: 6.5,
+			want: obs.DialerBlockedProviderSessions, wantUntil: at(time.Second)},
+		{name: "reserved, waiting and in the gate, all the dialer's", r: ratemeter.Reading{At: t0, Starts: 50, StartsWaiting: 1},
+			sessionRPM: 60, pending: 2, unstarted: 4, expected: 5},
+		{name: "legs that are no flight's still count", r: ratemeter.Reading{At: t0, Starts: 50, StartsWaiting: 2, StartsDropAt: at(time.Second)},
+			sessionRPM: 60, pending: 3, unstarted: 1, expected: 4.5,
+			want: obs.DialerBlockedProviderSessions, wantUntil: at(time.Second)},
+		{name: "on the token rule too", r: ratemeter.Reading{At: t0, Tokens: 80000, StartsWaiting: 1, TokensDropAt: at(2 * time.Second)},
+			tokenRPM: 100000, unstarted: 1, expected: 8, active: 40},
 		// tokens60 + n x tokens60/active <= TokenRPM, n = pending + E + 1
 		{name: "cold start admits on tokens", r: ratemeter.Reading{At: t0}, tokenRPM: 100000, expected: 500},
 		// 80000 + 10 x 80000/40 = 100000.
@@ -62,7 +80,7 @@ func TestTheProviderRuleArithmetic(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, until := providerHold(tt.r, perMinute(tt.sessionRPM, tt.tokenRPM), tt.pending, tt.expected, tt.active)
+			got, until := providerHold(tt.r, perMinute(tt.sessionRPM, tt.tokenRPM), tt.pending, tt.unstarted, tt.expected, tt.active)
 			if got != tt.want || !until.Equal(tt.wantUntil) {
 				t.Errorf("providerHold = %q until %v, want %q until %v", got, until, tt.want, tt.wantUntil)
 			}
@@ -86,7 +104,7 @@ func TestTheQuotaBackoffEndsAtExactlyOneMinute(t *testing.T) {
 			{2 * time.Minute, ""},
 		} {
 			r := ratemeter.Reading{At: refused.Add(tt.after), LastQuotaRefusal: refused}
-			if got, _ := providerHold(r, q, 0, 0, 0); got != tt.want {
+			if got, _ := providerHold(r, q, 0, 0, 0, 0); got != tt.want {
 				t.Errorf("%+v, %v after the refusal: %q, want %q", q, tt.after, got, tt.want)
 			}
 		}
@@ -104,6 +122,7 @@ func TestTheProviderRuleOverTheVendorsPeriods(t *testing.T) {
 		q                 providerQuota
 		r                 ratemeter.Reading
 		pending, expected float64
+		unstarted         float64
 		active            int
 		want              string
 		wantUntil         time.Time
@@ -118,6 +137,8 @@ func TestTheProviderRuleOverTheVendorsPeriods(t *testing.T) {
 		{name: "a start waiting in the gate is one about to be made", q: q,
 			r: ratemeter.Reading{At: t0, Starts: 20, StartsWaiting: 1, StartsDropAt: at(time.Second)}, pending: 2, expected: 7,
 			want: obs.DialerBlockedProviderSessions, wantUntil: at(time.Second)},
+		{name: "a gate waiting for the dialer's own legs counts them once", q: q,
+			r: ratemeter.Reading{At: t0, Starts: 20, StartsWaiting: 2}, pending: 1, unstarted: 3, expected: 6},
 		{name: "three starts in the last second alone do not hold admission", q: q,
 			r: ratemeter.Reading{At: t0, Starts: 3, StartsDropAt: at(9 * time.Second)}, expected: 2},
 		// Tokens are judged over their own 12 s: 50,000 + 4 x 50,000/40 = 55,000.
@@ -143,7 +164,7 @@ func TestTheProviderRuleOverTheVendorsPeriods(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, until := providerHold(tt.r, tt.q, tt.pending, tt.expected, tt.active)
+			got, until := providerHold(tt.r, tt.q, tt.pending, tt.unstarted, tt.expected, tt.active)
 			if got != tt.want || !until.Equal(tt.wantUntil) {
 				t.Errorf("providerHold = %q until %v, want %q until %v", got, until, tt.want, tt.wantUntil)
 			}
@@ -166,7 +187,7 @@ func TestTheQuotaBackoffEndsAfterTheLongerPeriod(t *testing.T) {
 		{12 * time.Second, ""},
 	} {
 		r := ratemeter.Reading{At: refused.Add(tt.after), LastQuotaRefusal: refused}
-		if got, _ := providerHold(r, q, 0, 0, 0); got != tt.want {
+		if got, _ := providerHold(r, q, 0, 0, 0, 0); got != tt.want {
 			t.Errorf("%v after the refusal: %q, want %q", tt.after, got, tt.want)
 		}
 	}
