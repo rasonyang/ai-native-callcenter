@@ -252,7 +252,7 @@ func TestEachQuotaRefusalHoldsForItsOwnLimitPeriod(t *testing.T) {
 func TestARefusalHoldsAdmissionForAMinuteAndTheDialerWakesForItsEnd(t *testing.T) {
 	s := newSim(t, simSpec{capacity: 50, campaigns: 1, seed: 1, maxConcurrent: 5, isGated: true})
 	t0 := s.clock.Now()
-	s.meter.QuotaRefused("UNKNOWN") // an inbound call's session, refused at t0
+	s.meter.QuotaRefused(ratemeter.LimitUnknown) // an inbound call's session, refused at t0
 	s.clock.Set(t0.Add(30 * time.Second))
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -292,7 +292,7 @@ func TestARefusalHoldsAdmissionForAMinuteAndTheDialerWakesForItsEnd(t *testing.T
 // after it — and a TOKENS refusal keeps it held for the token window.
 func TestARefusalEndsWithTheWindowItsLimitCarries(t *testing.T) {
 	ctx := context.Background()
-	newSimFor := func(kind string) (*sim, time.Time, context.CancelFunc, <-chan struct{}) {
+	newSimFor := func(kind ratemeter.Limit) (*sim, time.Time, context.CancelFunc, <-chan struct{}) {
 		s := newSim(t, simSpec{capacity: 50, campaigns: 1, seed: 1, maxConcurrent: 5, isGated: true,
 			sessionLimit: 3, sessionPeriod: time.Second, tokenLimit: 60000, tokenPeriod: 12 * time.Second})
 		t0 := s.clock.Now()
@@ -309,7 +309,7 @@ func TestARefusalEndsWithTheWindowItsLimitCarries(t *testing.T) {
 	}
 
 	t.Run("a REQUESTS refusal ends with the session window", func(t *testing.T) {
-		s, t0, cancel, done := newSimFor("REQUESTS")
+		s, t0, cancel, done := newSimFor(ratemeter.LimitRequests)
 		defer func() { cancel(); <-done }()
 		s.clock.Set(t0.Add(999 * time.Millisecond))
 		if err := s.d.Sync(ctx); err != nil {
@@ -328,7 +328,7 @@ func TestARefusalEndsWithTheWindowItsLimitCarries(t *testing.T) {
 	})
 
 	t.Run("a TOKENS refusal holds the full token window", func(t *testing.T) {
-		s, t0, cancel, done := newSimFor("TOKENS")
+		s, t0, cancel, done := newSimFor(ratemeter.LimitTokens)
 		defer func() { cancel(); <-done }()
 		s.clock.Set(t0.Add(12*time.Second - time.Millisecond))
 		if err := s.d.Sync(ctx); err != nil {

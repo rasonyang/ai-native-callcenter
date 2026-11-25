@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/rasonyang/ai-native-callcenter/internal/provider"
+	"github.com/rasonyang/ai-native-callcenter/internal/provider/ratemeter"
 )
 
 type fakeMeter struct {
@@ -26,7 +27,7 @@ func (m *fakeMeter) TokensUsed(n int) {
 	m.tokens = append(m.tokens, n)
 }
 
-func (m *fakeMeter) QuotaRefused(limit string) {
+func (m *fakeMeter) QuotaRefused(limit ratemeter.Limit) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.refusals++

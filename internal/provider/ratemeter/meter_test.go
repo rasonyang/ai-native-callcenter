@@ -232,15 +232,55 @@ func TestTheLatestQuotaRefusalIsKept(t *testing.T) {
 	if r := m.Read(); !r.LastQuotaRefusal.IsZero() {
 		t.Fatalf("a fresh meter has a refusal at %v", r.LastQuotaRefusal)
 	}
-	m.QuotaRefused("UNKNOWN")
+	m.QuotaRefused(LimitUnknown)
 	first := c.Now()
 	c.advance(5 * time.Minute)
 	if r := m.Read(); !r.LastQuotaRefusal.Equal(first) {
 		t.Errorf("refusal at %v, want %v", r.LastQuotaRefusal, first)
 	}
-	m.QuotaRefused("UNKNOWN")
+	m.QuotaRefused(LimitUnknown)
 	if r := m.Read(); !r.LastQuotaRefusal.Equal(c.Now()) {
 		t.Errorf("refusal at %v, want the latest, %v", r.LastQuotaRefusal, c.Now())
+	}
+}
+
+// Each limit keeps its own latest refusal (#652): two limits refused at one
+// instant are both kept, a later refusal of one limit moves only its own time,
+// LastQuotaRefusal is the latest of all, and a clock that stepped back moves
+// none of them earlier.
+func TestEachLimitKeepsItsOwnLatestRefusal(t *testing.T) {
+	c := newClock()
+	m := New(c.Now, Config{})
+	t0 := c.Now()
+	m.QuotaRefused(LimitRequests)
+	m.QuotaRefused(LimitTokens)
+	r := m.Read()
+	if !r.LastQuotaRefusalRequests.Equal(t0) || !r.LastQuotaRefusalTokens.Equal(t0) ||
+		!r.LastQuotaRefusalUnknown.IsZero() || !r.LastQuotaRefusal.Equal(t0) {
+		t.Fatalf("two limits refused at one instant read %+v, want both at %v", r, t0)
+	}
+
+	c.advance(500 * time.Millisecond)
+	t1 := c.Now()
+	m.QuotaRefused(LimitTokens)
+	m.QuotaRefused("SOMETHING_ELSE") // any other value is UNKNOWN
+	r = m.Read()
+	if !r.LastQuotaRefusalRequests.Equal(t0) || !r.LastQuotaRefusalTokens.Equal(t1) ||
+		!r.LastQuotaRefusalUnknown.Equal(t1) || !r.LastQuotaRefusal.Equal(t1) {
+		t.Errorf("after TOKENS and an unnamed limit at +500ms: %+v", r)
+	}
+
+	// The clock steps back a second: refusals then move no limit's time
+	// earlier.
+	c.mu.Lock()
+	c.now = t0.Add(-time.Second)
+	c.mu.Unlock()
+	back := c.Now()
+	m.QuotaRefused(LimitRequests)
+	m.QuotaRefused(LimitUnknown)
+	r = m.Read()
+	if !r.LastQuotaRefusalRequests.Equal(t0) || !r.LastQuotaRefusalUnknown.Equal(t1) || !r.LastQuotaRefusal.Equal(t1) {
+		t.Errorf("refusals at %v after the clock stepped back moved a time earlier: %+v", back, r)
 	}
 }
 
@@ -256,7 +296,7 @@ func TestNothingAndNilCountNothing(t *testing.T) {
 	var none *Meter
 	none.SessionStarted()
 	none.TokensUsed(10)
-	none.QuotaRefused("UNKNOWN")
+	none.QuotaRefused(LimitUnknown)
 	if r := none.Read(); r.Starts != 0 || r.Tokens != 0 || !r.LastQuotaRefusal.IsZero() {
 		t.Errorf("a nil meter reads %+v", r)
 	}
@@ -303,7 +343,7 @@ func TestConcurrentUseIsSafe(t *testing.T) {
 				}
 				m.TokensUsed(2)
 				if i%100 == 0 {
-					m.QuotaRefused("UNKNOWN")
+					m.QuotaRefused(LimitUnknown)
 				}
 				_ = m.Read()
 			}

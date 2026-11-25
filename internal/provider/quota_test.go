@@ -17,6 +17,7 @@ import (
 
 	"github.com/gorilla/websocket"
 
+	"github.com/rasonyang/ai-native-callcenter/internal/provider/ratemeter"
 	"github.com/rasonyang/ai-native-callcenter/internal/provider/wsconn"
 )
 
@@ -44,20 +45,20 @@ func TestAQuotaRefusalNamesTheLimitItsWordsSettle(t *testing.T) {
 	for _, tt := range []struct {
 		name string
 		err  error
-		want string
+		want ratemeter.Limit
 	}{
-		{"qwen's session-rate refusal", event("", "Requests rate limit exceeded, please try again later."), LimitRequests},
-		{"qwen's token refusal", closed(1007, qwenQuotaText), LimitTokens},
-		{"dashscope's throttling", refused(429, `{"code":"Throttling"}`), LimitRequests},
-		{"dashscope's request-rate quota", event("Throttling.RateQuota", ""), LimitRequests},
-		{"dashscope's allocation quota", refused(429, `{"code":"Throttling.AllocationQuota"}`), LimitTokens},
-		{"openai's requests variant", event("rate_limit_exceeded", "Rate limit reached for requests per min"), LimitRequests},
-		{"openai's tokens variant", event("rate_limit_exceeded", "Rate limit reached for tokens per min"), LimitTokens},
-		{"openai's insufficient quota", event("insufficient_quota", "You exceeded your current quota"), LimitTokens},
-		{"an HTTP 429 with an empty body", refused(429, ""), LimitRequests},
-		{"doubao's concurrency refusal", event("ExceededConcurrentLimit", ""), LimitRequests},
-		{"a quota text naming neither window", closed(1007, "QUOTA reached"), LimitUnknown},
-		{"a rate_limit_exceeded with no unit", event("rate_limit_exceeded", "slow down"), LimitRequests},
+		{"qwen's session-rate refusal", event("", "Requests rate limit exceeded, please try again later."), ratemeter.LimitRequests},
+		{"qwen's token refusal", closed(1007, qwenQuotaText), ratemeter.LimitTokens},
+		{"dashscope's throttling", refused(429, `{"code":"Throttling"}`), ratemeter.LimitRequests},
+		{"dashscope's request-rate quota", event("Throttling.RateQuota", ""), ratemeter.LimitRequests},
+		{"dashscope's allocation quota", refused(429, `{"code":"Throttling.AllocationQuota"}`), ratemeter.LimitTokens},
+		{"openai's requests variant", event("rate_limit_exceeded", "Rate limit reached for requests per min"), ratemeter.LimitRequests},
+		{"openai's tokens variant", event("rate_limit_exceeded", "Rate limit reached for tokens per min"), ratemeter.LimitTokens},
+		{"openai's insufficient quota", event("insufficient_quota", "You exceeded your current quota"), ratemeter.LimitTokens},
+		{"an HTTP 429 with an empty body", refused(429, ""), ratemeter.LimitRequests},
+		{"doubao's concurrency refusal", event("ExceededConcurrentLimit", ""), ratemeter.LimitRequests},
+		{"a quota text naming neither window", closed(1007, "QUOTA reached"), ratemeter.LimitUnknown},
+		{"a rate_limit_exceeded with no unit", event("rate_limit_exceeded", "slow down"), ratemeter.LimitRequests},
 		{"not a quota refusal", refused(401, ""), ""},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
@@ -177,7 +178,7 @@ func (m *fakeMeter) TokensUsed(n int) {
 	m.tokens = append(m.tokens, n)
 }
 
-func (m *fakeMeter) QuotaRefused(limit string) {
+func (m *fakeMeter) QuotaRefused(limit ratemeter.Limit) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.refusals++

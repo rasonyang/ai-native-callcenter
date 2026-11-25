@@ -722,7 +722,7 @@ func (s *sim) openSession(id uuid.UUID) {
 	at := s.clock.Now()
 	call := s.calls[id]
 	if !s.prov.start(at) {
-		s.meter.QuotaRefused("UNKNOWN")
+		s.meter.QuotaRefused(ratemeter.LimitUnknown)
 		call.isRefused = true
 		s.push(at.Add(time.Second), evTalkEnd, id)
 		return

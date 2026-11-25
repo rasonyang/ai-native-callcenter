@@ -56,14 +56,14 @@ func (q providerQuota) backoff() time.Duration {
 // TOKENS refusal with the token window, each falling back to the longer of
 // the periods in force when its own limit is not configured. An UNKNOWN
 // refusal, or none at all, holds as it always did.
-func (q providerQuota) backoffFor(limit string) time.Duration {
+func (q providerQuota) backoffFor(limit ratemeter.Limit) time.Duration {
 	switch limit {
-	case "REQUESTS":
-		if q.sessionLimit > 0 {
+	case ratemeter.LimitRequests:
+		if q.sessionLimit > 0 && q.sessionPeriod > 0 {
 			return q.sessionPeriod
 		}
-	case "TOKENS":
-		if q.tokenLimit > 0 {
+	case ratemeter.LimitTokens:
+		if q.tokenLimit > 0 && q.tokenPeriod > 0 {
 			return q.tokenPeriod
 		}
 	}
@@ -115,14 +115,14 @@ func providerHold(r ratemeter.Reading, q providerQuota, pending, unstarted, expe
 	// Each outstanding refusal holds for its own limit's period; refusals of
 	// both kinds end when the later one ends (#652).
 	until := time.Time{}
-	limit := ""
+	var limit ratemeter.Limit
 	for _, refusal := range []struct {
-		kind string
+		kind ratemeter.Limit
 		at   time.Time
 	}{
-		{"REQUESTS", r.LastQuotaRefusalRequests},
-		{"TOKENS", r.LastQuotaRefusalTokens},
-		{"UNKNOWN", r.LastQuotaRefusalUnknown},
+		{ratemeter.LimitRequests, r.LastQuotaRefusalRequests},
+		{ratemeter.LimitTokens, r.LastQuotaRefusalTokens},
+		{ratemeter.LimitUnknown, r.LastQuotaRefusalUnknown},
 	} {
 		if refusal.at.IsZero() {
 			continue
@@ -132,7 +132,7 @@ func providerHold(r ratemeter.Reading, q providerQuota, pending, unstarted, expe
 		}
 	}
 	if !until.IsZero() {
-		return obs.DialerBlockedProviderBackoff + "/" + limit, until
+		return obs.DialerBlockedProviderBackoff + "/" + string(limit), until
 	}
 	n := max(pending+float64(r.StartsWaiting), unstarted) + expected + 1
 	if q.sessionLimit > 0 {
