@@ -977,7 +977,7 @@ func (s *Session) pumpCallerAudio() {
 
 // takeArrived queues every frame already waiting on the leg. It reports false
 // once the leg's queue has closed.
-func takeArrived(clock *uplinkClock, frames <-chan []byte) bool {
+func takeArrived(clock *uplinkClock, frames <-chan *[]byte) bool {
 	for {
 		select {
 		case frame, ok := <-frames:
@@ -998,17 +998,21 @@ func takeArrived(clock *uplinkClock, frames <-chan []byte) bool {
 func (s *Session) sendDueSlots(clock *uplinkClock, probe *echoprobe.Monitor, now time.Time, converted []byte) ([]byte, error) {
 	for n := clock.owed(now); n > 0; n-- {
 		frame := clock.pop()
+		var frameB []byte
+		if frame != nil {
+			frameB = *frame
+		}
 		if probe != nil {
 			// A read-only look at the slot, hushed or not, so the measurement's
 			// axis keeps the clock's. The suppressor, when on, judges the slot
 			// here too, after the measurement has seen it raw.
-			probe.FeedUplink(frame)
+			probe.FeedUplink(frameB)
 		}
 		if s.isListening.Load() {
 			// The slot is the listener's to judge and nobody else's: nothing
 			// is sent, fills included, and no echo suppression is applied
 			// (there is nothing to suppress from).
-			s.listenToSlot(clock, n, frame)
+			s.listenToSlot(clock, n, frameB)
 			if frame != nil {
 				media.PutBytes(frame)
 				clock.stats.DroppedListening++
@@ -1027,10 +1031,10 @@ func (s *Session) sendDueSlots(clock *uplinkClock, probe *echoprobe.Monitor, now
 			// leg's law, in place, and is still sent: the provider gets its
 			// frame for the slot as before. Nothing changes with suppression
 			// off.
-			probe.Suppress(frame)
+			probe.Suppress(frameB)
 		}
 		var err error
-		converted, err = s.feedSlot(clock, frame, converted)
+		converted, err = s.feedSlot(clock, frameB, converted)
 		if frame != nil {
 			media.PutBytes(frame)
 		}

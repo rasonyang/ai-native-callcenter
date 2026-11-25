@@ -36,7 +36,7 @@ type jitterBuffer struct {
 	law         media.Law
 	initialized bool
 	expected    uint16
-	future      map[uint16][]byte
+	future      map[uint16]*[]byte
 
 	lost    atomic.Int64 // frames that never arrived
 	dropped atomic.Int64 // frames that arrived too late to be of use
@@ -44,7 +44,7 @@ type jitterBuffer struct {
 }
 
 func newJitterBuffer(law media.Law) *jitterBuffer {
-	return &jitterBuffer{law: law, future: map[uint16][]byte{}}
+	return &jitterBuffer{law: law, future: map[uint16]*[]byte{}}
 }
 
 // seqDelta reports how far a runs ahead of b. The int16 conversion is what
@@ -52,11 +52,11 @@ func newJitterBuffer(law media.Law) *jitterBuffer {
 func seqDelta(a, b uint16) int { return int(int16(a - b)) }
 
 // push takes one payload and returns whatever is now playable, in order.
-func (j *jitterBuffer) push(seq uint16, payload []byte) [][]byte {
+func (j *jitterBuffer) push(seq uint16, payload *[]byte) []*[]byte {
 	if !j.initialized {
 		j.initialized = true
 		j.expected = seq + 1
-		return [][]byte{payload}
+		return []*[]byte{payload}
 	}
 
 	switch delta := seqDelta(seq, j.expected); {
@@ -69,7 +69,7 @@ func (j *jitterBuffer) push(seq uint16, payload []byte) [][]byte {
 
 	case delta == 0:
 		j.expected++
-		return append([][]byte{payload}, j.drain()...)
+		return append([]*[]byte{payload}, j.drain()...)
 
 	default:
 		j.future[seq] = payload
@@ -81,8 +81,8 @@ func (j *jitterBuffer) push(seq uint16, payload []byte) [][]byte {
 }
 
 // drain releases the run of buffered frames that is now contiguous.
-func (j *jitterBuffer) drain() [][]byte {
-	var out [][]byte
+func (j *jitterBuffer) drain() []*[]byte {
+	var out []*[]byte
 	for {
 		payload, ok := j.future[j.expected]
 		if !ok {
@@ -104,11 +104,11 @@ func (j *jitterBuffer) maxLead() int {
 
 // giveUpWaiting stops waiting for frames that are not coming: a small gap is
 // filled with silence, a large one is treated as a restart and skipped.
-func (j *jitterBuffer) giveUpWaiting() [][]byte {
+func (j *jitterBuffer) giveUpWaiting() []*[]byte {
 	oldest, gap := j.oldestBuffered()
 	j.lost.Add(int64(gap))
 
-	var out [][]byte
+	var out []*[]byte
 	if gap < maxSilenceGapFrames {
 		for range gap {
 			out = append(out, j.silenceFrame())
@@ -130,9 +130,10 @@ func (j *jitterBuffer) oldestBuffered() (seq uint16, gap int) {
 	return seq, seqDelta(seq, j.expected)
 }
 
-func (j *jitterBuffer) silenceFrame() []byte {
+func (j *jitterBuffer) silenceFrame() *[]byte {
 	frame := media.GetBytes(media.FrameSamples)
-	return append(frame, media.SilenceFrame(j.law)...)
+	*frame = append(*frame, media.SilenceFrame(j.law)...)
+	return frame
 }
 
 // reset returns everything still buffered and prepares for a new stream.

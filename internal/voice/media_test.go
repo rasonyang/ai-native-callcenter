@@ -127,20 +127,20 @@ func TestSDPAnswerOmitsDTMFWhenNotNegotiated(t *testing.T) {
 //
 
 // frameOf builds a pooled payload the buffer can take ownership of.
-func frameOf(marker byte) []byte {
+func frameOf(marker byte) *[]byte {
 	frame := media.GetBytes(media.FrameSamples)
 	for range media.FrameSamples {
-		frame = append(frame, marker)
+		*frame = append(*frame, marker)
 	}
 	return frame
 }
 
 func markerOf(frame []byte) byte { return frame[0] }
 
-func markersOf(frames [][]byte) []byte {
+func markersOf(frames []*[]byte) []byte {
 	out := make([]byte, 0, len(frames))
 	for _, f := range frames {
-		out = append(out, markerOf(f))
+		out = append(out, markerOf(*f))
 	}
 	return out
 }
@@ -151,7 +151,7 @@ func TestJitterPassesOrderedAudioStraightThrough(t *testing.T) {
 
 	for i := range 5 {
 		out := j.push(uint16(100+i), frameOf(byte(i)))
-		if len(out) != 1 || markerOf(out[0]) != byte(i) {
+		if len(out) != 1 || markerOf(*out[0]) != byte(i) {
 			t.Fatalf("frame %d: got %v, want it passed through immediately", i, markersOf(out))
 		}
 	}
@@ -199,7 +199,7 @@ func TestJitterFillsSmallGapsWithCodecCorrectSilence(t *testing.T) {
 	j.push(100, frameOf(0))
 
 	// Frames 101 and 102 never arrive. Once the window fills, waiting stops.
-	var out [][]byte
+	var out []*[]byte
 	for i := range reorderWindowFrames {
 		out = append(out, j.push(uint16(103+i), frameOf(byte(3+i)))...)
 	}
@@ -208,7 +208,7 @@ func TestJitterFillsSmallGapsWithCodecCorrectSilence(t *testing.T) {
 	}
 	// The fill must be A-law silence, not zero bytes, which are audible.
 	for i := range 2 {
-		if got := markerOf(out[i]); got != media.LawAlaw.Silence() {
+		if got := markerOf(*out[i]); got != media.LawAlaw.Silence() {
 			t.Errorf("gap frame %d is %#x, want the A-law silence byte %#x",
 				i, got, media.LawAlaw.Silence())
 		}
@@ -342,7 +342,7 @@ func TestUnnegotiatedPayloadTypeIsIgnored(t *testing.T) {
 
 	select {
 	case frame := <-session.Frames():
-		t.Errorf("a frame of the wrong payload type was delivered: %d bytes", len(frame))
+		t.Errorf("a frame of the wrong payload type was delivered: %d bytes", len(*frame))
 	default:
 	}
 }
@@ -358,7 +358,7 @@ func TestSendCopiesTheCallersBuffer(t *testing.T) {
 	frame[0] = 99 // the caller reuses its own buffer
 
 	queued := <-session.tx
-	if queued[0] != 1 {
+	if (*queued)[0] != 1 {
 		t.Error("Send kept the caller's buffer instead of copying it")
 	}
 }
@@ -393,7 +393,7 @@ func TestInboundQueueDropsTheOldestWhenFull(t *testing.T) {
 		t.Fatalf("queue holds %d frames, want it capped at %d", got, cap(session.rx))
 	}
 	first := <-session.rx
-	if markerOf(first) == 0 {
+	if markerOf(*first) == 0 {
 		t.Error("the oldest frame survived; the queue dropped new audio instead of stale audio")
 	}
 	if got := session.RxDropped(); got != 10 {

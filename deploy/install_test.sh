@@ -586,5 +586,96 @@ for _os in linux macos; do
     done
 done
 
+# --------------------------------------------------- first install marker ----
+
+# completed_install: the marker a completed run wrote, or the containers or
+# data volume an installer without one left behind. A run that died after
+# writing .env has none of them and is still the first install (#551).
+CI_CONFIG="$TMP/ci-config.txt"
+cat >"$CI_CONFIG" <<'EOF'
+services:
+  aicc:
+    image: rasonyang/aicc:v0.9.1
+  freeswitch:
+    image: rasonyang/freeswitch-aicc:v0.9.1
+  postgres:
+    image: postgres:18
+volumes:
+  postgres-data:
+    name: aicc_postgres-data
+EOF
+
+ci_case() { # marker compose ps-out volume-rc -> completed_install exit code
+    (
+        DIR="$TMP/ci-$1-$3-$4"; mkdir -p "$DIR"
+        [ "$1" = 1 ] && : >"$DIR/.install-complete"
+        [ "$2" = 1 ] && : >"$DIR/docker-compose.yml"
+        CI_PS=$3
+        CI_VOLUME_RC=$4
+        # shellcheck disable=SC2317
+        docker() {
+            case $1 in
+            compose)
+                shift
+                case $1 in
+                ps) [ -n "$CI_PS" ] && printf '%s\n' "$CI_PS"; return 0 ;;
+                config) cat "$CI_CONFIG" ;;
+                esac
+                ;;
+            volume) [ "$2" = inspect ] && [ "$3" = aicc_postgres-data ] && return "$CI_VOLUME_RC"; return 1 ;;
+            esac
+            return 0
+        }
+        completed_install
+    )
+}
+ok 'completed: the marker counts even with nothing else' ci_case 1 0 '' 1
+ok 'completed: containers an older install left' ci_case 0 1 'abc123' 1
+ok 'completed: the data volume an older install left' ci_case 0 0 '' 0
+notok 'not completed: .env would not count, and nothing ran' ci_case 0 0 '' 1
+notok 'not completed: a pull failure left no container' ci_case 0 1 '' 1
+
+# The marker is written with the tag of the run that finished.
+TAG=v0.9.9
+DIR="$TMP/markdir"; mkdir -p "$DIR"
+mark_install_complete
+eq 'marker holds the tag' "$(cat "$DIR/.install-complete")" v0.9.9
+ok 'completed: the marker just written' ci_case 1 0 '' 1
+
+# A pull failure names the image it stopped on and says the rerun resumes;
+# there are no container logs yet (#551).
+pull_out=$( (
+    DIR="$TMP/pullfail"; mkdir -p "$DIR"; : >"$DIR/docker-compose.yml"
+    # shellcheck disable=SC2317
+    dc() { [ "$1" = config ] && cat "$CI_CONFIG"; }
+    OS=linux
+    pull_hint ' aicc Pulling
+ postgres Pulled
+ aicc Error
+error getting credentials - err: exit status 1'
+) 2>&1)
+ok 'pull hint: names the failing image' has_text "$pull_out" 'rasonyang/aicc:v0.9.1'
+ok 'pull hint: says the rerun resumes' has_text "$pull_out" 'resumes the pull'
+notok 'pull hint: no container-logs command' has_text "$pull_out" 'docker compose logs'
+
+# With no "<service> Error" line the hint still says what to do next.
+pull_out=$( (
+    DIR="$TMP/pullfail2"; mkdir -p "$DIR"
+    dc() { :; }
+    OS=linux
+    pull_hint 'Error response from daemon: toomanyrequests'
+) 2>&1)
+ok 'pull hint: resume advice without a service line' has_text "$pull_out" 'resumes the pull'
+
+# The logs hint, where containers do exist, carries sudo on Linux and not on
+# macOS — .env is root-owned there.
+OS=linux
+eq 'logs hint: linux runs compose with sudo' \
+    "$(logs_hint 2>&1 | grep -o 'sudo docker compose logs')" 'sudo docker compose logs'
+OS=macos
+eq 'logs hint: macOS runs it without' \
+    "$(logs_hint 2>&1 | grep -c 'sudo')" 0
+OS=linux
+
 printf '\n%d tests, %d failed\n' "$tests" "$failures"
 [ "$failures" = 0 ]

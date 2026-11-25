@@ -79,7 +79,7 @@ func runEchoScenario(t *testing.T, leg *tapLeg, dir string) (fed, sent [][]byte,
 	for k := 0; k < 200; k++ {
 		var ref []byte
 		if k < 60 || k >= 100 {
-			ref = callerFrame(media.LawMu, byte(0x10+k%64))
+			ref = *callerFrame(media.LawMu, byte(0x10+k%64))
 			// The session's own queueing is a different path from the tap:
 			// the leg is also given the frame to send, as it would be.
 			leg.Send(ref)
@@ -105,7 +105,7 @@ func TestMeasuringTheEchoLeavesBothAudioPathsByteIdentical(t *testing.T) {
 	v := startVirtualPump(t, plainLeg, plain.frames, provider.OpenAIProfile())
 	for k := 0; k < 200; k++ {
 		if k < 60 || k >= 100 {
-			plain.Send(callerFrame(media.LawMu, byte(0x10+k%64)))
+			plain.Send(*callerFrame(media.LawMu, byte(0x10+k%64)))
 		}
 		v.feed(byte(0x80 + k%100))
 		stepSlot(t, v, k+1)
@@ -234,7 +234,7 @@ func playScripted(t *testing.T, v *virtualPump, leg *tapLeg, bot [][]byte, from,
 	t.Helper()
 	for k := from; k < to; k++ {
 		leg.tick(bot[k], v.epoch.Add(time.Duration(k)*uplinkSlot))
-		frame := append(media.GetBytes(media.FrameSamples), uplink(k)...)
+		frame := pooledFrame(uplink(k))
 		select {
 		case v.frames <- frame:
 		case <-time.After(10 * time.Second):
@@ -436,14 +436,18 @@ func BenchmarkUplinkClockWithEchoProbe(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
 		leg.tick(ref, now)
-		clock.push(frame)
+		clock.push(pooledFrame(frame))
 		now = now.Add(uplinkSlot)
-		// sendDueSlots minus the pool return, whose boxing of the slice
-		// header is the existing benchmarks' business, not the probe's.
+		// sendDueSlots' slot loop as the pump runs it, pool return included.
 		for n := clock.owed(now); n > 0; n-- {
 			f := clock.pop()
-			probe.FeedUplink(f)
-			converted, _ = session.feedSlot(clock, f, converted)
+			var fb []byte
+			if f != nil {
+				fb = *f
+			}
+			probe.FeedUplink(fb)
+			converted, _ = session.feedSlot(clock, fb, converted)
+			media.PutBytes(f)
 		}
 	}
 }

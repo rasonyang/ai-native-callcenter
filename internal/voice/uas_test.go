@@ -277,8 +277,8 @@ func TestAudioFlowsBothWays(t *testing.T) {
 
 	select {
 	case frame := <-dialog.RTP.Frames():
-		if len(frame) != media.FrameSamples || frame[0] != 0x2A {
-			t.Errorf("inbound frame came through as %d bytes starting %#x", len(frame), frame[0])
+		if len(*frame) != media.FrameSamples || (*frame)[0] != 0x2A {
+			t.Errorf("inbound frame came through as %d bytes starting %#x", len(*frame), (*frame)[0])
 		}
 		media.PutBytes(frame)
 	case <-time.After(2 * time.Second):

@@ -23,7 +23,7 @@ type Leg interface {
 	Law() media.Law
 	// Frames yields inbound audio, one 20 ms frame at a time. Each frame is
 	// returned to the media pool by the consumer.
-	Frames() <-chan []byte
+	Frames() <-chan *[]byte
 	// Digits yields keypresses, however they arrived.
 	Digits() <-chan string
 	// Send queues one frame of outbound audio, reporting false when the queue
@@ -68,7 +68,7 @@ func FromDialog(dialog *voice.Dialog) Leg { return dialogLeg{dialog} }
 
 func (l dialogLeg) ID() string                    { return l.dialog.SIPCallID }
 func (l dialogLeg) Law() media.Law                { return l.dialog.RTP.Law() }
-func (l dialogLeg) Frames() <-chan []byte         { return l.dialog.RTP.Frames() }
+func (l dialogLeg) Frames() <-chan *[]byte        { return l.dialog.RTP.Frames() }
 func (l dialogLeg) Digits() <-chan string         { return l.dialog.RTP.DTMF() }
 func (l dialogLeg) Send(frame []byte) bool        { return l.dialog.RTP.Send(frame) }
 func (l dialogLeg) ClearTx() int                  { return l.dialog.RTP.ClearTx() }
