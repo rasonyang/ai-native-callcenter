@@ -886,9 +886,9 @@ where backoff_REQUESTS = SessionPeriod   (backoff when SessionLimit is 0)
   The dialer's hold log line adds `limit`, `backoff` (the period) and `until`. The campaign's
   activity is still `AT_CAPACITY`, and the API contract and the CDR are unchanged.
 - In the simulation, refusals of the three kinds are injected at random into a campaign whose
-  only other limit is its concurrency, over many seeds: no call is placed inside any refusal's
-  period, and at every pass the rule holds with the reason of the limit whose period ends last and
-  admits from that end on.
+  only other limit is its concurrency, over 40 seeds: no call is placed inside any refusal's
+  period, and each time the rule reads the meter it holds with the reason of the limit whose
+  period ends last until that end, and for no refusal from then on.
 
 ### 6.4 Take a slot on answer; wait briefly if there is none
 
