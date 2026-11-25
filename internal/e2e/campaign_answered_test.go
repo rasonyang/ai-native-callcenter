@@ -4,6 +4,7 @@ package e2e
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -176,7 +177,8 @@ func fakeRun(t *testing.T, form phonenum.DialForm) *RunView {
 	busy, answered := api.CampaignOutcome("BUSY"), api.CampaignOutcome("ANSWERED")
 	attempt := func(o *api.CampaignOutcome) api.CampaignAttempt {
 		end := base.Add(time.Minute)
-		return api.CampaignAttempt{ID: uuid.Must(uuid.NewV7()), CallID: uuid.Must(uuid.NewV7()), State: attemptFinished, Outcome: o, FinishedAt: &end}
+		return api.CampaignAttempt{ID: uuid.Must(uuid.NewV7()), CallID: uuid.Must(uuid.NewV7()), State: attemptFinished, Outcome: o,
+			StartedAt: base, FinishedAt: &end}
 	}
 	a03 := []api.CampaignAttempt{attempt(&busy), attempt(&busy)}
 	a04 := []api.CampaignAttempt{attempt(&busy), attempt(&answered)}
@@ -222,6 +224,7 @@ func TestInvariantsHoldOnAConsistentRun(t *testing.T) {
 		for name, check := range map[string]func(context.Context, *RunView, *Checks){
 			"sessions": CheckProviderSessions, "no-invite-after-answer": CheckNoInviteAfterAnswer,
 			"capacity": CheckCapacityReleased, "finished-once": CheckAttemptsFinishedOnce,
+			"finished-not-before-started": CheckFinishedNotBeforeStarted,
 		} {
 			if c := run(check, fakeRun(t, form)); c.Failed() || len(c.checks) == 0 {
 				t.Errorf("%s: %d checks, failures %v", name, len(c.checks), c.failures)
@@ -299,6 +302,48 @@ func TestFinishedOnceInvariantFails(t *testing.T) {
 		v.Regions[0].Contacts[1].Attempts[1].State = "DIALING"
 		if c := run(CheckAttemptsFinishedOnce, v); !c.Failed() {
 			t.Error("an unfinished attempt passed")
+		}
+	})
+}
+
+// An attempt's startedAt is the dialer's clock and its finishedAt the
+// switch's (issue #704): C12's line refusal, ended sooner than the switch's
+// clock was behind, read as ending 51 ms before it began.
+func TestFinishedNotBeforeStartedInvariant(t *testing.T) {
+	forEachForm(t, func(t *testing.T, form phonenum.DialForm) {
+		v := fakeRun(t, form)
+		a := &v.Regions[0].Contacts[1].Attempts[0]
+		early := a.StartedAt.Add(-51 * time.Millisecond)
+		a.FinishedAt = &early
+		c := run(CheckFinishedNotBeforeStarted, v)
+		if !c.Failed() {
+			t.Fatal("an attempt that finished before it started passed")
+		}
+		if want := fmt.Sprintf("%s %s attempt 1 (%s): finished", v.Regions[0].Region.Code, v.Regions[0].Contacts[1].Case.ID, a.CallID); !strings.Contains(c.failures[0], want) {
+			t.Errorf("the failure %q does not name the attempt (%q)", c.failures[0], want)
+		}
+
+		// The store's clamp: an end at the start itself holds.
+		v = fakeRun(t, form)
+		a = &v.Regions[0].Contacts[1].Attempts[0]
+		at := a.StartedAt
+		a.FinishedAt = &at
+		if c := run(CheckFinishedNotBeforeStarted, v); c.Failed() {
+			t.Errorf("an attempt that finished as it started failed: %v", c.failures)
+		}
+
+		// An attempt with no end is not this check's; one with none at all fails.
+		v = fakeRun(t, form)
+		v.Regions[0].Contacts[1].Attempts[1].State = "DIALING"
+		v.Regions[0].Contacts[1].Attempts[1].FinishedAt = nil
+		if c := run(CheckFinishedNotBeforeStarted, v); c.Failed() {
+			t.Errorf("an attempt still DIALING failed the check: %v", c.failures)
+		}
+		for i := range v.Regions[0].Contacts {
+			v.Regions[0].Contacts[i].Attempts = nil
+		}
+		if c := run(CheckFinishedNotBeforeStarted, v); !c.Failed() {
+			t.Error("a run with no finished attempt passed")
 		}
 	})
 }

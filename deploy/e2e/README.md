@@ -314,7 +314,11 @@ wall clock's reading in each check's text), so a step shows up as the gap
 between the two. Where the wall clock does not step, the two agree.
 
 An attempt's `finishedAt`, a contact's `nextAttemptAt` and the CDR times are
-stamped from the switch's event timestamps instead. The switch follows the
+stamped from the switch's event timestamps instead, with one exception: the
+store never keeps a `finishedAt` earlier than the attempt's `startedAt` (the
+dialer's stamp), so an attempt that ends sooner than the switch's clock is
+behind reads its `startedAt` there, while its `nextAttemptAt` is still the
+switch's end plus the interval (#704). The switch follows the
 kernel's monotonic clock and does not step, so against the VM's wall clock it
 sits at an offset that moves as the wall clock does: on one environment it ran
 0.25 s ahead right after `make e2e-up` and 6.5 s ahead five runs later. A check
@@ -424,6 +428,7 @@ They read the application's metrics (`GET /metrics` on the ops listener,
 | every answered number gets exactly one answered INVITE, and none after it | the simulator's dialogs per number (C04's earlier, refused INVITE comes before its answer) |
 | bot slots and DID outbound lines back to zero | `aicc_bot_slots{state="IN_USE"\|"RESERVED"}` and `aicc_did_outbound_in_use{did=<each campaign's DID>}` exist and are 0 |
 | every attempt finished exactly once | each attempt appears once in the API, `FINISHED` with an outcome and an end; `aicc_campaign_attempts_total`, which counts a finish when it first commits and never a revision, moved by exactly the attempts, per outcome |
+| no attempt finished before it started | every `FINISHED` attempt of every case, in the API: `finishedAt` (the switch's stamp) at or after `startedAt` (the dialer's), with at least one finished attempt; a failure names the region, case, attempt and call id (#704: C12's refusal ends sooner than the switch's clock may be behind) |
 | every attempt that created a channel has exactly one CDR carrying `campaignId` | the CDRs listed by the campaign's DID (not by campaign, so a row without its campaign id is still found): one per attempt that was placed, each with the campaign's id, also when read by call id; no CDR for a skipped attempt, none the campaign does not own |
 
 The counters move on hand-offs the API does not wait for (the dialer counts a

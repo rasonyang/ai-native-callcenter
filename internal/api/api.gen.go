@@ -1790,7 +1790,7 @@ type CampaignAttempt struct {
 	// DeclaredLeadIntent The lead the flow recorded, as it was before the verdict. Present only when leadVerdict is.
 	DeclaredLeadIntent *CampaignLeadIntent `json:"declaredLeadIntent,omitempty"`
 
-	// FinishedAt Absent while DIALING.
+	// FinishedAt Absent while DIALING. startedAt is the application's clock when the attempt was written and finishedAt the switch's stamp of the call's end (the application's clock for a call that never made a channel), so the two can disagree by the hosts' clock difference, but finishedAt is never reported earlier than startedAt.
 	FinishedAt  *time.Time         `json:"finishedAt,omitempty"`
 	HangupCause *string            `json:"hangupCause,omitempty"`
 	ID          openapi_types.UUID `json:"id"`

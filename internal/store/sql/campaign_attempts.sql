@@ -66,10 +66,15 @@ SELECT NOT EXISTS (
 
 -- sip_status is the far end's final SIP status the CDR's tech carried; NULL
 -- for none, and for an ending with no CDR.
+-- started_at is the application's clock when the attempt was written and the
+-- ending is the switch's stamp, two clocks that may disagree by more than a
+-- call refused at once lasts: finished_at is never stored earlier than
+-- started_at (#704).
 -- name: FinishCampaignAttempt :exec
 UPDATE campaign_attempts
 SET state = 'FINISHED', outcome = $2, hangup_cause = $3, talk_sec = $4,
-    is_touched = $5, finished_at = $6, sip_status = sqlc.narg('sip_status')::int
+    is_touched = $5, finished_at = GREATEST(sqlc.arg('finished_at')::timestamptz, started_at),
+    sip_status = sqlc.narg('sip_status')::int
 WHERE id = $1;
 
 -- The contact after its latest attempt settled: counters, fate and schedule.
