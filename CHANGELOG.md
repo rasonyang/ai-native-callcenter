@@ -32,6 +32,15 @@ carries the one-line installer's files.
   summary list twelve outcomes instead of eleven. `CampaignAttempt` gains
   `sipStatus`. `make api-breaking BASE=main` reports no breaking change for
   this, only 13 `response-property-enum-value-added` warnings from that value.
+- **Dashboards and alerts on a provider quota refusal** (#652). The dialer's
+  hold reason `PROVIDER_QUOTA_BACKOFF` in
+  `aicc_dialer_admission_blocked_total{reason}` is now three values:
+  `PROVIDER_QUOTA_BACKOFF_REQUESTS`, `PROVIDER_QUOTA_BACKOFF_TOKENS`, and
+  `PROVIDER_QUOTA_BACKOFF` for a refusal that named neither limit. A query
+  that matches the old value alone misses the first two; match
+  `reason=~"PROVIDER_QUOTA_BACKOFF.*"`. `aicc_provider_dial_failures_total`
+  gains a `limit` label; a query that sums it by its other labels is
+  unaffected.
 
 ### Added
 
@@ -70,6 +79,23 @@ carries the one-line installer's files.
   configuration tree takes upstream's two comment-only changes
   (`sip_profiles/internal.xml`, `autoload_configs/verto.conf.xml`), so a switch
   installed natively needs no file copied in for this.
+- **A provider's quota refusal says which limit refused, and admission holds
+  for that limit's own period** (#652, #676; thanks @sanketpatel32). A
+  provider refuses a session either for its session-start rate or for its
+  token rate, and both were counted and handled as one: the same
+  `QUOTA_EXCEEDED` metric, and one hold of campaign admission as long as the
+  longer of the two periods. A refusal is now classified `REQUESTS`,
+  `TOKENS` or `UNKNOWN` from the provider's own words, only where a vendor
+  document or a production log says which limit they speak for; anything
+  else, a bare 429 included, is `UNKNOWN`. The value is the new `limit`
+  label of `aicc_provider_dial_failures_total` (empty for a failure that is
+  not a quota refusal) and is on the log line of a refused start and of a
+  quota error during a call. Campaign admission then holds for the session
+  period after a `REQUESTS` refusal, for the token period after a `TOKENS`
+  one, and as before after `UNKNOWN`; with refusals of both kinds
+  outstanding it resumes when the later hold ends. The dialer's hold reason
+  and its log line name the limit and the period. Calls, CDRs and the API
+  are unchanged: a refused start is still `BOT_START_FAILED`.
 - Newer `golang.org/x/net` (v0.62.0) and `github.com/klauspost/compress`
   (v1.20.2), past three advisories the vuln scan lists at module level; none
   of them is in code the server calls (#548).
