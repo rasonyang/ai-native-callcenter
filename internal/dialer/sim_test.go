@@ -385,6 +385,8 @@ type simSpec struct {
 	// isWindowJittered draws each answered call's window uniformly in
 	// [startWindow/2, 3·startWindow/2) instead of the fixed span.
 	isWindowJittered bool
+	// log is the dialer's logger; nil discards.
+	log *slog.Logger
 }
 
 func newSim(t *testing.T, sp simSpec) *sim {
@@ -436,7 +438,10 @@ func newSim(t *testing.T, sp simSpec) *sim {
 	}
 	deps := Deps{
 		Store: s.store, Placer: s, Slots: s, Lines: s.lines, Clock: s.clock,
-		IsLive: s.isLive, Log: slog.New(slog.DiscardHandler), OnChange: sp.onChange,
+		IsLive: s.isLive, Log: sp.log, OnChange: sp.onChange,
+	}
+	if deps.Log == nil {
+		deps.Log = slog.New(slog.DiscardHandler)
 	}
 	s.prov = sp.provider
 	s.startWindow = sp.startWindow

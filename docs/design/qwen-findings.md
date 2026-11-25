@@ -2083,7 +2083,10 @@ quota limit.`
 counted on `aicc_provider_tokens_total`; the qwen profile carries the documented 60 / 100000
 (`Profile.SessionRPM`, `Profile.TokenRPM`, for flash only, overridable); and campaign admission paces
 itself by both and holds for a minute after any quota refusal (design 10 §6.3, design 06 §4). The
-refusal stays a `BOT_START_FAILED` call and a `BOT_FAILED` outcome.
+refusal stays a `BOT_START_FAILED` call and a `BOT_FAILED` outcome. Later: the limits became a count
+over the vendor's period (#644), and the two refusal texts are told apart (#652): "Requests rate
+limit exceeded" is `limit="REQUESTS"` and holds for the session period, "Allocated quota exceeded"
+is `limit="TOKENS"` and holds for the token period.
 
 **Not measured.** How many tokens a call of a given flow spends a minute, which is what decides
 whether the connect cap or the token cap binds first: the new counter is how a deployment finds out.
