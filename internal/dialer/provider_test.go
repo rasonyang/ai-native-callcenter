@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"math/rand"
 	"strings"
 	"sync"
 	"testing"
@@ -562,12 +563,167 @@ func TestTheHoldLogNamesTheRefusingLimitAndItsPeriod(t *testing.T) {
 	}
 }
 
+// Refusals of every limit injected at random into the capacity simulation
+// (#652), at 3 per 1 s and 60,000 per 12 s, into a campaign whose only other
+// limit is its concurrency (the bot, the rates and the tokens have room), over
+// many seeds. Read from the dialer's own trace:
+//
+//   - no call is placed inside any refusal's period: 1 s after REQUESTS, 12 s
+//     after TOKENS and UNKNOWN, the longer one when several are outstanding;
+//   - each time the provider rule reads the meter, the meter's latest refusal
+//     of each limit is the run's own, the rule holds with the reason of the
+//     limit whose period ends last while it lasts, and from its end on it
+//     holds for none: admission resumes after the refusing limit's period;
+//   - and over the seeds every kind of hold ended and was let through again,
+//     refusals of one limit came during holds of the other, both ways, and
+//     calls went out after a REQUESTS hold's end that the rule before #652
+//     (12 s for every refusal) would still have held.
+//
+// The periods expected are written out here, not taken from the rule.
+func TestAdmissionResumesAfterTheRefusingLimitsPeriodOverManySeeds(t *testing.T) {
+	const seeds, minutes = 40, 10
+	q := providerQuota{sessionLimit: 3, sessionPeriod: time.Second, tokenLimit: 60000, tokenPeriod: 12 * time.Second}
+	period := map[ratemeter.Limit]time.Duration{
+		ratemeter.LimitRequests: time.Second, ratemeter.LimitTokens: 12 * time.Second, ratemeter.LimitUnknown: 12 * time.Second,
+	}
+	reasonOf := map[ratemeter.Limit]string{
+		ratemeter.LimitRequests: obs.DialerBlockedProviderBackoffRequests,
+		ratemeter.LimitTokens:   obs.DialerBlockedProviderBackoffTokens,
+		ratemeter.LimitUnknown:  obs.DialerBlockedProviderBackoff,
+	}
+	isBackoff := func(reason string) bool {
+		return reason == obs.DialerBlockedProviderBackoff || reason == obs.DialerBlockedProviderBackoffRequests ||
+			reason == obs.DialerBlockedProviderBackoffTokens
+	}
+	limits := []ratemeter.Limit{ratemeter.LimitRequests, ratemeter.LimitTokens, ratemeter.LimitUnknown}
+
+	refusals := map[ratemeter.Limit]int{}
+	held := map[string]int{}     // reads the rule held for a refusal, by reason
+	released := map[string]int{} // holds that ended and were read again, by the reason they had
+	overlaps := map[string]int{}
+	var placements, earlyPlacements, reads int
+	for seed := int64(1); seed <= seeds; seed++ {
+		tr := &simTrace{}
+		p := simProvider{refuseShare: 0.3, refuseLimits: limits, refuseRng: rand.New(rand.NewSource(seed))}
+		s := newSim(t, simSpec{capacity: 400, inboundReserve: 4, campaigns: 1, seed: seed, maxConcurrent: 8,
+			rates: []func(time.Duration) float64{constRate(0.5)}, provider: &p, isGated: true,
+			sessionLimit: q.sessionLimit, sessionPeriod: q.sessionPeriod, tokenLimit: q.tokenLimit, tokenPeriod: q.tokenPeriod,
+			trace: tr})
+		s.run(minutes * time.Minute)
+		s.checkTerm()
+
+		latest := map[ratemeter.Limit]time.Time{}
+		// hold is what the refusals so far give at now: the limit whose
+		// period ends last, and that end; zero when none holds.
+		hold := func(now time.Time) (ratemeter.Limit, time.Time) {
+			var limit ratemeter.Limit
+			var until time.Time
+			for _, l := range limits {
+				if at, ok := latest[l]; ok {
+					if end := at.Add(period[l]); now.Before(end) && end.After(until) {
+						limit, until = l, end
+					}
+				}
+			}
+			return limit, until
+		}
+		// A read's verdict is the hold line that follows it, before the next
+		// read, or the last one logged when none does (the dialer logs a
+		// change only).
+		reported, lastJudged := "", ""
+		type pendingRead struct {
+			at    time.Time
+			limit ratemeter.Limit
+			until time.Time
+		}
+		var pending *pendingRead
+		judge := func() {
+			if pending == nil {
+				return
+			}
+			reads++
+			if !pending.until.IsZero() {
+				if want := reasonOf[pending.limit]; reported != want {
+					t.Errorf("seed %d at +%v: the rule read %q, want %q until +%v",
+						seed, pending.at.Sub(s.start), reported, want, pending.until.Sub(s.start))
+				}
+				held[reported]++
+			} else {
+				if isBackoff(reported) {
+					t.Errorf("seed %d at +%v: the rule still held %q after every refusal's period",
+						seed, pending.at.Sub(s.start), reported)
+				}
+				if isBackoff(lastJudged) {
+					released[lastJudged]++
+				}
+			}
+			lastJudged = reported
+			pending = nil
+		}
+		for _, e := range tr.all() {
+			switch e.kind {
+			case traceRefusal:
+				refusals[e.limit]++
+				if l, until := hold(e.at); !until.IsZero() && l != e.limit && l != ratemeter.LimitUnknown && e.limit != ratemeter.LimitUnknown {
+					overlaps[string(e.limit)+" during "+string(l)]++
+				}
+				if e.at.After(latest[e.limit]) {
+					latest[e.limit] = e.at
+				}
+			case tracePlacement:
+				judge()
+				placements++
+				if l, until := hold(e.at); !until.IsZero() {
+					t.Errorf("seed %d: a call placed at +%v inside a %s refusal's period (until +%v)",
+						seed, e.at.Sub(s.start), l, until.Sub(s.start))
+				}
+				if at, ok := latest[ratemeter.LimitRequests]; ok && e.at.Sub(at) < 12*time.Second {
+					earlyPlacements++
+				}
+			case traceRead:
+				judge()
+				r := e.reading
+				for l, got := range map[ratemeter.Limit]time.Time{ratemeter.LimitRequests: r.LastQuotaRefusalRequests,
+					ratemeter.LimitTokens: r.LastQuotaRefusalTokens, ratemeter.LimitUnknown: r.LastQuotaRefusalUnknown} {
+					if !got.Equal(latest[l]) {
+						t.Fatalf("seed %d at +%v: the meter's latest %s refusal is %v, want %v",
+							seed, e.at.Sub(s.start), l, got, latest[l])
+					}
+				}
+				limit, until := hold(e.at)
+				pending = &pendingRead{at: e.at, limit: limit, until: until}
+			case traceHold:
+				reported = e.reason
+				judge()
+			}
+		}
+		judge()
+	}
+	t.Logf("%d seeds x %d min: refusals %v; %d placements, %d reads; held %v; released %v; overlaps %v; "+
+		"%d placements within 12 s of a REQUESTS refusal",
+		seeds, minutes, refusals, placements, reads, held, released, overlaps, earlyPlacements)
+	for _, l := range limits {
+		if r := reasonOf[l]; refusals[l] == 0 || held[r] == 0 || released[r] == 0 {
+			t.Errorf("%s: %d refusals, %d reads held, %d holds released: the run does not show its hold",
+				l, refusals[l], held[r], released[r])
+		}
+	}
+	for _, o := range []string{"REQUESTS during TOKENS", "TOKENS during REQUESTS"} {
+		if overlaps[o] == 0 {
+			t.Errorf("no refusal of %s: the run does not show one limit's refusal in the other's hold", o)
+		}
+	}
+	if earlyPlacements == 0 {
+		t.Error("no call placed within 12 s of a REQUESTS refusal: the run does not show its shorter hold")
+	}
+}
+
 // simProvider is a speech provider with a quota, as the vendor of #604
 // documents its own: it refuses a session start once the starts of its own
 // last connectPeriod, or the tokens of its last tokenPeriod, have reached the
-// limit (a zero period is a minute). A refused attempt still counts as a
-// connect. A session it accepts reports tokensPerTurn every turnEvery until
-// the call ends.
+// limit (a zero period is a minute), naming no limit (UNKNOWN). A refused
+// attempt still counts as a connect. A session it accepts reports
+// tokensPerTurn every turnEvery until the call ends.
 type simProvider struct {
 	connectLimit  int
 	connectPeriod time.Duration
@@ -575,6 +731,12 @@ type simProvider struct {
 	tokenPeriod   time.Duration
 	tokensPerTurn int
 	turnEvery     time.Duration
+	// refuseShare is the share of the starts its quota admits that it
+	// refuses all the same, each naming a limit drawn evenly from
+	// refuseLimits by refuseRng: refusals of chosen limits, injected (#652).
+	refuseShare  float64
+	refuseLimits []ratemeter.Limit
+	refuseRng    *rand.Rand
 
 	starts           []time.Time
 	spent            []simSpend
@@ -600,28 +762,35 @@ func (p *simProvider) prune(now time.Time) {
 	}
 }
 
-func (p *simProvider) start(now time.Time) bool {
+// start is one session start: it returns the limit a refusal named, empty
+// when the session is accepted.
+func (p *simProvider) start(now time.Time) ratemeter.Limit {
 	p.prune(now)
 	var tokens int64
 	for _, s := range p.spent {
 		tokens += s.n
 	}
-	isRefused := (p.connectLimit > 0 && len(p.starts) >= p.connectLimit) ||
-		(p.tokenLimit > 0 && tokens >= p.tokenLimit)
+	var limit ratemeter.Limit
+	switch {
+	case (p.connectLimit > 0 && len(p.starts) >= p.connectLimit) || (p.tokenLimit > 0 && tokens >= p.tokenLimit):
+		limit = ratemeter.LimitUnknown
+	case p.refuseShare > 0 && p.refuseRng.Float64() < p.refuseShare:
+		limit = p.refuseLimits[p.refuseRng.Intn(len(p.refuseLimits))]
+	}
 	p.starts = append(p.starts, now)
 	isMeasured := !now.Before(p.measureFrom)
 	if isMeasured {
 		p.startedAfter++
 	}
-	if isRefused {
+	if limit != "" {
 		p.refuse++
 		if isMeasured {
 			p.refusedAfter++
 		}
-		return false
+		return limit
 	}
 	p.accepted++
-	return true
+	return ""
 }
 
 func (p *simProvider) spend(now time.Time, n int) {

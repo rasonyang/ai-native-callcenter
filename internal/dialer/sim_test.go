@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math/rand"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -306,6 +307,8 @@ type sim struct {
 	isStartGated bool
 	startWaits   []ratemeter.Start
 	counted      []uuid.UUID
+	// trace records the run when the spec asked for it; nil records nothing.
+	trace *simTrace
 }
 
 // simLines is the DID line account as the dialer sees it.
@@ -387,6 +390,86 @@ type simSpec struct {
 	isWindowJittered bool
 	// log is the dialer's logger; nil discards.
 	log *slog.Logger
+	// trace, when set, records the run in order: refusals, placements and
+	// each time the dialer reads the provider's quota (#652).
+	trace *simTrace
+}
+
+// simTrace is a run in the order things happened: each refused session start
+// and the limit it named, each placement, each read of the rate meter by the
+// provider rule with what it read, and each change of the provider rule's
+// hold that the dialer logged (noteProviderHold).
+type simTrace struct {
+	mu     sync.Mutex
+	events []traceEvent
+}
+
+type traceKind int
+
+const (
+	traceRefusal traceKind = iota
+	tracePlacement
+	traceRead
+	traceHold
+)
+
+type traceEvent struct {
+	kind    traceKind
+	at      time.Time
+	limit   ratemeter.Limit   // traceRefusal
+	reading ratemeter.Reading // traceRead
+	reason  string            // traceHold: the reason now, "" when it lets calls through
+}
+
+func (tr *simTrace) add(e traceEvent) {
+	if tr == nil {
+		return
+	}
+	tr.mu.Lock()
+	defer tr.mu.Unlock()
+	tr.events = append(tr.events, e)
+}
+
+func (tr *simTrace) all() []traceEvent {
+	tr.mu.Lock()
+	defer tr.mu.Unlock()
+	return append([]traceEvent(nil), tr.events...)
+}
+
+// tracedRate is the rate meter as the dialer reads it, each read traced.
+type tracedRate struct {
+	meter *ratemeter.Meter
+	trace *simTrace
+}
+
+func (r tracedRate) Read() ratemeter.Reading {
+	reading := r.meter.Read()
+	r.trace.add(traceEvent{kind: traceRead, at: reading.At, reading: reading})
+	return reading
+}
+
+// traceHandler traces the provider rule's hold changes from the dialer's log.
+type traceHandler struct {
+	clock *fakeClock
+	trace *simTrace
+}
+
+func (h traceHandler) Enabled(context.Context, slog.Level) bool { return true }
+func (h traceHandler) WithAttrs([]slog.Attr) slog.Handler       { return h }
+func (h traceHandler) WithGroup(string) slog.Handler            { return h }
+func (h traceHandler) Handle(_ context.Context, r slog.Record) error {
+	if !strings.Contains(r.Message, "provider's quota") {
+		return nil
+	}
+	e := traceEvent{kind: traceHold, at: h.clock.Now()}
+	r.Attrs(func(a slog.Attr) bool {
+		if a.Key == "reason" {
+			e.reason = a.Value.String()
+		}
+		return true
+	})
+	h.trace.add(e)
+	return nil
 }
 
 func newSim(t *testing.T, sp simSpec) *sim {
@@ -443,6 +526,10 @@ func newSim(t *testing.T, sp simSpec) *sim {
 	if deps.Log == nil {
 		deps.Log = slog.New(slog.DiscardHandler)
 	}
+	if sp.trace != nil {
+		s.trace = sp.trace
+		deps.Log = slog.New(traceHandler{clock: s.clock, trace: sp.trace})
+	}
 	s.prov = sp.provider
 	s.startWindow = sp.startWindow
 	s.hangupInWindow = sp.hangupInWindow
@@ -458,6 +545,9 @@ func newSim(t *testing.T, sp simSpec) *sim {
 	}
 	if sp.isGated {
 		deps.ProviderRate = s.meter
+		if s.trace != nil {
+			deps.ProviderRate = tracedRate{meter: s.meter, trace: s.trace}
+		}
 		cfg.ProviderSessionLimit, cfg.ProviderSessionPeriod = sp.sessionLimit, sp.sessionPeriod
 		cfg.ProviderTokenLimit, cfg.ProviderTokenPeriod = sp.tokenLimit, sp.tokenPeriod
 	}
@@ -516,6 +606,7 @@ func (s *sim) PlaceAI(_ context.Context, req outbound.AIDialRequest) (outbound.P
 	defer s.mu.Unlock()
 	s.placements++
 	now := s.clock.Now()
+	s.trace.add(traceEvent{kind: tracePlacement, at: now})
 	call := &simCall{camp: req.CampaignID, did: req.DIDNumber}
 	s.calls[req.CallID] = call
 	if s.rng.Float64() < s.answerRate[req.CampaignID](now.Sub(s.start)) {
@@ -726,8 +817,9 @@ func (s *sim) openSession(id uuid.UUID) {
 	s.counted = append(s.counted, id)
 	at := s.clock.Now()
 	call := s.calls[id]
-	if !s.prov.start(at) {
-		s.meter.QuotaRefused(ratemeter.LimitUnknown)
+	if limit := s.prov.start(at); limit != "" {
+		s.meter.QuotaRefused(limit)
+		s.trace.add(traceEvent{kind: traceRefusal, at: at, limit: limit})
 		call.isRefused = true
 		s.push(at.Add(time.Second), evTalkEnd, id)
 		return
