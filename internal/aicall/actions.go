@@ -561,6 +561,17 @@ func (a *callActions) isArmed() bool {
 	return a.armed != nil
 }
 
+// isClosingLine reports whether a turn is the armed ending's closing line, as
+// onBargeIn and onCutAcknowledged judge a cut: an ending is armed and the turn
+// began after the one it was armed in (armedInTurn), so the turn that carried
+// the arming call is not the line. It labels a cut for aicc_bot_turn_cuts_total
+// (Config.IsClosingLine, #626) and decides nothing.
+func (a *callActions) isClosingLine(turn int) bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.armed != nil && turn > a.armedInTurn
+}
+
 // armedState reports whether an ending is armed and whether it is a transfer.
 func (a *callActions) armedState() (isArmed, isTransfer bool) {
 	a.mu.Lock()

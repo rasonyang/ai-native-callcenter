@@ -48,6 +48,7 @@ var (
 	providerRateLeft   metric.Int64Gauge
 	providerUnanswered metric.Int64Counter
 	botInterruptions   metric.Int64Counter
+	botTurnCuts        metric.Int64Counter
 	echoDelay          metric.Int64Histogram
 	echoReturnLoss     metric.Float64Histogram
 	echoCalls          metric.Int64Counter
@@ -264,6 +265,29 @@ func init() {
 			"in place of the dead-air prompt) and outcome (BACKED: the turn that answered "+
 			"the cue made a tool call; NOT_BACKED: it did not). The rate of BACKED is how "+
 			"often the second ask fixes the first."))
+	botTurnCuts, _ = meter.Int64Counter("aicc_bot_turn_cuts_total",
+		metric.WithDescription("Cuts of a bot line made by an engine that detects the "+
+			"caller's turns by itself and cuts on them (qwen, grok, gateway, doubao), "+
+			"once each: the session's barge-in over audible playback, or the provider's "+
+			"own cancellation for speech while audio was queued (for the opening, also "+
+			"before any was). Nothing is counted on openai, whose client holds the "+
+			"caller's speech until the words are known, nor for a keypress, the "+
+			"application's own pre-emption (a line said, a muted turn, an abandoned "+
+			"response), or speech the session ignored inside its barge-in guard or that "+
+			"had nothing audible to cut. "+
+			"words is what the final transcript of the utterance that cut made of it: "+
+			"WORDS (any words, an acknowledgement or a greeting included), BLANK (none), "+
+			"MISSING (no final judged it: another cut replaced it or the call ended "+
+			"first, or on the opening a tool call's wait for the verdict settled it as "+
+			"words unknown, #610; a later final changes nothing). line is where it fell, "+
+			"fixed when the cut was made: OPENING (the opening or its replay, or any line "+
+			"while the opening is owed after a cut), CLOSING (a turn after the one the "+
+			"armed ending was armed in) or LATER. The words follow the verdict's matching "+
+			"of finals to cuts: with no item id on the wire the next final judges the "+
+			"open cut, and a cut the provider reports before the speech that made it, "+
+			"while the previous utterance's final is still due, is judged by that final. "+
+			"Many BLANK and MISSING cuts point at sound on the callee's side taken for "+
+			"speech, or at a transcriber that wrote nothing (#626)."))
 	botInterruptions, _ = meter.Int64Counter("aicc_bot_interruptions_total",
 		metric.WithDescription("Times a caller took the floor back from the bot, by what "+
 			"took it: SPEECH or DTMF. Speech inside the barge-in guard is not counted — "+
@@ -541,6 +565,30 @@ func RecordBotFirstAudio(provider string, ms int64, isBeforeMedia bool) {
 	botFirstAudio.Record(context.Background(), ms, metric.WithAttributes(
 		attribute.String("provider", provider),
 		attribute.Bool("before_media", isBeforeMedia)))
+}
+
+// Turn-cut metric labels (RecordBotTurnCut, #626).
+const (
+	// TurnCutWords* say what the cut's final transcript made of it.
+	TurnCutWords        = "WORDS"
+	TurnCutWordsBlank   = "BLANK"
+	TurnCutWordsMissing = "MISSING"
+	// TurnCutLine* say where the cut fell.
+	TurnCutLineOpening = "OPENING"
+	TurnCutLineLater   = "LATER"
+	TurnCutLineClosing = "CLOSING"
+)
+
+// RecordBotTurnCut counts a cut an engine made by itself, once per cut, as the
+// step-0 measure of background sound taken for the callee (#626).
+func RecordBotTurnCut(provider, words, line string) {
+	if botTurnCuts == nil {
+		return
+	}
+	botTurnCuts.Add(context.Background(), 1, metric.WithAttributes(
+		attribute.String("provider", provider),
+		attribute.String("words", words),
+		attribute.String("line", line)))
 }
 
 // RecordBotInterruption counts a caller taking the floor back from the bot.

@@ -336,6 +336,37 @@ cut of the opening, and one line whenever a moving tool answers a cut ("a tool
 that could move the call answers a cut the engine made": `tool`, `turn`,
 `verdict`, `isOpening`, `playedMs`, `waitedMs`, `isRefused`).
 
+Counted (#626, step 0), and nothing else changes: every cut opened here, once,
+in `aicc_bot_turn_cuts_total{provider,words,line}`.
+
+- `words` is what the final that judged the cut said: `WORDS` (any words, an
+  acknowledgement or a greeting included) or `BLANK`. `MISSING` is a cut no
+  final judged: another cut replaced it, or the call ended, first; or a tool
+  call's wait settled a cut of the opening as words not known, after which a
+  final judges nothing. A wait that runs out over any other cut settles
+  nothing, so the final that arrives later still counts it.
+- `line` is fixed when the cut is made: `OPENING` when the cut is judged as
+  one over the opening (the opening, its replay, or any line while the opening
+  is owed), `CLOSING` for a turn after the one the armed ending was armed in
+  (the closing line as the ending itself judges a cut, so not the turn that
+  carried the arming call), `LATER` for any other.
+- The count follows the verdict's matching of finals to cuts, its mistakes
+  included: with no item id on the wire the next final judges the open cut,
+  and a cut the provider reports before the speech that made it, while the
+  previous utterance's final is still due, is judged by that final and not by
+  its own.
+- Not counted: anything on openai (the hold has the words before anything is
+  cut, and a declined acknowledgement cuts nothing), a keypress, the
+  application's own pre-emption (a line said, a muted turn, an abandoned
+  response), speech the session ignored inside its barge-in guard or that
+  had nothing audible to cut, and a response the provider cancelled before any
+  of its audio was queued, except the opening (`noteUnqueuedOpeningCut`).
+
+A call that had a cut logs one line when its session ends, "ai turn cuts", with
+`cutsWords`, `cutsBlank`, `cutsMissing`, `cutsOpening`, `cutsLater`,
+`cutsClosing` and, on a campaign call, `campaignId`; its `callId` joins it to
+the CDR. Grouped by `campaignId` the lines give the counts per campaign.
+
 ### The opening stays owed
 
 A cut of the opening line is not always followed by the greeting's final

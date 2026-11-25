@@ -512,6 +512,10 @@ func (o *Orchestrator) runCall(ctx context.Context, dialog *voice.Dialog) error 
 
 	sessionCfg := o.sessionConfig(sessionConfigFor(spec, runtime, language), actions.isArmed, log)
 	sessionCfg.OnCutAcknowledged = actions.onCutAcknowledged
+	// Only to label and add up cuts (#626): where a cut fell, and the
+	// campaign its call's tally belongs to.
+	sessionCfg.IsClosingLine = actions.isClosingLine
+	sessionCfg.CampaignID = actions.campaignID
 	// Listen before opening only on a call this platform placed to a customer:
 	// on an inbound or internal call the caller expects to be greeted, and a
 	// flow that serves both keeps its field (#594).

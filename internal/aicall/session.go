@@ -229,6 +229,18 @@ type Config struct {
 	// actions' own lock. Nil is never armed.
 	IsEndingArmed func() bool
 
+	// IsClosingLine reports whether a turn is the armed ending's closing line
+	// (callActions.isClosingLine): an ending is armed and the turn began after
+	// the one it was armed in. A cut is labelled with it when it is made, for
+	// aicc_bot_turn_cuts_total (#626); it decides nothing. Asked like
+	// IsEndingArmed, never while holding a session lock. Nil is never.
+	IsClosingLine func(turn int) bool
+
+	// CampaignID is the campaign that placed the call, empty on any other
+	// call. Only the call's one "ai turn cuts" line carries it (#626), so the
+	// cuts can be added up per campaign; the logger does not.
+	CampaignID string
+
 	// OnCutAcknowledged is told when the engine cut the bot by itself and the
 	// words that did it turn out to be only an acknowledgement. cut is the
 	// BARGE_IN that reported it. The orchestrator uses it to keep the cut from
@@ -636,6 +648,8 @@ func (s *Session) Start(ctx context.Context) error {
 	// stream is safe.
 	go func() {
 		s.wg.Wait()
+		// No final can judge a cut any more: the model's pump has returned.
+		s.finishTurnCuts()
 		select {
 		case s.events <- Event{Type: EventTypeEnded}:
 		default:
