@@ -615,6 +615,9 @@ func TestAnAgreementOverTheReplayIsRefusedWithoutASecondReplay(t *testing.T) {
 	r.started()
 	r.speaks("我们续约可以打八折，您需要吗？")
 	r.ended()
+	waitFor(t, "the model's words to be heard", func() bool {
+		return r.session.isOfferHeard()
+	})
 	r.callerSpoke("u3")
 	r.final("u3", "好的，续约吧。")
 	r.started()
