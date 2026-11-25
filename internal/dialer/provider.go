@@ -33,8 +33,9 @@ func (c Config) providerQuota() providerQuota {
 	}
 }
 
-// backoff is how long admission holds after the provider last said its quota
-// was spent (#644): the longer of the periods of the limits in force, by when
+// backoff is how long admission holds after the provider said its quota was
+// spent without naming the limit (#644, #652): the longer of the periods of
+// the limits in force, by when
 // whichever window the refusal broke has cleared; a minute (ratemeter.Span)
 // when no limit is, the period the vendors document.
 func (q providerQuota) backoff() time.Duration {
@@ -51,10 +52,67 @@ func (q providerQuota) backoff() time.Duration {
 	return d
 }
 
+// backoffFor is how long admission holds after a refusal of limit (#652): a
+// REQUESTS refusal clears with the session period and a TOKENS refusal with the
+// token period, each falling back to backoff when its own limit is not in
+// force. An UNKNOWN refusal holds for backoff, as every refusal did before.
+func (q providerQuota) backoffFor(limit ratemeter.Limit) time.Duration {
+	switch limit {
+	case ratemeter.LimitRequests:
+		if q.sessionLimit > 0 && q.sessionPeriod > 0 {
+			return q.sessionPeriod
+		}
+	case ratemeter.LimitTokens:
+		if q.tokenLimit > 0 && q.tokenPeriod > 0 {
+			return q.tokenPeriod
+		}
+	}
+	return q.backoff()
+}
+
+// refusalHold is the refusal backoff of providerHold: each limit's latest
+// refusal holds until it is backoffFor that limit old, and the hold ends when
+// the last of them ends; limit is the one whose end that is (on a tie the
+// first of REQUESTS, TOKENS, UNKNOWN). A later refusal never shortens a hold:
+// a REQUESTS refusal during a TOKENS hold leaves the TOKENS end in place, and a
+// TOKENS refusal during a REQUESTS hold moves the end out. until is zero when
+// no refusal holds.
+func refusalHold(r ratemeter.Reading, q providerQuota) (limit ratemeter.Limit, until time.Time) {
+	for _, refusal := range [...]struct {
+		limit ratemeter.Limit
+		at    time.Time
+	}{
+		{ratemeter.LimitRequests, r.LastQuotaRefusalRequests},
+		{ratemeter.LimitTokens, r.LastQuotaRefusalTokens},
+		{ratemeter.LimitUnknown, r.LastQuotaRefusalUnknown},
+	} {
+		if refusal.at.IsZero() {
+			continue
+		}
+		if end := refusal.at.Add(q.backoffFor(refusal.limit)); r.At.Before(end) && end.After(until) {
+			limit, until = refusal.limit, end
+		}
+	}
+	return limit, until
+}
+
+// backoffReason is the hold reason of a refusal backoff, by the limit whose
+// end it is (aicc_dialer_admission_blocked_total{reason}).
+func backoffReason(limit ratemeter.Limit) string {
+	switch limit {
+	case ratemeter.LimitRequests:
+		return obs.DialerBlockedProviderBackoffRequests
+	case ratemeter.LimitTokens:
+		return obs.DialerBlockedProviderBackoffTokens
+	default:
+		return obs.DialerBlockedProviderBackoff
+	}
+}
+
 // providerHold applies the provider's quota to one more admission (design 10
-// section 6.3, as built for #604 and #644):
+// section 6.3, as built for #604, #644 and #652):
 //
-//	now >= lastQuotaRefusal + backoff
+//	now >= lastQuotaRefusal_L + backoff_L                          for each limit L
 //	starts_W + n <= sessionLimit x W / sessionPeriod               when sessionLimit > 0
 //	tokens_T + n x tokens_T / max(1, active) <= tokenLimit         when tokenLimit > 0
 //	where n = max(pending + waiting, unstarted) + E + 1
@@ -83,7 +141,8 @@ func (q providerQuota) backoff() time.Duration {
 // dialer never heard. active is the bot sessions in use, so
 // tokens_T / active is what a session has cost over the token period; with no
 // tokens yet the token rule admits, and the session rule is what guards a cold
-// burst. backoff is providerQuota.backoff.
+// burst. lastQuotaRefusal_L is the meter's latest refusal for limit L, and
+// backoff_L is providerQuota.backoffFor(L) (refusalHold, #652).
 //
 // The refusal backoff applies whatever the limits are, a limit of 0 included:
 // a refusal is the provider's word, not an estimate.
@@ -93,8 +152,8 @@ func (q providerQuota) backoff() time.Duration {
 // start or token entry leaving its window); zero when only an event can
 // change it.
 func providerHold(r ratemeter.Reading, q providerQuota, pending, unstarted, expected float64, active int) (string, time.Time) {
-	if backoff := q.backoff(); !r.LastQuotaRefusal.IsZero() && r.At.Before(r.LastQuotaRefusal.Add(backoff)) {
-		return obs.DialerBlockedProviderBackoff, r.LastQuotaRefusal.Add(backoff)
+	if limit, until := refusalHold(r, q); !until.IsZero() {
+		return backoffReason(limit), until
 	}
 	n := max(pending+float64(r.StartsWaiting), unstarted) + expected + 1
 	if q.sessionLimit > 0 {
@@ -141,6 +200,11 @@ func (d *Dialer) noteProviderHold(reason string, r ratemeter.Reading) {
 		"tokenLimit", q.tokenLimit, "tokenPeriod", q.tokenPeriod}
 	if !r.LastQuotaRefusal.IsZero() {
 		attrs = append(attrs, "lastQuotaRefusalAt", r.LastQuotaRefusal)
+	}
+	// A refusal's hold says which limit refused, the period it holds for and
+	// when it ends (#652).
+	if limit, until := refusalHold(r, q); !until.IsZero() {
+		attrs = append(attrs, "limit", string(limit), "backoff", q.backoffFor(limit), "until", until)
 	}
 	if reason != "" {
 		d.log.Info("dialer: admission held by the provider's quota", append([]any{"reason", reason}, attrs...)...)

@@ -12,12 +12,14 @@ import (
 	"time"
 
 	"github.com/rasonyang/ai-native-callcenter/internal/provider"
+	"github.com/rasonyang/ai-native-callcenter/internal/provider/ratemeter"
 )
 
 type fakeMeter struct {
 	mu       sync.Mutex
 	tokens   []int
 	refusals int
+	limits   []ratemeter.Limit
 }
 
 func (m *fakeMeter) TokensUsed(n int) {
@@ -26,10 +28,11 @@ func (m *fakeMeter) TokensUsed(n int) {
 	m.tokens = append(m.tokens, n)
 }
 
-func (m *fakeMeter) QuotaRefused() {
+func (m *fakeMeter) QuotaRefused(limit ratemeter.Limit) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.refusals++
+	m.limits = append(m.limits, limit)
 }
 
 func (m *fakeMeter) counts() ([]int, int) {
@@ -69,7 +72,7 @@ func TestARefusedSessionIsAStartFailureWithTheLogid(t *testing.T) {
 		t.Fatalf("Start = %v, want a StartFailure", err)
 	}
 	if failure.Status != provider.StartStatusErrorEvent || failure.Reason != provider.StartReasonQuotaExceeded ||
-		failure.RequestID != "fake-logid-1" || failure.Provider != "doubao" {
+		failure.RequestID != "fake-logid-1" || failure.Provider != "doubao" || failure.Limit != ratemeter.LimitUnknown {
 		t.Errorf("failure = %+v", failure)
 	}
 	if !errors.Is(err, provider.ErrQuotaExceeded) {
@@ -77,6 +80,13 @@ func TestARefusedSessionIsAStartFailureWithTheLogid(t *testing.T) {
 	}
 	if _, refusals := meter.counts(); refusals != 1 {
 		t.Errorf("the meter heard %d refusals, want 1", refusals)
+	}
+	// No document names this code's limit (#652): the shared path reports it
+	// as UNKNOWN.
+	meter.mu.Lock()
+	defer meter.mu.Unlock()
+	if fmt.Sprint(meter.limits) != "[UNKNOWN]" {
+		t.Errorf("the meter heard %v, want [UNKNOWN]", meter.limits)
 	}
 }
 

@@ -26,6 +26,20 @@
 // Every injection is logged at WARN with the relay's session number, so a
 // call can be matched against the application's log afterwards.
 //
+// With -refuse-close it refuses sessions during setup the way a provider
+// refuses one for its quota: it reads the session.update and closes the
+// socket with the given code and text. The flag repeats, and the sessions
+// take the refusals in turn; -refuse-sessions N refuses only the first N
+// sessions and serves the rest (0, the default, refuses every one). For the
+// two texts qwen closed production sessions with (#604, #652):
+//
+//	aicc-mockprovider -addr 127.0.0.1:9099 \
+//	    -refuse-close "1007:Requests rate limit exceeded, please try again later." \
+//	    -refuse-close "1007:Allocated quota exceeded, please increase your quota limit." \
+//	    -refuse-sessions 2 &
+//	AICC_PROVIDER=qwen AICC_PROVIDER_ENDPOINT=ws://127.0.0.1:9099/api-ws/v1/realtime \
+//	ALIYUN_API_KEY=not-a-key ./aicc
+//
 // See docs/load-tests.md.
 package main
 
@@ -64,6 +78,18 @@ func main() {
 	hold := flag.Duration("hold", 20*time.Second,
 		"relay mode, stall-hold: how long a held response.done is kept when no barge-in releases it")
 	quiet := flag.Bool("quiet", false, "log warnings only")
+	var refusals []mockprovider.Refusal
+	flag.Func("refuse-close",
+		`refuse sessions during setup: read the session.update, then close with CODE:TEXT, e.g. "1007:Requests rate limit exceeded, please try again later."; repeat it and sessions take the refusals in turn; not in relay mode`,
+		func(s string) error {
+			r, err := mockprovider.ParseRefusal(s)
+			if err == nil {
+				refusals = append(refusals, r)
+			}
+			return err
+		})
+	refuseSessions := flag.Int("refuse-sessions", 0,
+		"with -refuse-close: refuse only the first N sessions and serve the rest; 0 refuses every session")
 	flag.Parse()
 
 	level := slog.LevelInfo
@@ -72,6 +98,14 @@ func main() {
 	}
 	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level}))
 
+	if *upstream != "" && len(refusals) > 0 {
+		fmt.Fprintln(os.Stderr, "error: -refuse-close is not offered in relay mode")
+		os.Exit(2)
+	}
+	if *refuseSessions < 0 {
+		fmt.Fprintln(os.Stderr, "error: -refuse-sessions must be 0 or more")
+		os.Exit(2)
+	}
 	if *upstream != "" {
 		fault, err := ParseFault(*faultName)
 		turns, err2 := ParseTurnRange(*faultTurns)
@@ -108,14 +142,16 @@ func main() {
 	}
 
 	server := mockprovider.New(mockprovider.Config{
-		FirstAudio:   *firstAudio,
-		TurnAudio:    *turnAudio,
-		TurnEvery:    *turnEvery,
-		SpeechBefore: *speechBefore,
-		DeltaAudio:   *deltaAudio,
-		DeltaPace:    *deltaPace,
-		Scenario:     scenario,
-		Log:          log,
+		FirstAudio:     *firstAudio,
+		TurnAudio:      *turnAudio,
+		TurnEvery:      *turnEvery,
+		SpeechBefore:   *speechBefore,
+		DeltaAudio:     *deltaAudio,
+		DeltaPace:      *deltaPace,
+		Scenario:       scenario,
+		Refusals:       refusals,
+		RefuseSessions: *refuseSessions,
+		Log:            log,
 	})
 
 	go func() {
@@ -123,7 +159,7 @@ func main() {
 			stats := server.Stats()
 			log.Info("mockprovider", "live", stats.Live, "peak", stats.Peak,
 				"total", stats.Total, "turns", stats.Turns, "cut", stats.Cut,
-				"audioSec", stats.AudioSec)
+				"audioSec", stats.AudioSec, "refused", stats.Refused)
 			if scenario != nil {
 				log.Info("mockprovider scenario", "toolCalls", stats.ToolCalls,
 					"toolResults", stats.ToolResults, "scriptsDone", stats.ScriptsDone,
@@ -133,7 +169,8 @@ func main() {
 	}()
 
 	log.Info("mockprovider listening", "addr", *addr,
-		"firstAudio", *firstAudio, "turnAudio", *turnAudio, "turnEvery", *turnEvery)
+		"firstAudio", *firstAudio, "turnAudio", *turnAudio, "turnEvery", *turnEvery,
+		"refusals", len(refusals), "refuseSessions", *refuseSessions)
 
 	if err := http.ListenAndServe(*addr, server.Handler()); err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)

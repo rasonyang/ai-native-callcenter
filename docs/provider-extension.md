@@ -217,13 +217,18 @@ which shares no protocol event:
 
 - **A failed start is a number.** Every failure before the session is
   confirmed becomes a `provider.StartFailure`, counted on
-  `aicc_provider_dial_failures_total{provider,status,reason}` and logged with
+  `aicc_provider_dial_failures_total{provider,status,reason,limit}` and logged with
   the upgrade's request id (`X-Request-Id` on the Realtime vendors,
   `X-Tt-Logid` on doubao). `status` is the HTTP status of a refused upgrade,
   `CLOSE_<code>` for a close during setup, `ERROR_EVENT`, `TIMEOUT` or
   `NETWORK`; `reason` is `QUOTA_EXCEEDED` (a 429, or vendor text: quota, rate
   limit, throttling, too many requests, `ExceededConcurrentLimit`),
-  `AUTH_REJECTED` or `OTHER`. Callers ask
+  `AUTH_REJECTED` or `OTHER`. `limit` is, for a quota refusal, the limit it
+  spoke for: `REQUESTS` (session starts) or `TOKENS` where a vendor document
+  or a production log says the words name it, `UNKNOWN` otherwise (a bare
+  429 included), and empty for any other failure (#652); campaign admission
+  holds for that limit's period. A new vendor's texts join the lists in
+  `internal/provider/quota.go` with their source. Callers ask
   `errors.Is(err, provider.ErrQuotaExceeded)`, never the vendor's words. Its
   text is the original error's, so the CDR's `BOT_START_FAILED` and the rescue
   are unchanged. A start the call gave up on is not counted.

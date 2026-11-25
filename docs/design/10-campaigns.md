@@ -779,6 +779,7 @@ and tokens_T + n × tokens_T / max(1, botSessionsInUse) ≤ TokenLimit   -- when
 where n = max(pendingAnswered + startsWaiting, unstarted) + Σ_campaigns (p̂_c × ringing_c) + 1
       W = max(SessionPeriod, 10 s), T = TokenPeriod
       backoff = the longer period of the limits in force; 60 s when neither is
+                (since #652 per limit, below)
       unstarted = the answered campaign legs whose start is not counted yet (#640, below)
 ```
 
@@ -861,6 +862,33 @@ start is refused; without it, at every window, the bot went into its reserve and
 refused. The simulation's rings are whole seconds, so a fixed 50 ms and a fixed 200 ms window
 order events alike. Unit tests on the in-memory store walk the term through every ending and message order, the
 bot rule from the answer to the counted start, a start waiting in the gate, and a restart.
+
+**As built (#652): a refusal holds for the limit it named.** A quota refusal is classified inside
+`internal/provider` as `REQUESTS` (session starts), `TOKENS` or `UNKNOWN`, from the vendor's code
+and text, and only where a vendor document or a production log says which limit the words speak
+for (the list and its sources are in `internal/provider/quota.go`); everything else, a bare 429
+included, is `UNKNOWN`. `aicc_provider_dial_failures_total` carries it as `limit` (empty for a
+failure that is not a quota refusal), and the start-failure and mid-call log lines carry it too.
+The meter keeps the latest refusal of each limit, and the backoff of the rule above is per limit:
+
+```
+and now ≥ lastQuotaRefusal_L + backoff_L      -- for each limit L
+where backoff_REQUESTS = SessionPeriod   (backoff when SessionLimit is 0)
+      backoff_TOKENS   = TokenPeriod     (backoff when TokenLimit is 0)
+      backoff_UNKNOWN  = backoff: the longer period of the limits in force; 60 s when neither is
+```
+
+- Refusals of several limits hold until the last of their ends, so a `REQUESTS` refusal during a
+  `TOKENS` hold does not shorten it and a `TOKENS` refusal during a `REQUESTS` hold extends it.
+  Per-minute limits, and no limits, hold 60 s for every kind, as before.
+- The hold reason is `PROVIDER_QUOTA_BACKOFF_REQUESTS` or `PROVIDER_QUOTA_BACKOFF_TOKENS` by the
+  limit whose end the hold is, and `PROVIDER_QUOTA_BACKOFF` for `UNKNOWN`, the value from before.
+  The dialer's hold log line adds `limit`, `backoff` (the period) and `until`. The campaign's
+  activity is still `AT_CAPACITY`, and the API contract and the CDR are unchanged.
+- In the simulation, refusals of the three kinds are injected at random into a campaign whose
+  only other limit is its concurrency, over 40 seeds: no call is placed inside any refusal's
+  period, and each time the rule reads the meter it holds with the reason of the limit whose
+  period ends last until that end, and for no refusal from then on.
 
 ### 6.4 Take a slot on answer; wait briefly if there is none
 
@@ -1630,7 +1658,8 @@ configuration today, so only the env names `AICC_OVERFLOW_HOLD` and the like app
   their final SIP status, counted as each is classified (#702)
 - `aicc_dialer_in_flight{kind=ringing|talking}`
 - `aicc_dialer_admission_blocked_total{reason}` (reasons include the provider rule's
-  `PROVIDER_SESSION_RATE`, `PROVIDER_TOKEN_RATE`, `PROVIDER_QUOTA_BACKOFF`, #604)
+  `PROVIDER_SESSION_RATE`, `PROVIDER_TOKEN_RATE`, `PROVIDER_QUOTA_BACKOFF`, #604, and
+  `PROVIDER_QUOTA_BACKOFF_REQUESTS`, `PROVIDER_QUOTA_BACKOFF_TOKENS`, #652)
 - `aicc_bot_slots{state=in_use|reserved}`
 - `aicc_did_outbound_in_use{did}`
 - `aicc_campaign_answer_rate_ucb{campaign}`, `aicc_campaign_overflow_total`, `aicc_bot_overflow_hold_ms`

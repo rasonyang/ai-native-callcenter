@@ -6,6 +6,10 @@ import (
 	"cmp"
 	"context"
 	"fmt"
+	"log/slog"
+	"math/rand"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -74,9 +78,9 @@ func TestTheProviderRuleArithmetic(t *testing.T) {
 		{name: "no session in use counts as one", r: ratemeter.Reading{At: t0, Tokens: 40000},
 			tokenRPM: 100000, expected: 1, want: obs.DialerBlockedProviderTokens},
 		// The backoff holds whatever the limits.
-		{name: "a refusal a second ago holds with no limits", r: ratemeter.Reading{At: t0, LastQuotaRefusal: at(-time.Second)},
+		{name: "a refusal a second ago holds with no limits", r: ratemeter.Reading{At: t0, LastQuotaRefusalUnknown: at(-time.Second)},
 			want: obs.DialerBlockedProviderBackoff, wantUntil: at(59 * time.Second)},
-		{name: "the backoff comes before the rates", r: ratemeter.Reading{At: t0, Starts: 100, LastQuotaRefusal: at(-30 * time.Second)},
+		{name: "the backoff comes before the rates", r: ratemeter.Reading{At: t0, Starts: 100, LastQuotaRefusalUnknown: at(-30 * time.Second)},
 			sessionRPM: 60, want: obs.DialerBlockedProviderBackoff, wantUntil: at(30 * time.Second)},
 	}
 	for _, tt := range tests {
@@ -104,7 +108,7 @@ func TestTheQuotaBackoffEndsAtExactlyOneMinute(t *testing.T) {
 			{time.Minute, ""},
 			{2 * time.Minute, ""},
 		} {
-			r := ratemeter.Reading{At: refused.Add(tt.after), LastQuotaRefusal: refused}
+			r := ratemeter.Reading{At: refused.Add(tt.after), LastQuotaRefusalUnknown: refused}
 			if got, _ := providerHold(r, q, 0, 0, 0, 0); got != tt.want {
 				t.Errorf("%+v, %v after the refusal: %q, want %q", q, tt.after, got, tt.want)
 			}
@@ -151,16 +155,16 @@ func TestTheProviderRuleOverTheVendorsPeriods(t *testing.T) {
 			want: obs.DialerBlockedProviderTokens, wantUntil: at(3 * time.Second)},
 		// The backoff is the longer of the two periods, 12 s.
 		{name: "a refusal holds for the longer period", q: q,
-			r:    ratemeter.Reading{At: t0, LastQuotaRefusal: at(-time.Second)},
+			r:    ratemeter.Reading{At: t0, LastQuotaRefusalUnknown: at(-time.Second)},
 			want: obs.DialerBlockedProviderBackoff, wantUntil: at(11 * time.Second)},
 		{name: "with the token limit off, for the session period", q: providerQuota{sessionLimit: 3, sessionPeriod: time.Second, tokenPeriod: 12 * time.Second},
-			r:    ratemeter.Reading{At: t0, LastQuotaRefusal: at(-500 * time.Millisecond)},
+			r:    ratemeter.Reading{At: t0, LastQuotaRefusalUnknown: at(-500 * time.Millisecond)},
 			want: obs.DialerBlockedProviderBackoff, wantUntil: at(500 * time.Millisecond)},
 		{name: "a period longer than a minute is its own window", q: providerQuota{sessionLimit: 1000, sessionPeriod: time.Hour},
 			r: ratemeter.Reading{At: t0, Starts: 990, StartsDropAt: at(time.Minute)}, expected: 9.5,
 			want: obs.DialerBlockedProviderSessions, wantUntil: at(time.Minute)},
 		{name: "and its backoff", q: providerQuota{sessionLimit: 1000, sessionPeriod: time.Hour},
-			r:    ratemeter.Reading{At: t0, LastQuotaRefusal: at(-time.Minute)},
+			r:    ratemeter.Reading{At: t0, LastQuotaRefusalUnknown: at(-time.Minute)},
 			want: obs.DialerBlockedProviderBackoff, wantUntil: at(59 * time.Minute)},
 	}
 	for _, tt := range tests {
@@ -187,10 +191,183 @@ func TestTheQuotaBackoffEndsAfterTheLongerPeriod(t *testing.T) {
 		{12*time.Second - time.Millisecond, obs.DialerBlockedProviderBackoff},
 		{12 * time.Second, ""},
 	} {
-		r := ratemeter.Reading{At: refused.Add(tt.after), LastQuotaRefusal: refused}
+		r := ratemeter.Reading{At: refused.Add(tt.after), LastQuotaRefusalUnknown: refused}
 		if got, _ := providerHold(r, q, 0, 0, 0, 0); got != tt.want {
 			t.Errorf("%v after the refusal: %q, want %q", tt.after, got, tt.want)
 		}
+	}
+}
+
+// A refusal that names a limit holds for that limit's period, not the longer
+// of both (#652): at 3 per 1 s and 60,000 per 12 s a REQUESTS refusal ends
+// with the session window, a TOKENS or UNKNOWN one with the token window.
+// Refusals of both kinds end when the later one ends: REQUESTS arriving
+// during a TOKENS hold does not shorten it; TOKENS during REQUESTS extends it.
+func TestEachQuotaRefusalHoldsForItsOwnLimitPeriod(t *testing.T) {
+	t0 := time.Date(2026, 11, 23, 10, 0, 0, 0, time.UTC)
+	q := providerQuota{sessionLimit: 3, sessionPeriod: time.Second, tokenLimit: 60000, tokenPeriod: 12 * time.Second}
+	for _, tt := range []struct {
+		name  string
+		r     ratemeter.Reading
+		want  string
+		until time.Duration
+	}{
+		{"a REQUESTS refusal holds for the session period",
+			ratemeter.Reading{At: t0, LastQuotaRefusalRequests: t0},
+			obs.DialerBlockedProviderBackoffRequests, time.Second},
+		{"a TOKENS refusal holds for the token period",
+			ratemeter.Reading{At: t0, LastQuotaRefusalTokens: t0},
+			obs.DialerBlockedProviderBackoffTokens, 12 * time.Second},
+		{"an UNKNOWN refusal holds for the longer period",
+			ratemeter.Reading{At: t0, LastQuotaRefusalUnknown: t0},
+			obs.DialerBlockedProviderBackoff, 12 * time.Second},
+		{"a REQUESTS refusal from 900ms ago has ended at 1s, a TOKENS one has not",
+			ratemeter.Reading{At: t0, LastQuotaRefusalRequests: t0.Add(-900 * time.Millisecond)},
+			obs.DialerBlockedProviderBackoffRequests, 100 * time.Millisecond},
+		{"both outstanding: the hold ends when the later one ends",
+			ratemeter.Reading{At: t0, LastQuotaRefusalRequests: t0.Add(-time.Second), LastQuotaRefusalTokens: t0.Add(-time.Second)},
+			obs.DialerBlockedProviderBackoffTokens, 11 * time.Second},
+		{"a REQUESTS refusal during a TOKENS hold does not shorten it",
+			ratemeter.Reading{At: t0, LastQuotaRefusalRequests: t0, LastQuotaRefusalTokens: t0.Add(-6 * time.Second)},
+			obs.DialerBlockedProviderBackoffTokens, 6 * time.Second},
+		{"a TOKENS refusal during a REQUESTS hold extends it",
+			ratemeter.Reading{At: t0, LastQuotaRefusalTokens: t0, LastQuotaRefusalRequests: t0.Add(-900 * time.Millisecond)},
+			obs.DialerBlockedProviderBackoffTokens, 12 * time.Second},
+		{"the REQUESTS refusal ended a second ago: the rate rules still apply",
+			ratemeter.Reading{At: t0, LastQuotaRefusalRequests: t0.Add(-time.Second), Starts: 3,
+				StartsDropAt: t0.Add(9 * time.Second)},
+			"", 0},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			got, until := providerHold(tt.r, q, 0, 0, 0, 0)
+			if got != tt.want {
+				t.Errorf("providerHold = %q, want %q", got, tt.want)
+			}
+			if tt.until != 0 && !until.Equal(t0.Add(tt.until)) {
+				t.Errorf("until = %v, want %v", until, t0.Add(tt.until))
+			}
+		})
+	}
+}
+
+// The refusal hold as the dialer reads it, from the rate meter itself on a
+// fake clock (#652). Each case is refusals at offsets from t0, then where the
+// hold must end and with which reason: held a millisecond before, admitted at
+// the end, and the end is the until the dialer wakes for.
+func TestTheMeterAndTheHoldRuleHoldForTheRefusingLimit(t *testing.T) {
+	short := providerQuota{sessionLimit: 3, sessionPeriod: time.Second, tokenLimit: 60000, tokenPeriod: 12 * time.Second}
+	type refusal struct {
+		at    time.Duration
+		limit ratemeter.Limit
+	}
+	for _, tt := range []struct {
+		name     string
+		q        providerQuota
+		refusals []refusal
+		end      time.Duration
+		reason   string
+	}{
+		{"REQUESTS holds for the session period", short,
+			[]refusal{{0, ratemeter.LimitRequests}}, time.Second, obs.DialerBlockedProviderBackoffRequests},
+		{"TOKENS holds for the token period", short,
+			[]refusal{{0, ratemeter.LimitTokens}}, 12 * time.Second, obs.DialerBlockedProviderBackoffTokens},
+		{"UNKNOWN holds for the longer period", short,
+			[]refusal{{0, ratemeter.LimitUnknown}}, 12 * time.Second, obs.DialerBlockedProviderBackoff},
+		{"REQUESTS during a TOKENS hold does not shorten it", short,
+			[]refusal{{0, ratemeter.LimitTokens}, {6 * time.Second, ratemeter.LimitRequests}},
+			12 * time.Second, obs.DialerBlockedProviderBackoffTokens},
+		{"TOKENS during a REQUESTS hold extends it", short,
+			[]refusal{{0, ratemeter.LimitRequests}, {500 * time.Millisecond, ratemeter.LimitTokens}},
+			12500 * time.Millisecond, obs.DialerBlockedProviderBackoffTokens},
+		{"REQUESTS and TOKENS at one instant hold for the token period", short,
+			[]refusal{{0, ratemeter.LimitRequests}, {0, ratemeter.LimitTokens}},
+			12 * time.Second, obs.DialerBlockedProviderBackoffTokens},
+		{"a REQUESTS refusal after the TOKENS one ended holds for its own period", short,
+			[]refusal{{0, ratemeter.LimitTokens}, {12 * time.Second, ratemeter.LimitRequests}},
+			13 * time.Second, obs.DialerBlockedProviderBackoffRequests},
+		{"REQUESTS with the session limit off holds for the longer period in force",
+			providerQuota{sessionPeriod: time.Second, tokenLimit: 60000, tokenPeriod: 12 * time.Second},
+			[]refusal{{0, ratemeter.LimitRequests}}, 12 * time.Second, obs.DialerBlockedProviderBackoffRequests},
+		{"TOKENS with the token limit off holds for the longer period in force",
+			providerQuota{sessionLimit: 3, sessionPeriod: time.Second, tokenPeriod: 12 * time.Second},
+			[]refusal{{0, ratemeter.LimitTokens}}, time.Second, obs.DialerBlockedProviderBackoffTokens},
+		// Per-minute limits and no limits: a minute for every kind, as in v0.9.1.
+		{"per minute, REQUESTS", perMinute(60, 100000), []refusal{{0, ratemeter.LimitRequests}},
+			time.Minute, obs.DialerBlockedProviderBackoffRequests},
+		{"per minute, TOKENS", perMinute(60, 100000), []refusal{{0, ratemeter.LimitTokens}},
+			time.Minute, obs.DialerBlockedProviderBackoffTokens},
+		{"per minute, UNKNOWN", perMinute(60, 100000), []refusal{{0, ratemeter.LimitUnknown}},
+			time.Minute, obs.DialerBlockedProviderBackoff},
+		{"no limits, REQUESTS", providerQuota{}, []refusal{{0, ratemeter.LimitRequests}},
+			time.Minute, obs.DialerBlockedProviderBackoffRequests},
+		{"no limits, TOKENS", providerQuota{}, []refusal{{0, ratemeter.LimitTokens}},
+			time.Minute, obs.DialerBlockedProviderBackoffTokens},
+		{"no limits, UNKNOWN", providerQuota{}, []refusal{{0, ratemeter.LimitUnknown}},
+			time.Minute, obs.DialerBlockedProviderBackoff},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			clock := &fakeClock{now: time.Date(2026, 11, 23, 10, 0, 0, 0, time.UTC)}
+			t0 := clock.Now()
+			m := ratemeter.New(clock.Now, ratemeter.Config{SessionPeriod: tt.q.sessionPeriod, TokenPeriod: tt.q.tokenPeriod})
+			for _, r := range tt.refusals {
+				clock.Set(t0.Add(r.at))
+				m.QuotaRefused(r.limit)
+			}
+			end := t0.Add(tt.end)
+			clock.Set(end.Add(-time.Millisecond))
+			if got, until := providerHold(m.Read(), tt.q, 0, 0, 0, 0); got != tt.reason || !until.Equal(end) {
+				t.Errorf("1 ms before the end: %q until %v, want %q until %v", got, until, tt.reason, end)
+			}
+			clock.Set(end)
+			if got, until := providerHold(m.Read(), tt.q, 0, 0, 0, 0); got != "" || !until.IsZero() {
+				t.Errorf("at the end: %q until %v, want admitted", got, until)
+			}
+		})
+	}
+}
+
+// The wake the dialer asks for is the hold's end (rateWake), for each limit:
+// nothing else is in flight, so that wake is what dials again.
+func TestTheDialerWakesAtTheEndOfTheRefusingLimitsHold(t *testing.T) {
+	for _, tt := range []struct {
+		limit ratemeter.Limit
+		end   time.Duration
+	}{
+		{ratemeter.LimitRequests, time.Second},
+		{ratemeter.LimitTokens, 12 * time.Second},
+		{ratemeter.LimitUnknown, 12 * time.Second},
+	} {
+		t.Run(string(tt.limit), func(t *testing.T) {
+			s := newSim(t, simSpec{capacity: 50, campaigns: 1, seed: 1, maxConcurrent: 5, isGated: true,
+				sessionLimit: 3, sessionPeriod: time.Second, tokenLimit: 60000, tokenPeriod: 12 * time.Second})
+			t0 := s.clock.Now()
+			s.meter.QuotaRefused(tt.limit)
+			ctx, cancel := context.WithCancel(context.Background())
+			done := make(chan struct{})
+			go func() { defer close(done); s.d.Run(ctx) }()
+			defer func() { cancel(); <-done }()
+			s.settle()
+
+			// Read on the actor, before any pass of its own: the last pass's.
+			var rateWake, nextWake time.Time
+			if err := s.d.run(ctx, func(context.Context) { rateWake, nextWake = s.d.rateWake, s.d.nextWake }); err != nil {
+				t.Fatal(err)
+			}
+			end := t0.Add(tt.end)
+			if !rateWake.Equal(end) || nextWake.After(end) {
+				t.Errorf("rateWake %v, nextWake %v; want the hold's end %v, and no wake after it", rateWake, nextWake, end)
+			}
+			if s.placements != 0 {
+				t.Fatalf("%d calls placed during the hold", s.placements)
+			}
+			s.clock.Set(end)
+			if err := s.d.Sync(ctx); err != nil {
+				t.Fatal(err)
+			}
+			if s.placements != 5 {
+				t.Errorf("%d calls placed at the hold's end, want the campaign's 5", s.placements)
+			}
+		})
 	}
 }
 
@@ -200,7 +377,7 @@ func TestTheQuotaBackoffEndsAfterTheLongerPeriod(t *testing.T) {
 func TestARefusalHoldsAdmissionForAMinuteAndTheDialerWakesForItsEnd(t *testing.T) {
 	s := newSim(t, simSpec{capacity: 50, campaigns: 1, seed: 1, maxConcurrent: 5, isGated: true})
 	t0 := s.clock.Now()
-	s.meter.QuotaRefused() // an inbound call's session, refused at t0
+	s.meter.QuotaRefused(ratemeter.LimitUnknown) // an inbound call's session, refused at t0
 	s.clock.Set(t0.Add(30 * time.Second))
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -234,12 +411,319 @@ func TestARefusalHoldsAdmissionForAMinuteAndTheDialerWakesForItsEnd(t *testing.T
 	}
 }
 
+// The same hold in the dialer's own simulation, on its fake clock (#652): at 3
+// per 1 s and 60,000 per 12 s a REQUESTS refusal ends with the session window
+// — a call the old minute-long rule would still hold dials a session period
+// after it — and a TOKENS refusal keeps it held for the token window.
+func TestARefusalEndsWithTheWindowItsLimitCarries(t *testing.T) {
+	ctx := context.Background()
+	newSimFor := func(kind ratemeter.Limit) (*sim, time.Time, context.CancelFunc, <-chan struct{}) {
+		s := newSim(t, simSpec{capacity: 50, campaigns: 1, seed: 1, maxConcurrent: 5, isGated: true,
+			sessionLimit: 3, sessionPeriod: time.Second, tokenLimit: 60000, tokenPeriod: 12 * time.Second})
+		t0 := s.clock.Now()
+		s.meter.QuotaRefused(kind) // refused at t0
+		s.clock.Set(t0.Add(500 * time.Millisecond))
+		runCtx, cancel := context.WithCancel(ctx)
+		done := make(chan struct{})
+		go func() { defer close(done); s.d.Run(runCtx) }()
+		s.settle()
+		if s.placements != 0 {
+			t.Fatalf("%d calls placed while a %s refusal held", s.placements, kind)
+		}
+		return s, t0, cancel, done
+	}
+
+	t.Run("a REQUESTS refusal ends with the session window", func(t *testing.T) {
+		s, t0, cancel, done := newSimFor(ratemeter.LimitRequests)
+		defer func() { cancel(); <-done }()
+		s.clock.Set(t0.Add(999 * time.Millisecond))
+		if err := s.d.Sync(ctx); err != nil {
+			t.Fatal(err)
+		}
+		if s.placements != 0 {
+			t.Fatalf("%d calls placed before the refused limit's window was over", s.placements)
+		}
+		s.clock.Set(t0.Add(time.Second))
+		if err := s.d.Sync(ctx); err != nil {
+			t.Fatal(err)
+		}
+		if s.placements != 5 {
+			t.Errorf("%d calls placed once the session window was over, want the campaign's 5", s.placements)
+		}
+	})
+
+	t.Run("a TOKENS refusal holds the full token window", func(t *testing.T) {
+		s, t0, cancel, done := newSimFor(ratemeter.LimitTokens)
+		defer func() { cancel(); <-done }()
+		s.clock.Set(t0.Add(12*time.Second - time.Millisecond))
+		if err := s.d.Sync(ctx); err != nil {
+			t.Fatal(err)
+		}
+		if s.placements != 0 {
+			t.Fatalf("%d calls placed while a TOKENS refusal held", s.placements)
+		}
+		s.clock.Set(t0.Add(12 * time.Second))
+		if err := s.d.Sync(ctx); err != nil {
+			t.Fatal(err)
+		}
+		if s.placements != 5 {
+			t.Errorf("%d calls placed once the token window was over, want the campaign's 5", s.placements)
+		}
+	})
+}
+
+// holdLog keeps the dialer's provider-hold log lines (noteProviderHold) with
+// the time on the fake clock each was written at.
+type holdLog struct {
+	clock *fakeClock
+	mu    sync.Mutex
+	lines []holdLine
+}
+
+type holdLine struct {
+	at    time.Time
+	msg   string
+	attrs map[string]string
+}
+
+func (h *holdLog) Enabled(context.Context, slog.Level) bool { return true }
+func (h *holdLog) WithAttrs([]slog.Attr) slog.Handler       { return h }
+func (h *holdLog) WithGroup(string) slog.Handler            { return h }
+func (h *holdLog) Handle(_ context.Context, r slog.Record) error {
+	if !strings.Contains(r.Message, "provider's quota") {
+		return nil
+	}
+	line := holdLine{at: h.clock.Now(), msg: r.Message, attrs: map[string]string{}}
+	r.Attrs(func(a slog.Attr) bool {
+		line.attrs[a.Key] = a.Value.Resolve().String()
+		return true
+	})
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.lines = append(h.lines, line)
+	return nil
+}
+
+func (h *holdLog) all() []holdLine {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return append([]holdLine(nil), h.lines...)
+}
+
+// The dialer's hold log says which limit refused, the period it holds for and
+// when the hold ends (#652): at 3 per 1 s and 60,000 per 12 s, a REQUESTS
+// refusal holds for 1 s, a TOKENS refusal half a second later takes the hold
+// over for 12 s, and the line that lets calls through again comes at its end.
+func TestTheHoldLogNamesTheRefusingLimitAndItsPeriod(t *testing.T) {
+	logs := &holdLog{}
+	s := newSim(t, simSpec{capacity: 50, campaigns: 1, seed: 1, maxConcurrent: 5, isGated: true,
+		sessionLimit: 3, sessionPeriod: time.Second, tokenLimit: 60000, tokenPeriod: 12 * time.Second,
+		log: slog.New(logs)})
+	logs.clock = s.clock
+	t0 := s.clock.Now()
+	s.meter.QuotaRefused(ratemeter.LimitRequests) // before the dialer's first pass
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { defer close(done); s.d.Run(ctx) }()
+	defer func() { cancel(); <-done }()
+	s.settle()
+	s.clock.Set(t0.Add(500 * time.Millisecond))
+	s.meter.QuotaRefused(ratemeter.LimitTokens)
+	s.d.Wake()
+	s.settle()
+	s.clock.Set(t0.Add(12500 * time.Millisecond))
+	s.settle()
+
+	lines := logs.all()
+	if len(lines) != 3 {
+		t.Fatalf("%d hold lines, want 3: %+v", len(lines), lines)
+	}
+	for i, want := range []struct {
+		at                     time.Duration
+		reason, limit, backoff string
+		until                  time.Duration
+	}{
+		{0, obs.DialerBlockedProviderBackoffRequests, "REQUESTS", "1s", time.Second},
+		{500 * time.Millisecond, obs.DialerBlockedProviderBackoffTokens, "TOKENS", "12s", 12500 * time.Millisecond},
+		{12500 * time.Millisecond, "", "", "", 0},
+	} {
+		got := lines[i]
+		if !got.at.Equal(t0.Add(want.at)) || got.attrs["reason"] != want.reason ||
+			got.attrs["limit"] != want.limit || got.attrs["backoff"] != want.backoff {
+			t.Errorf("line %d = %v %q %v, want at +%v reason %q limit %q backoff %q",
+				i, got.at.Sub(t0), got.msg, got.attrs, want.at, want.reason, want.limit, want.backoff)
+		}
+		if want.until != 0 && got.attrs["until"] != t0.Add(want.until).String() {
+			t.Errorf("line %d until = %s, want %v", i, got.attrs["until"], t0.Add(want.until))
+		}
+	}
+	if s.placements != 5 {
+		t.Errorf("%d calls placed once the TOKENS hold ended, want the campaign's 5", s.placements)
+	}
+}
+
+// Refusals of every limit injected at random into the capacity simulation
+// (#652), at 3 per 1 s and 60,000 per 12 s, into a campaign whose only other
+// limit is its concurrency (the bot, the rates and the tokens have room), over
+// many seeds. Read from the dialer's own trace:
+//
+//   - no call is placed inside any refusal's period: 1 s after REQUESTS, 12 s
+//     after TOKENS and UNKNOWN, the longer one when several are outstanding;
+//   - each time the provider rule reads the meter, the meter's latest refusal
+//     of each limit is the run's own, the rule holds with the reason of the
+//     limit whose period ends last while it lasts, and from its end on it
+//     holds for none: admission resumes after the refusing limit's period;
+//   - and over the seeds every kind of hold ended and was let through again,
+//     refusals of one limit came during holds of the other, both ways, and
+//     calls went out after a REQUESTS hold's end that the rule before #652
+//     (12 s for every refusal) would still have held.
+//
+// The periods expected are written out here, not taken from the rule.
+func TestAdmissionResumesAfterTheRefusingLimitsPeriodOverManySeeds(t *testing.T) {
+	const seeds, minutes = 40, 10
+	q := providerQuota{sessionLimit: 3, sessionPeriod: time.Second, tokenLimit: 60000, tokenPeriod: 12 * time.Second}
+	period := map[ratemeter.Limit]time.Duration{
+		ratemeter.LimitRequests: time.Second, ratemeter.LimitTokens: 12 * time.Second, ratemeter.LimitUnknown: 12 * time.Second,
+	}
+	reasonOf := map[ratemeter.Limit]string{
+		ratemeter.LimitRequests: obs.DialerBlockedProviderBackoffRequests,
+		ratemeter.LimitTokens:   obs.DialerBlockedProviderBackoffTokens,
+		ratemeter.LimitUnknown:  obs.DialerBlockedProviderBackoff,
+	}
+	isBackoff := func(reason string) bool {
+		return reason == obs.DialerBlockedProviderBackoff || reason == obs.DialerBlockedProviderBackoffRequests ||
+			reason == obs.DialerBlockedProviderBackoffTokens
+	}
+	limits := []ratemeter.Limit{ratemeter.LimitRequests, ratemeter.LimitTokens, ratemeter.LimitUnknown}
+
+	refusals := map[ratemeter.Limit]int{}
+	held := map[string]int{}     // reads the rule held for a refusal, by reason
+	released := map[string]int{} // holds that ended and were read again, by the reason they had
+	overlaps := map[string]int{}
+	var placements, earlyPlacements, reads int
+	for seed := int64(1); seed <= seeds; seed++ {
+		tr := &simTrace{}
+		p := simProvider{refuseShare: 0.3, refuseLimits: limits, refuseRng: rand.New(rand.NewSource(seed))}
+		s := newSim(t, simSpec{capacity: 400, inboundReserve: 4, campaigns: 1, seed: seed, maxConcurrent: 8,
+			rates: []func(time.Duration) float64{constRate(0.5)}, provider: &p, isGated: true,
+			sessionLimit: q.sessionLimit, sessionPeriod: q.sessionPeriod, tokenLimit: q.tokenLimit, tokenPeriod: q.tokenPeriod,
+			trace: tr})
+		s.run(minutes * time.Minute)
+		s.checkTerm()
+
+		latest := map[ratemeter.Limit]time.Time{}
+		// hold is what the refusals so far give at now: the limit whose
+		// period ends last, and that end; zero when none holds.
+		hold := func(now time.Time) (ratemeter.Limit, time.Time) {
+			var limit ratemeter.Limit
+			var until time.Time
+			for _, l := range limits {
+				if at, ok := latest[l]; ok {
+					if end := at.Add(period[l]); now.Before(end) && end.After(until) {
+						limit, until = l, end
+					}
+				}
+			}
+			return limit, until
+		}
+		// A read's verdict is the hold line that follows it, before the next
+		// read, or the last one logged when none does (the dialer logs a
+		// change only).
+		reported, lastJudged := "", ""
+		type pendingRead struct {
+			at    time.Time
+			limit ratemeter.Limit
+			until time.Time
+		}
+		var pending *pendingRead
+		judge := func() {
+			if pending == nil {
+				return
+			}
+			reads++
+			if !pending.until.IsZero() {
+				if want := reasonOf[pending.limit]; reported != want {
+					t.Errorf("seed %d at +%v: the rule read %q, want %q until +%v",
+						seed, pending.at.Sub(s.start), reported, want, pending.until.Sub(s.start))
+				}
+				held[reported]++
+			} else {
+				if isBackoff(reported) {
+					t.Errorf("seed %d at +%v: the rule still held %q after every refusal's period",
+						seed, pending.at.Sub(s.start), reported)
+				}
+				if isBackoff(lastJudged) {
+					released[lastJudged]++
+				}
+			}
+			lastJudged = reported
+			pending = nil
+		}
+		for _, e := range tr.all() {
+			switch e.kind {
+			case traceRefusal:
+				refusals[e.limit]++
+				if l, until := hold(e.at); !until.IsZero() && l != e.limit && l != ratemeter.LimitUnknown && e.limit != ratemeter.LimitUnknown {
+					overlaps[string(e.limit)+" during "+string(l)]++
+				}
+				if e.at.After(latest[e.limit]) {
+					latest[e.limit] = e.at
+				}
+			case tracePlacement:
+				judge()
+				placements++
+				if l, until := hold(e.at); !until.IsZero() {
+					t.Errorf("seed %d: a call placed at +%v inside a %s refusal's period (until +%v)",
+						seed, e.at.Sub(s.start), l, until.Sub(s.start))
+				}
+				if at, ok := latest[ratemeter.LimitRequests]; ok && e.at.Sub(at) < 12*time.Second {
+					earlyPlacements++
+				}
+			case traceRead:
+				judge()
+				r := e.reading
+				for l, got := range map[ratemeter.Limit]time.Time{ratemeter.LimitRequests: r.LastQuotaRefusalRequests,
+					ratemeter.LimitTokens: r.LastQuotaRefusalTokens, ratemeter.LimitUnknown: r.LastQuotaRefusalUnknown} {
+					if !got.Equal(latest[l]) {
+						t.Fatalf("seed %d at +%v: the meter's latest %s refusal is %v, want %v",
+							seed, e.at.Sub(s.start), l, got, latest[l])
+					}
+				}
+				limit, until := hold(e.at)
+				pending = &pendingRead{at: e.at, limit: limit, until: until}
+			case traceHold:
+				reported = e.reason
+				judge()
+			}
+		}
+		judge()
+	}
+	t.Logf("%d seeds x %d min: refusals %v; %d placements, %d reads; held %v; released %v; overlaps %v; "+
+		"%d placements within 12 s of a REQUESTS refusal",
+		seeds, minutes, refusals, placements, reads, held, released, overlaps, earlyPlacements)
+	for _, l := range limits {
+		if r := reasonOf[l]; refusals[l] == 0 || held[r] == 0 || released[r] == 0 {
+			t.Errorf("%s: %d refusals, %d reads held, %d holds released: the run does not show its hold",
+				l, refusals[l], held[r], released[r])
+		}
+	}
+	for _, o := range []string{"REQUESTS during TOKENS", "TOKENS during REQUESTS"} {
+		if overlaps[o] == 0 {
+			t.Errorf("no refusal of %s: the run does not show one limit's refusal in the other's hold", o)
+		}
+	}
+	if earlyPlacements == 0 {
+		t.Error("no call placed within 12 s of a REQUESTS refusal: the run does not show its shorter hold")
+	}
+}
+
 // simProvider is a speech provider with a quota, as the vendor of #604
 // documents its own: it refuses a session start once the starts of its own
 // last connectPeriod, or the tokens of its last tokenPeriod, have reached the
-// limit (a zero period is a minute). A refused attempt still counts as a
-// connect. A session it accepts reports tokensPerTurn every turnEvery until
-// the call ends.
+// limit (a zero period is a minute), naming no limit (UNKNOWN). A refused
+// attempt still counts as a connect. A session it accepts reports
+// tokensPerTurn every turnEvery until the call ends.
 type simProvider struct {
 	connectLimit  int
 	connectPeriod time.Duration
@@ -247,6 +731,12 @@ type simProvider struct {
 	tokenPeriod   time.Duration
 	tokensPerTurn int
 	turnEvery     time.Duration
+	// refuseShare is the share of the starts its quota admits that it
+	// refuses all the same, each naming a limit drawn evenly from
+	// refuseLimits by refuseRng: refusals of chosen limits, injected (#652).
+	refuseShare  float64
+	refuseLimits []ratemeter.Limit
+	refuseRng    *rand.Rand
 
 	starts           []time.Time
 	spent            []simSpend
@@ -272,28 +762,35 @@ func (p *simProvider) prune(now time.Time) {
 	}
 }
 
-func (p *simProvider) start(now time.Time) bool {
+// start is one session start: it returns the limit a refusal named, empty
+// when the session is accepted.
+func (p *simProvider) start(now time.Time) ratemeter.Limit {
 	p.prune(now)
 	var tokens int64
 	for _, s := range p.spent {
 		tokens += s.n
 	}
-	isRefused := (p.connectLimit > 0 && len(p.starts) >= p.connectLimit) ||
-		(p.tokenLimit > 0 && tokens >= p.tokenLimit)
+	var limit ratemeter.Limit
+	switch {
+	case (p.connectLimit > 0 && len(p.starts) >= p.connectLimit) || (p.tokenLimit > 0 && tokens >= p.tokenLimit):
+		limit = ratemeter.LimitUnknown
+	case p.refuseShare > 0 && p.refuseRng.Float64() < p.refuseShare:
+		limit = p.refuseLimits[p.refuseRng.Intn(len(p.refuseLimits))]
+	}
 	p.starts = append(p.starts, now)
 	isMeasured := !now.Before(p.measureFrom)
 	if isMeasured {
 		p.startedAfter++
 	}
-	if isRefused {
+	if limit != "" {
 		p.refuse++
 		if isMeasured {
 			p.refusedAfter++
 		}
-		return false
+		return limit
 	}
 	p.accepted++
-	return true
+	return ""
 }
 
 func (p *simProvider) spend(now time.Time, n int) {

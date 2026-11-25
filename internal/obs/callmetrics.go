@@ -171,7 +171,10 @@ func init() {
 			"event during setup, TIMEOUT for a setup the provider never confirmed, "+
 			"NETWORK for no answer to classify. reason is QUOTA_EXCEEDED (a 429, or "+
 			"vendor text that says quota, rate limit or throttling), AUTH_REJECTED "+
-			"(401, 403, or text about the key) or OTHER. A session the call gave up "+
+			"(401, 403, or text about the key) or OTHER. limit is the limit a quota "+
+			"refusal spoke for: REQUESTS (session starts) or TOKENS where the "+
+			"vendor's words name it, UNKNOWN where they do not; empty for a failure "+
+			"that is not a quota refusal (#652). A session the call gave up "+
 			"on (the caller hung up during setup) is not counted."))
 	providerTokens, _ = meter.Int64Counter("aicc_provider_tokens_total",
 		metric.WithDescription("Tokens the provider reported a response cost (response.done "+
@@ -383,10 +386,13 @@ func init() {
 			"reason: CAMPAIGN_CONCURRENCY, OUTBOUND_RINGING, BOT_CAPACITY (the expected "+
 			"answers would not fit in the bot's free capacity), DID_LINES (the campaign's "+
 			"DID is at its outbound line limit), PROVIDER_SESSION_RATE or "+
-			"PROVIDER_TOKEN_RATE (the last minute's provider session starts or tokens, "+
-			"plus what the expected answers would add, would pass the provider's "+
-			"per-minute quota) or PROVIDER_QUOTA_BACKOFF (the provider refused a session "+
-			"for its quota less than a minute ago)."))
+			"PROVIDER_TOKEN_RATE (the provider session starts or tokens counted over "+
+			"their periods, plus what the expected answers would add, would pass the "+
+			"provider's quota), PROVIDER_QUOTA_BACKOFF_REQUESTS or "+
+			"PROVIDER_QUOTA_BACKOFF_TOKENS (the provider refused a session for that "+
+			"limit less than its period ago) or PROVIDER_QUOTA_BACKOFF (it refused one "+
+			"without naming the limit, less than the longer period in force ago, 60 s "+
+			"when none is)."))
 	didOutboundInUse, _ = meter.Int64UpDownCounter("aicc_did_outbound_in_use",
 		metric.WithDescription("Outbound lines held on a DID: calls the platform placed "+
 			"or is placing from it, plus hand-dialled legs it observed. Compare with "+
@@ -793,14 +799,15 @@ func RecordProviderSessionStarted(provider string) {
 // (provider.StartFailure). A quota refusal is the one this exists for: without
 // it a refused handshake looks like any other failed call, and the first sign
 // of a spent quota is a run of rescued callers (#604).
-func RecordProviderDialFailure(provider, status, reason string) {
+func RecordProviderDialFailure(provider, status, reason, limit string) {
 	if providerDialFails == nil {
 		return
 	}
 	providerDialFails.Add(context.Background(), 1, metric.WithAttributes(
 		attribute.String("provider", provider),
 		attribute.String("status", status),
-		attribute.String("reason", reason)))
+		attribute.String("reason", reason),
+		attribute.String("limit", limit)))
 }
 
 // The kinds of aicc_provider_quota_per_minute.
@@ -1014,12 +1021,17 @@ const (
 	DialerBlockedRinging  = "OUTBOUND_RINGING"
 	DialerBlockedBot      = "BOT_CAPACITY"
 	DialerBlockedDIDLines = "DID_LINES"
-	// The provider rule (#604): the speech provider's session starts or tokens
-	// per minute would pass its quota, or it refused a session for its quota
-	// less than a minute ago.
-	DialerBlockedProviderSessions = "PROVIDER_SESSION_RATE"
-	DialerBlockedProviderTokens   = "PROVIDER_TOKEN_RATE"
-	DialerBlockedProviderBackoff  = "PROVIDER_QUOTA_BACKOFF"
+	// The provider rule (#604, #644): the speech provider's session starts or
+	// tokens over their periods would pass its quota, or it refused a session
+	// for its quota within the backoff of the limit the refusal named (#652):
+	// _REQUESTS the session period, _TOKENS the token period, and
+	// PROVIDER_QUOTA_BACKOFF, the value from before #652, a refusal that named
+	// neither (the longer of the periods in force).
+	DialerBlockedProviderSessions        = "PROVIDER_SESSION_RATE"
+	DialerBlockedProviderTokens          = "PROVIDER_TOKEN_RATE"
+	DialerBlockedProviderBackoff         = "PROVIDER_QUOTA_BACKOFF"
+	DialerBlockedProviderBackoffRequests = "PROVIDER_QUOTA_BACKOFF_REQUESTS"
+	DialerBlockedProviderBackoffTokens   = "PROVIDER_QUOTA_BACKOFF_TOKENS"
 )
 
 // DIDOutboundInUseChanged moves the outbound-lines gauge of a DID.

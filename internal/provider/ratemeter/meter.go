@@ -14,7 +14,9 @@
 //
 // It imports nothing of the provider clients and they import nothing of the
 // dialer: the clients feed it through provider.QuotaMeter, the orchestrator
-// counts starts, and the dialer reads a Reading.
+// counts starts, and the dialer reads a Reading. Limit, the limit a refusal
+// spoke for, is defined here so that internal/provider, the meter and the
+// dialer share one set of values.
 package ratemeter
 
 import (
@@ -62,6 +64,21 @@ func AdmissionWindow(period time.Duration) time.Duration {
 	return max(period, MinAdmissionWindow)
 }
 
+// Limit is which of the provider's limits a quota refusal spoke for (#652):
+// LimitRequests the session-start rate, counted over Config.SessionPeriod;
+// LimitTokens the tokens spent, over Config.TokenPeriod; LimitUnknown a
+// refusal whose words settle neither. internal/provider reads it from the
+// vendor's words (the label limit of aicc_provider_dial_failures_total), the
+// meter keeps the latest refusal of each, and campaign admission holds for the
+// refusing limit's own period (docs/design/10-campaigns.md section 6.3).
+type Limit string
+
+const (
+	LimitRequests Limit = "REQUESTS"
+	LimitTokens   Limit = "TOKENS"
+	LimitUnknown  Limit = "UNKNOWN"
+)
+
 // Config is what a meter counts over, and the limit its start gate keeps.
 type Config struct {
 	// SessionPeriod and TokenPeriod are the periods the provider states its
@@ -88,8 +105,14 @@ type Reading struct {
 	// in the last token period.
 	Tokens int64
 	// LastQuotaRefusal is when the provider last said the quota was spent:
-	// a refused start, or an error mid-call. Zero when it never has.
-	LastQuotaRefusal time.Time
+	// a refused start, or an error mid-call, whichever limit it named. Zero
+	// when it never has. LastQuotaRefusalRequests, LastQuotaRefusalTokens and
+	// LastQuotaRefusalUnknown are the latest refusal of each Limit (#652),
+	// each kept on its own; a limit never refused is zero.
+	LastQuotaRefusal         time.Time
+	LastQuotaRefusalRequests time.Time
+	LastQuotaRefusalTokens   time.Time
+	LastQuotaRefusalUnknown  time.Time
 	// StartsDropAt and TokensDropAt are when the oldest entry still counted
 	// leaves its window, which is the next time that count can fall. Zero
 	// when there is none.
@@ -123,6 +146,11 @@ type Meter struct {
 	tokens  window[int64]    // over the token period
 	tokenIn int64            // the sum of tokens's values
 	refused time.Time
+	// refusedRequests, refusedTokens and refusedUnknown are the latest
+	// refusal of each Limit (#652).
+	refusedRequests time.Time
+	refusedTokens   time.Time
+	refusedUnknown  time.Time
 	// queue is the paced starts waiting for room, oldest first, and stopWake
 	// stops the timer that looks at it next; nil when none is set.
 	queue    []*waiter
@@ -333,17 +361,34 @@ func (m *Meter) TokensUsed(n int) {
 	m.tokenIn += int64(n)
 }
 
-// QuotaRefused notes that the provider said its quota is spent, now. It
-// satisfies provider.QuotaMeter.
-func (m *Meter) QuotaRefused() {
+// QuotaRefused notes that the provider said its quota is spent, now, for
+// limit; any value other than LimitRequests or LimitTokens is LimitUnknown. Each
+// limit keeps its own latest time, so refusals of two limits at one instant
+// (a coarse clock, a burst of answers) are both kept, and a clock that
+// stepped back never moves one earlier. It satisfies provider.QuotaMeter.
+func (m *Meter) QuotaRefused(limit Limit) {
 	if m == nil {
 		return
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if now := m.now(); now.After(m.refused) {
-		m.refused = now
+	now := m.now()
+	m.refused = latest(m.refused, now)
+	switch limit {
+	case LimitRequests:
+		m.refusedRequests = latest(m.refusedRequests, now)
+	case LimitTokens:
+		m.refusedTokens = latest(m.refusedTokens, now)
+	default:
+		m.refusedUnknown = latest(m.refusedUnknown, now)
 	}
+}
+
+func latest(kept, now time.Time) time.Time {
+	if now.After(kept) {
+		return now
+	}
+	return kept
 }
 
 // Read is the meter now.
@@ -356,7 +401,8 @@ func (m *Meter) Read() Reading {
 	now := m.now()
 	m.expireLocked(now)
 	r := Reading{At: now, Starts: m.starts.len(), Tokens: m.tokenIn, LastQuotaRefusal: m.refused,
-		StartsWaiting: len(m.queue)}
+		LastQuotaRefusalRequests: m.refusedRequests, LastQuotaRefusalTokens: m.refusedTokens,
+		LastQuotaRefusalUnknown: m.refusedUnknown, StartsWaiting: len(m.queue)}
 	if at, ok := m.starts.oldest(); ok {
 		r.StartsDropAt = at.Add(m.starts.period)
 	}

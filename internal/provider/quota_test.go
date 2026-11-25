@@ -17,12 +17,127 @@ import (
 
 	"github.com/gorilla/websocket"
 
+	"github.com/rasonyang/ai-native-callcenter/internal/provider/ratemeter"
 	"github.com/rasonyang/ai-native-callcenter/internal/provider/wsconn"
 )
 
 // The refusal qwen answered 1117 production calls with on 2026-11-19, as the
 // start error read then. It is the one shape this classification exists for.
 const qwenQuotaText = "Allocated quota exceeded, please increase your quota limit."
+
+// qwenRequestsText is the other refusal of that production day (#604): the
+// 4th session start within a second at 3 per 1 s.
+const qwenRequestsText = "Requests rate limit exceeded, please try again later."
+
+// Which limit a quota refusal spoke for (#652), on the vendor texts in the
+// forms they arrive in: a close frame's text, an error event's code and
+// message, a refused upgrade's body, in other case, among request ids. Each
+// row names where its text comes from; a text no document or production log
+// settles is UNKNOWN, and a failure that is not a quota refusal has no limit.
+func TestAQuotaRefusalNamesTheLimitItsWordsSettle(t *testing.T) {
+	t.Parallel()
+	refused := func(status int, body string) error {
+		return fmt.Errorf("x: %w", &wsconn.HandshakeError{
+			Endpoint: "wss://p.example", StatusCode: status, Body: body, Err: websocket.ErrBadHandshake})
+	}
+	closed := func(code int, text string) error {
+		return fmt.Errorf("session rejected: %w", &websocket.CloseError{Code: code, Text: text})
+	}
+	event := func(code, message string) error {
+		return fmt.Errorf("session rejected: %w", &wireError{Code: code, Message: message})
+	}
+	const (
+		production = "production, issue #604 comment of 2026-11-19"
+		dashscope  = "https://www.alibabacloud.com/help/en/model-studio/error-code"
+		openaiRL   = "https://help.openai.com/en/articles/5955604-how-can-i-solve-429-too-many-requests-errors"
+		openaiCB   = "https://developers.openai.com/cookbook/examples/how_to_handle_rate_limits"
+		openaiEC   = "https://developers.openai.com/docs/guides/error-codes"
+		doubao     = "docs/design/doubao-findings.md section 9; internal/provider/doubao/live_waitline_test.go"
+		made       = "constructed: the rule, not a vendor text"
+	)
+	for _, tt := range []struct {
+		name, source string
+		err          error
+		want         ratemeter.Limit
+	}{
+		// qwen, the two texts of one production day, in a close frame.
+		{"qwen's session-start refusal", production, closed(1007, qwenRequestsText), ratemeter.LimitRequests},
+		{"qwen's token refusal", production, closed(1007, qwenQuotaText), ratemeter.LimitTokens},
+		{"qwen's session-start refusal in capitals", production,
+			closed(1007, strings.ToUpper(qwenRequestsText)), ratemeter.LimitRequests},
+		{"qwen's token refusal among request ids", production,
+			closed(1007, "[request_id 6f1d2c3b-0000-4000-8000-00000000a1b2] "+qwenQuotaText+" (request id 6f1d2c3b)"), ratemeter.LimitTokens},
+
+		// DashScope: the code names the limit; the messages are the code's own.
+		{"Throttling.RateQuota as an error event", dashscope,
+			event("Throttling.RateQuota", qwenRequestsText), ratemeter.LimitRequests},
+		{"Throttling.RateQuota's other message", dashscope,
+			event("Throttling.RateQuota", "You have exceeded your request limit."), ratemeter.LimitRequests},
+		{"Throttling.RateQuota in a refused upgrade", dashscope,
+			refused(429, `{"request_id":"0c1f9a7e-0000-4000-8000-000000000001","code":"Throttling.RateQuota","message":"`+qwenRequestsText+`"}`),
+			ratemeter.LimitRequests},
+		{"a 429 whose body is the request limit's message", dashscope,
+			refused(429, "You have exceeded your request limit."), ratemeter.LimitRequests},
+		{"Throttling.AllocationQuota as an error event", dashscope,
+			event("Throttling.AllocationQuota", qwenQuotaText), ratemeter.LimitTokens},
+		{"Throttling.AllocationQuota in a refused upgrade", dashscope,
+			refused(429, `{"request_id":"0c1f9a7e-0000-4000-8000-000000000002","code":"Throttling.AllocationQuota","message":"`+qwenQuotaText+`"}`),
+			ratemeter.LimitTokens},
+		{"Throttling.AllocationQuota in lower case", dashscope, event("throttling.allocationquota", ""), ratemeter.LimitTokens},
+		{"DashScope's insufficient_quota with the allocation message", dashscope,
+			event("insufficient_quota", qwenQuotaText), ratemeter.LimitTokens},
+		{"bare Throttling names no limit", dashscope,
+			event("Throttling", "Requests throttling triggered."), ratemeter.LimitUnknown},
+		{"bare Throttling in a refused upgrade", dashscope,
+			refused(429, `{"code":"Throttling","message":"Requests throttling triggered."}`), ratemeter.LimitUnknown},
+		{"Throttling.BurstRate is a spike guard, not a window", dashscope,
+			event("Throttling.BurstRate", "Request rate increased too quickly."), ratemeter.LimitUnknown},
+		{"an allocated quota of requests over hours", dashscope,
+			closed(1007, "hour allocated quota exceeded"), ratemeter.LimitUnknown},
+		{"the free tier spent", dashscope,
+			refused(403, `{"code":"AllocationQuota.FreeTierOnly","message":"The free tier of the model has been exhausted."}`),
+			ratemeter.LimitUnknown},
+
+		// OpenAI: rate_limit_exceeded is one code for both limits; its
+		// message names the unit.
+		{"rate_limit_exceeded on requests per min", openaiCB,
+			event("rate_limit_exceeded", "Rate limit reached for default-codex in organization org-{id} on requests per min. Limit: 20.000000 / min. Current: 24.000000 / min."),
+			ratemeter.LimitRequests},
+		{"rate_limit_exceeded on tokens per min", openaiRL,
+			event("rate_limit_exceeded", "Rate limit reached for gpt-realtime in organization org-{id} on tokens per min (TPM): Limit 40000, Used 39000, Requested 2000."),
+			ratemeter.LimitTokens},
+		{"rate_limit_exceeded on requests per day is no window here", openaiRL,
+			event("rate_limit_exceeded", "Rate limit reached for gpt-realtime in organization org-{id} on requests per day (RPD): Limit 200, Used 200, Requested 1."),
+			ratemeter.LimitUnknown},
+		{"rate_limit_exceeded with no unit", openaiRL, event("rate_limit_exceeded", ""), ratemeter.LimitUnknown},
+		{"insufficient_quota is spent credit, no window", openaiEC,
+			event("insufficient_quota", "You exceeded your current quota, please check your plan and billing details."),
+			ratemeter.LimitUnknown},
+
+		// HTTP and doubao.
+		{"a 429 with an empty body", openaiRL + "; " + dashscope, refused(http.StatusTooManyRequests, ""), ratemeter.LimitUnknown},
+		{"a 429 with its reason phrase", openaiRL + "; " + dashscope,
+			refused(http.StatusTooManyRequests, "429 Too Many Requests"), ratemeter.LimitUnknown},
+		{"doubao's ExceededConcurrentLimit", doubao, event("45000292", "ExceededConcurrentLimit"), ratemeter.LimitUnknown},
+
+		{"a quota text naming neither limit", made, closed(1007, "QUOTA reached"), ratemeter.LimitUnknown},
+		{"a text naming both limits", made,
+			closed(1007, qwenRequestsText+" "+qwenQuotaText), ratemeter.LimitUnknown},
+		{"a refused key is no quota refusal", made, refused(http.StatusUnauthorized, `{"code":"InvalidApiKey"}`), ""},
+		{"a close about something else", made, closed(1011, "internal error"), ""},
+		{"a setup never confirmed", made, StartTimedOut("provider did not confirm the session configuration"), ""},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			_, reason, limit, _ := ClassifyStart(tt.err)
+			if limit != tt.want {
+				t.Errorf("ClassifyStart limit = %q (reason %s), want %q (%s)", limit, reason, tt.want, tt.source)
+			}
+			if isQuota := reason == StartReasonQuotaExceeded; isQuota != (tt.want != "") {
+				t.Errorf("reason %s with limit %q (%s)", reason, tt.want, tt.source)
+			}
+		})
+	}
+}
 
 func TestAStartFailureIsClassifiedByWhatTheProviderSaid(t *testing.T) {
 	t.Parallel()
@@ -64,7 +179,7 @@ func TestAStartFailureIsClassifiedByWhatTheProviderSaid(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			status, reason, _ := ClassifyStart(tt.err)
+			status, reason, _, _ := ClassifyStart(tt.err)
 			if status != tt.status || reason != tt.reason {
 				t.Errorf("ClassifyStart = %s/%s, want %s/%s", status, reason, tt.status, tt.reason)
 			}
@@ -124,6 +239,7 @@ type fakeMeter struct {
 	mu       sync.Mutex
 	tokens   []int
 	refusals int
+	limits   []ratemeter.Limit
 }
 
 func (m *fakeMeter) TokensUsed(n int) {
@@ -132,10 +248,17 @@ func (m *fakeMeter) TokensUsed(n int) {
 	m.tokens = append(m.tokens, n)
 }
 
-func (m *fakeMeter) QuotaRefused() {
+func (m *fakeMeter) QuotaRefused(limit ratemeter.Limit) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.refusals++
+	m.limits = append(m.limits, limit)
+}
+
+func (m *fakeMeter) refusedLimits() []ratemeter.Limit {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]ratemeter.Limit(nil), m.limits...)
 }
 
 func (m *fakeMeter) counts() (tokens []int, refusals int) {
@@ -198,8 +321,12 @@ func TestQwensQuotaCloseIsAStartFailureTheMeterHears(t *testing.T) {
 		t.Fatalf("Start = %T, want a StartFailure", err)
 	}
 	if failure.Status != "CLOSE_1007" || failure.Reason != StartReasonQuotaExceeded ||
-		failure.RequestID != "req-1007" || failure.Detail != qwenQuotaText || failure.Provider != NameQwen {
+		failure.RequestID != "req-1007" || failure.Detail != qwenQuotaText || failure.Provider != NameQwen ||
+		failure.Limit != ratemeter.LimitTokens {
 		t.Errorf("failure = %+v", failure)
+	}
+	if got := fmt.Sprint(meter.refusedLimits()); got != "[TOKENS]" {
+		t.Errorf("the meter heard %s, want [TOKENS]", got)
 	}
 	want := "session rejected: websocket: close 1007 (invalid payload data): " + qwenQuotaText
 	if err.Error() != want {
@@ -230,8 +357,11 @@ func TestA429UpgradeIsAQuotaRefusalWithItsRequestID(t *testing.T) {
 	if !errors.As(err, &failure) || !errors.Is(err, ErrQuotaExceeded) {
 		t.Fatalf("Start = %v, want a quota StartFailure", err)
 	}
-	if failure.Status != "429" || failure.RequestID != "req-429" {
+	if failure.Status != "429" || failure.RequestID != "req-429" || failure.Limit != ratemeter.LimitUnknown {
 		t.Errorf("failure = %+v", failure)
+	}
+	if got := fmt.Sprint(meter.refusedLimits()); got != "[UNKNOWN]" {
+		t.Errorf("the meter heard %s, want [UNKNOWN]: a bare 429 names no limit", got)
 	}
 	if !strings.Contains(err.Error(), "http 429") {
 		t.Errorf("text = %q, want the status in it as before", err)
@@ -327,6 +457,43 @@ func TestAQuotaErrorMidCallIsHeardByTheMeter(t *testing.T) {
 	}
 	if _, refusals := meter.counts(); refusals != 1 {
 		t.Errorf("the meter heard %d refusals, want 1 (the rate limit, not the bad voice)", refusals)
+	}
+	if got := fmt.Sprint(meter.refusedLimits()); got != "[TOKENS]" {
+		t.Errorf("the meter heard %s, want [TOKENS]", got)
+	}
+}
+
+// The start-failure log line and a mid-call quota error's log line carry the
+// limit the refusal spoke for, and the meter hears the same limit (#652).
+func TestTheRefusalLogLinesNameTheLimit(t *testing.T) {
+	t.Parallel()
+	var buf strings.Builder
+	log := slog.New(slog.NewTextHandler(&buf, nil))
+	meter := &fakeMeter{}
+	q := NewQuota(NameQwen, "X-Request-Id", meter)
+
+	err := q.Refused(context.Background(), log, nil,
+		fmt.Errorf("session rejected: %w", &websocket.CloseError{Code: 1007, Text: qwenRequestsText}))
+	var failure *StartFailure
+	if !errors.As(err, &failure) || failure.Limit != ratemeter.LimitRequests {
+		t.Fatalf("Refused = %v, want a REQUESTS StartFailure", err)
+	}
+	q.RefusedMidCall(log, &wireError{Code: "Throttling.AllocationQuota", Message: qwenQuotaText})
+	q.RefusedMidCall(log, &wireError{Code: "invalid_value", Message: "bad voice"})
+	_ = q.Refused(context.Background(), log, nil,
+		fmt.Errorf("session rejected: %w", &websocket.CloseError{Code: 1011, Text: "internal error"}))
+
+	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
+	if len(lines) != 3 {
+		t.Fatalf("%d log lines, want 3:\n%s", len(lines), buf.String())
+	}
+	for i, want := range []string{"limit=REQUESTS", "limit=TOKENS", `limit=""`} {
+		if !strings.Contains(lines[i], want) {
+			t.Errorf("log line %d lacks %s: %s", i, want, lines[i])
+		}
+	}
+	if got := fmt.Sprint(meter.refusedLimits()); got != "[REQUESTS TOKENS]" {
+		t.Errorf("the meter heard %s, want [REQUESTS TOKENS]", got)
 	}
 }
 

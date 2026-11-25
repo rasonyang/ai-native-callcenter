@@ -5,6 +5,7 @@ package mockprovider_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	nethttp "net/http"
@@ -16,6 +17,7 @@ import (
 	"github.com/rasonyang/ai-native-callcenter/internal/media"
 	"github.com/rasonyang/ai-native-callcenter/internal/mockprovider"
 	"github.com/rasonyang/ai-native-callcenter/internal/provider"
+	"github.com/rasonyang/ai-native-callcenter/internal/provider/ratemeter"
 )
 
 // The mock is only worth anything if the application's own client accepts it.
@@ -156,6 +158,89 @@ func TestStatsAreServedAsJSONBesideTheSessions(t *testing.T) {
 		total, live := counts(stats())
 		return total == 1 && live == 1
 	}, "one session counted over HTTP")
+}
+
+// A refusal closes a session during setup with the code and text it was
+// given, the sessions taking the refusals in turn, and the application's own
+// client reads it as the quota refusal it stands for: the two texts qwen
+// closed production sessions with (#604) come back as REQUESTS and TOKENS
+// (#652). With RefuseSessions 2 the third session is served.
+func TestARefusedSessionIsClosedDuringSetupWithItsCodeAndText(t *testing.T) {
+	requests, err := mockprovider.ParseRefusal("1007:Requests rate limit exceeded, please try again later.")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tokens, err := mockprovider.ParseRefusal("1007:Allocated quota exceeded, please increase your quota limit.")
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := mockprovider.New(mockprovider.Config{TurnEvery: time.Hour, Log: quietLog(),
+		Refusals: []mockprovider.Refusal{requests, tokens}, RefuseSessions: 2})
+	ts := httptest.NewServer(server.Handler())
+	defer ts.Close()
+
+	for _, want := range []struct {
+		text  string
+		limit ratemeter.Limit
+	}{{requests.Text, ratemeter.LimitRequests}, {tokens.Text, ratemeter.LimitTokens}} {
+		err := start(t, ts.URL)
+		var failure *provider.StartFailure
+		if !errors.Is(err, provider.ErrQuotaExceeded) || !errors.As(err, &failure) {
+			t.Fatalf("start = %v, want a quota refusal", err)
+		}
+		if failure.Status != "CLOSE_1007" || failure.Detail != want.text || failure.Limit != want.limit {
+			t.Errorf("failure = %s %q %s, want CLOSE_1007 %q %s",
+				failure.Status, failure.Detail, failure.Limit, want.text, want.limit)
+		}
+	}
+	if err := start(t, ts.URL); err != nil {
+		t.Errorf("the third session: %v, want it served", err)
+	}
+	if stats := server.Stats(); stats.Refused != 2 || stats.Total != 3 {
+		t.Errorf("refused %d of %d sessions, want 2 of 3", stats.Refused, stats.Total)
+	}
+}
+
+func TestARefusalIsCodeColonText(t *testing.T) {
+	for _, tt := range []struct {
+		in   string
+		want mockprovider.Refusal
+		ok   bool
+	}{
+		{"1007:Requests rate limit exceeded, please try again later.",
+			mockprovider.Refusal{Code: 1007, Text: "Requests rate limit exceeded, please try again later."}, true},
+		{"4008:a: text with colons", mockprovider.Refusal{Code: 4008, Text: "a: text with colons"}, true},
+		{"1011:", mockprovider.Refusal{Code: 1011}, true},
+		{"1007", mockprovider.Refusal{}, false},
+		{"x:quota", mockprovider.Refusal{}, false},
+		{"1005:no status", mockprovider.Refusal{}, false},
+		{"999:too low", mockprovider.Refusal{}, false},
+		{"1007:" + strings.Repeat("x", 124), mockprovider.Refusal{}, false},
+	} {
+		got, err := mockprovider.ParseRefusal(tt.in)
+		if (err == nil) != tt.ok || got != tt.want {
+			t.Errorf("ParseRefusal(%q) = %+v, %v; want %+v, ok %v", tt.in, got, err, tt.want, tt.ok)
+		}
+	}
+}
+
+// start opens one session with the application's own client, as dial does,
+// and returns what Start said.
+func start(t *testing.T, url string) error {
+	t.Helper()
+	t.Setenv("OPENAI_API_KEY", "not-a-key")
+	profile, err := provider.ProfileFor(provider.NameOpenAI, provider.Override{
+		Endpoint: "ws" + strings.TrimPrefix(url, "http") + "/v1/realtime",
+	})
+	if err != nil {
+		t.Fatalf("profile: %v", err)
+	}
+	session, err := provider.New(profile, quietLog())
+	if err != nil {
+		t.Fatalf("new session: %v", err)
+	}
+	defer session.Close(context.Background())
+	return session.Start(t.Context(), provider.SessionConfig{Instructions: "say something", Language: "en"})
 }
 
 func connect(t *testing.T, cfg mockprovider.Config) (*provider.Realtime, <-chan provider.Event) {

@@ -67,6 +67,23 @@ provider. The default mode is unchanged. Each session plays one script:
   error and the application rescues the caller instead.
 * Unknown fields and malformed scripts are rejected at startup.
 
+**Refused sessions** (`-refuse-close CODE:TEXT`, not in relay mode) make the mock
+refuse sessions during setup the way a provider refuses one for its quota: it reads
+the client's `session.update` and closes the socket with that code and text. The
+flag repeats and the sessions take the refusals in turn; `-refuse-sessions N`
+refuses only the first N sessions and serves the rest (0, the default, refuses
+every one). Each refusal is a WARN line with `session=N`, and `refused` is counted
+in the stats. The two texts qwen closed sessions with in production (#604), which
+the application counts as `limit="REQUESTS"` and `limit="TOKENS"` (#652):
+
+```sh
+go run ./cmd/aicc-mockprovider -addr 127.0.0.1:9099 \
+    -refuse-close "1007:Requests rate limit exceeded, please try again later." \
+    -refuse-close "1007:Allocated quota exceeded, please increase your quota limit." \
+    -refuse-sessions 2
+AICC_PROVIDER=qwen AICC_PROVIDER_ENDPOINT=ws://127.0.0.1:9099/api-ws/v1/realtime ...
+```
+
 **Relay mode** (`-upstream wss://...`) is for fault injection on the dev stack,
 not for load. The command then serves no script: it accepts the application's
 WebSocket on any path, dials the real provider (the client's query string and its
