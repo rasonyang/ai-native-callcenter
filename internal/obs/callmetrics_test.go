@@ -466,14 +466,20 @@ func TestAProviderDialFailureIsCountedByStatusAndReason(t *testing.T) {
 	reader := useTestReader()
 	const name = "aicc_provider_dial_failures_total"
 	before := sumByLabels(t, reader, name, "provider", "status", "reason", "limit")
-	RecordProviderDialFailure("qwen", "CLOSE_1007", "QUOTA_EXCEEDED", "UNKNOWN")
-	RecordProviderDialFailure("qwen", "CLOSE_1007", "QUOTA_EXCEEDED", "UNKNOWN")
+	// The two refusals of one qwen production day (#604), countable apart by
+	// limit (#652), an unnamed one, and a failure that is no quota refusal.
+	RecordProviderDialFailure("qwen", "CLOSE_1007", "QUOTA_EXCEEDED", "REQUESTS")
+	RecordProviderDialFailure("qwen", "CLOSE_1007", "QUOTA_EXCEEDED", "TOKENS")
+	RecordProviderDialFailure("qwen", "CLOSE_1007", "QUOTA_EXCEEDED", "TOKENS")
+	RecordProviderDialFailure("qwen", "429", "QUOTA_EXCEEDED", "UNKNOWN")
 	RecordProviderDialFailure("openai", "401", "AUTH_REJECTED", "")
 	after := sumByLabels(t, reader, name, "provider", "status", "reason", "limit")
 	for key, want := range map[string]int64{
-		"qwen/CLOSE_1007/QUOTA_EXCEEDED/UNKNOWN": 2,
-		"openai/401/AUTH_REJECTED/":              1,
-		"qwen/429/QUOTA_EXCEEDED/UNKNOWN":        0,
+		"qwen/CLOSE_1007/QUOTA_EXCEEDED/REQUESTS": 1,
+		"qwen/CLOSE_1007/QUOTA_EXCEEDED/TOKENS":   2,
+		"qwen/CLOSE_1007/QUOTA_EXCEEDED/UNKNOWN":  0,
+		"qwen/429/QUOTA_EXCEEDED/UNKNOWN":         1,
+		"openai/401/AUTH_REJECTED/":               1,
 	} {
 		if got := after[key] - before[key]; got != want {
 			t.Errorf("%s gained %d, want %d", key, got, want)

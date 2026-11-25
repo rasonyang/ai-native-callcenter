@@ -171,9 +171,10 @@ func init() {
 			"event during setup, TIMEOUT for a setup the provider never confirmed, "+
 			"NETWORK for no answer to classify. reason is QUOTA_EXCEEDED (a 429, or "+
 			"vendor text that says quota, rate limit or throttling), AUTH_REJECTED "+
-			"(401, 403, or text about the key) or OTHER. limit names the window a "+
-			"quota refusal spoke for (REQUESTS, TOKENS or UNKNOWN) and is empty "+
-			"otherwise (#652). A session the call gave up "+
+			"(401, 403, or text about the key) or OTHER. limit is the limit a quota "+
+			"refusal spoke for: REQUESTS (session starts) or TOKENS where the "+
+			"vendor's words name it, UNKNOWN where they do not; empty for a failure "+
+			"that is not a quota refusal (#652). A session the call gave up "+
 			"on (the caller hung up during setup) is not counted."))
 	providerTokens, _ = meter.Int64Counter("aicc_provider_tokens_total",
 		metric.WithDescription("Tokens the provider reported a response cost (response.done "+

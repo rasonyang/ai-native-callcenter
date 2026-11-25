@@ -136,14 +136,7 @@ func ClassifyStart(err error) (status string, reason StartReason, limit ratemete
 		default:
 			reason = StartReasonOther
 		}
-		limit = limitOf(reason, refused.Body)
-		// A bare 429 is HTTP's own rate limiting: a refusal of requests
-		// (RFC 6585), whatever the body leaves unsaid.
-		if reason == StartReasonQuotaExceeded && limit == ratemeter.LimitUnknown &&
-			refused.StatusCode == http.StatusTooManyRequests {
-			limit = ratemeter.LimitRequests
-		}
-		return httpStatus(refused.StatusCode), reason, limit, refused.Body
+		return httpStatus(refused.StatusCode), reason, limitOf(reason, refused.Body), refused.Body
 	case errors.As(err, &timeout) && timeout.Timeout():
 		return StartStatusTimeout, StartReasonOther, "", ""
 	default:
@@ -156,7 +149,8 @@ func ClassifyStart(err error) (status string, reason StartReason, limit ratemete
 // text, not protocol, and the list is kept short on purpose:
 //
 //   - qwen closes a session it will not serve with 1007 "Allocated quota
-//     exceeded, please increase your quota limit." (production, 2026-11-19);
+//     exceeded, please increase your quota limit." or "Requests rate limit
+//     exceeded, please try again later." (production, 2026-11-19);
 //   - DashScope's codes are "Throttling", "Throttling.RateQuota" and
 //     "Throttling.AllocationQuota";
 //   - OpenAI's error codes are "rate_limit_exceeded" and "insufficient_quota";
@@ -176,43 +170,81 @@ func isQuotaText(text string) bool { return containsAnyFold(text, quotaWords) }
 func isAuthText(text string) bool  { return containsAnyFold(text, authWords) }
 
 // tokenLimitWords and requestLimitWords split a quota refusal by the limit it
-// names (#652), matched case-insensitively like quotaWords:
+// spoke for (#652), matched case-insensitively anywhere in the code and text
+// like quotaWords. An entry is here only where a vendor document or a
+// production log says which limit the words speak for:
 //
-//   - TOKENS: qwen's close-1007 "Allocated quota exceeded, please increase
-//     your quota limit." (production, 2026-11-19: the token-period refusal —
-//     allocation is the token pool), DashScope's "Throttling.AllocationQuota",
-//     OpenAI's "insufficient_quota" (a spend cap, tokens) and the
-//     "tokens per ..." variant of its "rate_limit_exceeded" message;
-//   - REQUESTS: qwen's "Requests rate limit exceeded, please try again
-//     later." (same production day, the session-start refusal), DashScope's
-//     "Throttling" and "Throttling.RateQuota", the "requests per ..." variant
-//     of OpenAI's message, a bare "rate limit"/"throttl"/"too many requests"
-//     (a rate limit with no unit named is a request rate) and doubao's
-//     "ExceededConcurrentLimit" (a bound on sessions opened).
+//   - TOKENS, the tokens spent per period:
+//     "allocated quota exceeded, please increase your quota limit" (qwen's
+//     close 1007 in production, issue #604, 2026-11-19, and the message of
+//     DashScope's Throttling.AllocationQuota) and "throttling.allocationquota",
+//     whose cause DashScope gives as "Token consumption per second or minute
+//     (TPS/TPM) triggered rate limiting"
+//     (https://www.alibabacloud.com/help/en/model-studio/error-code);
+//     "tokens per min", the unit OpenAI's rate-limit message names when its
+//     tokens-per-minute limit refused ("Rate limit reached for requests or
+//     tokens", https://help.openai.com/en/articles/5955604-how-can-i-solve-429-too-many-requests-errors).
+//   - REQUESTS, the requests (here, session starts) per period:
+//     "requests rate limit exceeded" (qwen's close 1007 in production, issue
+//     #604, the 4th start in a second at 3 per 1 s, and the message of
+//     DashScope's Throttling.RateQuota), "throttling.ratequota" and
+//     "exceeded your request limit" (that code's cause and its other message:
+//     "Call frequency (RPS/RPM) triggered rate limiting", same page);
+//     "requests per min" (OpenAI: "Rate limit reached for ... on requests
+//     per min.", https://developers.openai.com/cookbook/examples/how_to_handle_rate_limits).
 //
-// A quota refusal naming neither stays UNKNOWN, not guessed.
+// Only the per-minute units are named: a per-day limit does not clear in a
+// period this platform knows. Everything else that is a quota refusal is
+// UNKNOWN, among them, because a document says they are used for more than
+// one limit or for neither window:
+//
+//   - a 429 with no words, and "too many requests", "rate limit",
+//     "rate_limit_exceeded" without a unit: OpenAI and DashScope answer 429
+//     for their request and their token limits alike (the pages above);
+//   - DashScope's bare "Throttling" ("Requests throttling triggered", cause
+//     "API calls triggered rate limiting") and Throttling.BurstRate (a spike
+//     guard, not a window of the quota);
+//   - "insufficient_quota": OpenAI's billing type, a spent credit or spend
+//     cap no window clears (https://developers.openai.com/docs/guides/error-codes),
+//     and DashScope's alias of Throttling.AllocationQuota, whose second
+//     message is OpenAI's billing sentence word for word;
+//   - DashScope's other "allocated quota exceeded" texts, request counts per
+//     hours, weeks or months and a concurrency bound (same page);
+//   - doubao's "ExceededConcurrentLimit": its documented limits are 60
+//     session starts and 100,000 tokens a minute per application id
+//     (docs/design/doubao-findings.md section 9) and no document names the
+//     code; its live tests only saw it refuse a session opened soon after
+//     another one closed.
+//
+// A text naming both limits is UNKNOWN too.
 var tokenLimitWords = []string{
-	"allocationquota", "allocated quota", "insufficient_quota", "tokens per",
+	"allocated quota exceeded, please increase your quota limit",
+	"throttling.allocationquota",
+	"tokens per min",
 }
 var requestLimitWords = []string{
-	"requests per", "requests rate limit", "throttling.ratequota", "throttling",
-	"rate limit", "rate_limit", "ratelimit", "too many requests", "concurrentlimit",
+	"requests rate limit exceeded",
+	"throttling.ratequota",
+	"exceeded your request limit",
+	"requests per min",
 }
 
-// limitOf is which limit a quota refusal spoke for: REQUESTS, TOKENS, or
-// UNKNOWN when the words settle neither; empty when the failure is not a
-// quota refusal at all.
+// limitOf is which limit a quota refusal spoke for: LimitRequests,
+// LimitTokens, or LimitUnknown when the words settle neither; empty when the
+// failure is not a quota refusal at all.
 func limitOf(reason StartReason, text string) ratemeter.Limit {
 	if reason != StartReasonQuotaExceeded {
 		return ""
 	}
-	if containsAnyFold(text, tokenLimitWords) {
+	isTokens, isRequests := containsAnyFold(text, tokenLimitWords), containsAnyFold(text, requestLimitWords)
+	switch {
+	case isTokens && !isRequests:
 		return ratemeter.LimitTokens
-	}
-	if containsAnyFold(text, requestLimitWords) {
+	case isRequests && !isTokens:
 		return ratemeter.LimitRequests
+	default:
+		return ratemeter.LimitUnknown
 	}
-	return ratemeter.LimitUnknown
 }
 
 func containsAnyFold(text string, words []string) bool {
