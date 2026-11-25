@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { ApiError, NetworkError, api, callApi } from './api'
+import { ApiError, NetworkError, api, callApi, fileNameOf, requestFile } from './api'
 
 const CALL_ID = '019a0000-0000-7000-8000-000000000221'
 
@@ -78,5 +78,61 @@ describe('a request the server never answered', () => {
     const failure = await api.me().catch((error: unknown) => error)
     expect(failure).toBeInstanceOf(DOMException)
     expect((failure as DOMException).name).toBe('AbortError')
+  })
+})
+
+// A file the server makes (an export) is fetched with the session, like any
+// request; a refusal is the error envelope and must never become the file.
+describe('a file the server makes', () => {
+  it('is the body, named as Content-Disposition names it, fetched with the session', async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response('\uFEFFCall ID\r\n', {
+          status: 200,
+          headers: {
+            'content-type': 'text/csv; charset=utf-8',
+            'content-disposition': 'attachment; filename="calls-20261201-20261201.csv"',
+          },
+        }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+    const file = await requestFile('/cdrs/export?from=a&to=b')
+    expect(file.fileName).toBe('calls-20261201-20261201.csv')
+    expect(new TextDecoder().decode(await file.blob.arrayBuffer())).toContain('Call ID')
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/v1/cdrs/export?from=a&to=b',
+      expect.objectContaining({ method: 'GET', credentials: 'same-origin' }),
+    )
+  })
+
+  it('is refused with the ApiError of the envelope, not a file', async () => {
+    reply(400, {
+      error: {
+        code: 'VALIDATION_FAILED',
+        message: 'an export covers at most two calendar months',
+        params: { field: 'to', rule: 'EXPORT_WINDOW_TOO_LONG', maxMonths: 2 },
+      },
+    })
+    const failure = await requestFile('/cdrs/export').catch((error: unknown) => error)
+    expect(failure).toBeInstanceOf(ApiError)
+    expect(failure).toMatchObject({
+      status: 400,
+      code: 'VALIDATION_FAILED',
+      params: { field: 'to', rule: 'EXPORT_WINDOW_TOO_LONG', maxMonths: 2 },
+    })
+  })
+})
+
+describe('the name in a Content-Disposition header', () => {
+  it('reads the quoted, the bare and the RFC 5987 forms', () => {
+    expect(fileNameOf('attachment; filename="calls-20261201-20261231.csv"')).toBe('calls-20261201-20261231.csv')
+    expect(fileNameOf('attachment; filename=calls.csv')).toBe('calls.csv')
+    expect(fileNameOf("attachment; filename=\"x.csv\"; filename*=UTF-8''%E9%80%9A%E8%AF%9D.csv")).toBe('通话.csv')
+  })
+
+  it('keeps only the last path segment, and nothing when there is no name', () => {
+    expect(fileNameOf('attachment; filename="../../etc/passwd"')).toBe('passwd')
+    expect(fileNameOf('attachment')).toBeUndefined()
+    expect(fileNameOf(null)).toBeUndefined()
   })
 })

@@ -112,10 +112,11 @@ func TestTheTimeWindowOfTheListingsIsFromInclusiveToExclusive(t *testing.T) {
 			// The extra NO_ANSWER row at minute 20 is in any window that holds 20.
 			inWindow := func(m int) bool { return !(w.loSet && m < w.lo) && !(w.hiSet && m >= w.hi) }
 
-			rows, total, err := ledger.ListCDRs(ctx, CDRFilter{From: w.from, To: w.to, DID: "95001", Limit: 200})
+			page, err := ledger.ListCDRs(ctx, CDRFilter{From: w.from, To: w.to, DID: "95001", Limit: 200})
 			if err != nil {
 				t.Fatalf("ListCDRs: %v", err)
 			}
+			rows, total := page.Items, page.Total
 			wantTotal := len(want)
 			if inWindow(20) {
 				wantTotal++
@@ -134,10 +135,11 @@ func TestTheTimeWindowOfTheListingsIsFromInclusiveToExclusive(t *testing.T) {
 			}
 
 			// The window composes with the other filters.
-			_, total, err = ledger.ListCDRs(ctx, CDRFilter{From: w.from, To: w.to, Status: CDRStatusNoAnswer})
+			missed, err := ledger.ListCDRs(ctx, CDRFilter{From: w.from, To: w.to, Status: CDRStatusNoAnswer})
 			if err != nil {
 				t.Fatalf("ListCDRs(status): %v", err)
 			}
+			total = missed.Total
 			if wantMissed := map[bool]int64{true: 1, false: 0}[inWindow(20)]; total != wantMissed {
 				t.Errorf("NO_ANSWER total = %d, want %d", total, wantMissed)
 			}
@@ -195,10 +197,11 @@ func TestABusyCallListsApartFromANoAnswerCall(t *testing.T) {
 		}
 	}
 	for status, want := range map[string]int{CDRStatusBusy: 2, CDRStatusNoAnswer: 1, CDRStatusAnswered: 1, "": 4} {
-		rows, total, err := ledger.ListCDRs(ctx, CDRFilter{Status: status, Limit: 50})
+		page, err := ledger.ListCDRs(ctx, CDRFilter{Status: status, Limit: 50})
 		if err != nil {
 			t.Fatalf("ListCDRs(%q): %v", status, err)
 		}
+		rows, total := page.Items, page.Total
 		if int(total) != want || len(rows) != want {
 			t.Errorf("status %q: total %d, rows %d, want %d", status, total, len(rows), want)
 		}

@@ -705,6 +705,15 @@ repository's [`.env.example`](../.env.example). Two rules:
 The wiring keys in `docker-compose.yml` are set under `environment:`, which
 overrides `env_file:`, so `.env` cannot break them.
 
+**Time zone.** `AICC_TIME_ZONE` is the deployment's time zone, an IANA name
+such as `Asia/Shanghai`; unset, it is `UTC`. The call records export
+(`GET /cdrs/export`) writes each call's start date and time in it, and the
+call records listing (`GET /cdrs`) returns it as `timeZone`, so a day picked on
+the screen or by an integration selects the same calls as the file exported
+for that day, whatever zone the browser is in. One export covers at most two
+calendar months of that zone. Numbers of `AICC_DEFAULT_COUNTRY_CODE` are
+written in national form in the file. An unknown zone name refuses startup.
+
 **Transcription.** Live transcription of the human phase is off by default.
 To turn it on, set in `deploy/.env`:
 

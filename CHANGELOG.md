@@ -41,6 +41,17 @@ carries the one-line installer's files.
   `reason=~"PROVIDER_QUOTA_BACKOFF.*"`. `aicc_provider_dial_failures_total`
   gains a `limit` label; a query that sums it by its other labels is
   unaffected.
+- `AICC_TIME_ZONE` is new (#711): the deployment's time zone, an IANA name,
+  `UTC` when unset. The call-record export dates calls in it, and the call
+  records listing tells clients which zone it is. Set it to where the
+  deployment's operators are (`Asia/Shanghai`, say); an unknown name or
+  `Local` refuses startup.
+- API contract (#711): additive only. `CDRList` gains the required
+  `billSecTotal` and `timeZone`, on `GET /cdrs` and `GET /cdrs/mine` alike;
+  `listCDRs` gains the optional `toNumber`, `billSecMin` and `billSecMax`; the
+  new operation `exportCDRs` (`GET /cdrs/export`) needs `history:read:all`.
+  The listing now breaks a tie of `startedAt` by `callId`, newest first.
+  `make api-breaking BASE=main` reports no breaking change.
 
 ### Added
 
@@ -90,6 +101,30 @@ carries the one-line installer's files.
   on a campaign call, `campaignId`, so the counts add up per call and per
   campaign. `docs/design/11-backchannels.md` says exactly what is counted
   (#626, #678; thanks @sanketpatel32).
+- **Call records filter by called number and billed duration, total the
+  billed seconds, and export as a CSV file** (#711). `GET /cdrs` takes
+  `toNumber` (a substring of the called number, as `fromNumber` is of the
+  caller's) and `billSecMin` / `billSecMax` (inclusive), and answers
+  `billSecTotal`, the billed seconds of every call the filters select, beside
+  `total`, whatever the page. The new `GET /cdrs/export` writes every call the
+  same filters select, in the listing's order, as one CSV file streamed as it
+  is read: UTF-8 with a byte order mark, a header row in the request's
+  language (`language=en|zh`, else `Accept-Language`), then `callId`, the
+  start date and start time in the deployment's time zone, `callType`, the
+  two numbers, `status`, `hangupCause`, `ringSec`, `talkSec`, `billSec`,
+  `totalSec`, `campaignId` and `leadIntent`. Numbers of the deployment's
+  country code are written in national form and every number as text, so a
+  spreadsheet keeps a leading 0 and a long number. `from` and `to` are
+  required and at most two calendar months apart in the deployment's zone; a
+  wider or missing window is answered 400 `VALIDATION_FAILED` (a too-wide one
+  with `params.rule` `EXPORT_WINDOW_TOO_LONG`) before any of the file is sent.
+  The Call records screen uses all of it: the start shows with its date and
+  year in the deployment's time zone, a Billed column sits beside the
+  duration, the filters are a start date range (whole days in that zone),
+  either end's number (the box that also opens a pasted call ID, #714),
+  caller, called number, status and billed duration, a totals line gives the
+  filtered calls' count and billed seconds, and Export downloads the filtered
+  set. Below 1280 px the Journey column is hidden to make room.
 
 ### Changed
 

@@ -1324,6 +1324,24 @@ func (e Weekday) Valid() bool {
 	}
 }
 
+// Defines values for ExportCDRsParamsLanguage.
+const (
+	ExportCDRsParamsLanguageEn ExportCDRsParamsLanguage = "en"
+	ExportCDRsParamsLanguageZh ExportCDRsParamsLanguage = "zh"
+)
+
+// Valid indicates whether the value is a known member of the ExportCDRsParamsLanguage enum.
+func (e ExportCDRsParamsLanguage) Valid() bool {
+	switch e {
+	case ExportCDRsParamsLanguageEn:
+		return true
+	case ExportCDRsParamsLanguageZh:
+		return true
+	default:
+		return false
+	}
+}
+
 // APIKey An API key as it can be read back. The secret is returned once, by the create operation, and never again — this shape carries only the prefix, which is what a person recognises a key by.
 type APIKey struct {
 	CreatedAt time.Time          `json:"createdAt"`
@@ -1629,7 +1647,12 @@ type CDRDetail struct {
 
 // CDRList defines model for CDRList.
 type CDRList struct {
-	Items []CDR `json:"items"`
+	// BillSecTotal Sum of `billSec` over every call the filter selects, all `total` of them, not over this page. Seconds as recorded; 0 when none was billed.
+	BillSecTotal int   `json:"billSecTotal"`
+	Items        []CDR `json:"items"`
+
+	// TimeZone The deployment's time zone, an IANA name such as Asia/Shanghai (AICC_TIME_ZONE; UTC when unset). The same on every answer: the export (exportCDRs) writes each call's start date and time in it, and a client that filters by calendar day turns the day into `from` and `to` in this zone, never its own, so a filtered day and the file exported from it hold the same calls.
+	TimeZone string `json:"timeZone"`
 
 	// Total Total rows matching the filter, for paging.
 	Total int `json:"total"`
@@ -3684,22 +3707,74 @@ type ListCDRsParams struct {
 	DID    *string    `form:"did,omitempty" json:"did,omitempty"`
 
 	// Number Substring of either end's number: a call matches when `fromNumber` or `toNumber` contains it, whichever way it went.
-	Number     *string `form:"number,omitempty" json:"number,omitempty"`
+	Number *string `form:"number,omitempty" json:"number,omitempty"`
+
+	// FromNumber Substring of the caller's number: a call matches when its `fromNumber` contains it.
 	FromNumber *string `form:"fromNumber,omitempty" json:"fromNumber,omitempty"`
 
-	// From RFC 3339 window start.
+	// ToNumber Substring of the called number: a call matches when its `toNumber` contains it. A call this platform placed is stored from the line it went out on to the customer, so the customer's number is its `toNumber`; on an inbound call `toNumber` is the number dialled.
+	ToNumber *string `form:"toNumber,omitempty" json:"toNumber,omitempty"`
+
+	// From RFC 3339 window start, inclusive: calls that started at or after it. A client that filters by calendar day takes the day's midnight in the deployment's time zone (`CDRList.timeZone`), as the export does.
 	From *time.Time `form:"from,omitempty" json:"from,omitempty"`
 
-	// To RFC 3339 window end.
+	// To RFC 3339 window end, exclusive: calls that started before it.
 	To      *time.Time          `form:"to,omitempty" json:"to,omitempty"`
 	QueueID *openapi_types.UUID `form:"queueId,omitempty" json:"queueId,omitempty"`
 
 	// CampaignID Only calls placed for this campaign.
 	CampaignID *openapi_types.UUID `form:"campaignId,omitempty" json:"campaignId,omitempty"`
 	AgentID    *openapi_types.UUID `form:"agentId,omitempty" json:"agentId,omitempty"`
-	Limit      *int                `form:"limit,omitempty" json:"limit,omitempty"`
-	Offset     *int                `form:"offset,omitempty" json:"offset,omitempty"`
+
+	// BillSecMin Only calls whose `billSec` is at least this many seconds (inclusive). `billSecMin=1` keeps the calls that were billed at all.
+	BillSecMin *int `form:"billSecMin,omitempty" json:"billSecMin,omitempty"`
+
+	// BillSecMax Only calls whose `billSec` is at most this many seconds (inclusive).
+	BillSecMax *int `form:"billSecMax,omitempty" json:"billSecMax,omitempty"`
+	Limit      *int `form:"limit,omitempty" json:"limit,omitempty"`
+	Offset     *int `form:"offset,omitempty" json:"offset,omitempty"`
 }
+
+// ExportCDRsParams defines parameters for ExportCDRs.
+type ExportCDRsParams struct {
+	Status *CDRStatus `form:"status,omitempty" json:"status,omitempty"`
+	DID    *string    `form:"did,omitempty" json:"did,omitempty"`
+
+	// Number Substring of either end's number: a call matches when `fromNumber` or `toNumber` contains it, whichever way it went.
+	Number *string `form:"number,omitempty" json:"number,omitempty"`
+
+	// FromNumber Substring of the caller's number: a call matches when its `fromNumber` contains it.
+	FromNumber *string `form:"fromNumber,omitempty" json:"fromNumber,omitempty"`
+
+	// ToNumber Substring of the called number: a call matches when its `toNumber` contains it. A call this platform placed is stored from the line it went out on to the customer, so the customer's number is its `toNumber`; on an inbound call `toNumber` is the number dialled.
+	ToNumber *string `form:"toNumber,omitempty" json:"toNumber,omitempty"`
+
+	// From RFC 3339 window start, inclusive. Required. A calendar day starts at its midnight in the deployment's time zone (`CDRList.timeZone`).
+	From time.Time `form:"from" json:"from"`
+
+	// To RFC 3339 window end, exclusive. Required, and at most two calendar months after `from` in the deployment's time zone: `from` 2026-12-01T00:00:00+08:00 in Asia/Shanghai allows `to` up to 2027-02-01T00:00:00+08:00.
+	To      time.Time           `form:"to" json:"to"`
+	QueueID *openapi_types.UUID `form:"queueId,omitempty" json:"queueId,omitempty"`
+
+	// CampaignID Only calls placed for this campaign.
+	CampaignID *openapi_types.UUID `form:"campaignId,omitempty" json:"campaignId,omitempty"`
+	AgentID    *openapi_types.UUID `form:"agentId,omitempty" json:"agentId,omitempty"`
+
+	// BillSecMin Only calls whose `billSec` is at least this many seconds (inclusive). `billSecMin=1` keeps the calls that were billed at all.
+	BillSecMin *int `form:"billSecMin,omitempty" json:"billSecMin,omitempty"`
+
+	// BillSecMax Only calls whose `billSec` is at most this many seconds (inclusive).
+	BillSecMax *int `form:"billSecMax,omitempty" json:"billSecMax,omitempty"`
+
+	// Language The language of the header row. When absent, the first of en or zh that `Accept-Language` prefers; en otherwise. Only the header row is translated: enum values are written as the API sends them.
+	Language *ExportCDRsParamsLanguage `form:"language,omitempty" json:"language,omitempty"`
+
+	// AcceptLanguage Read only when `language` is absent: the tag with the highest quality whose primary subtag is en or zh decides the header row's language.
+	AcceptLanguage *string `json:"Accept-Language,omitempty"`
+}
+
+// ExportCDRsParamsLanguage defines parameters for ExportCDRs.
+type ExportCDRsParamsLanguage string
 
 // ListMyCDRsParams defines parameters for ListMyCDRs.
 type ListMyCDRsParams struct {
@@ -4101,6 +4176,9 @@ type ServerInterface interface {
 	// ListCDRs Page the ledger
 	// (GET /cdrs)
 	ListCDRs(w http.ResponseWriter, r *http.Request, params ListCDRsParams)
+	// ExportCDRs Export the ledger as a CSV file
+	// (GET /cdrs/export)
+	ExportCDRs(w http.ResponseWriter, r *http.Request, params ExportCDRsParams)
 	// ListMyCDRs The caller's own finished calls
 	// (GET /cdrs/mine)
 	ListMyCDRs(w http.ResponseWriter, r *http.Request, params ListMyCDRsParams)
@@ -4638,6 +4716,12 @@ func (_ Unimplemented) StartCampaign(w http.ResponseWriter, r *http.Request, cam
 // ListCDRs Page the ledger
 // (GET /cdrs)
 func (_ Unimplemented) ListCDRs(w http.ResponseWriter, r *http.Request, params ListCDRsParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ExportCDRs Export the ledger as a CSV file
+// (GET /cdrs/export)
+func (_ Unimplemented) ExportCDRs(w http.ResponseWriter, r *http.Request, params ExportCDRsParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -6728,6 +6812,19 @@ func (siw *ServerInterfaceWrapper) ListCDRs(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	// ------------- Optional query parameter "toNumber" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "toNumber", r.URL.Query(), &params.ToNumber, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "toNumber"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "toNumber", Err: err})
+		}
+		return
+	}
+
 	// ------------- Optional query parameter "from" -------------
 
 	err = runtime.BindQueryParameterWithOptions("form", true, false, "from", r.URL.Query(), &params.From, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
@@ -6793,6 +6890,32 @@ func (siw *ServerInterfaceWrapper) ListCDRs(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	// ------------- Optional query parameter "billSecMin" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "billSecMin", r.URL.Query(), &params.BillSecMin, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "billSecMin"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "billSecMin", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "billSecMax" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "billSecMax", r.URL.Query(), &params.BillSecMax, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "billSecMax"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "billSecMax", Err: err})
+		}
+		return
+	}
+
 	// ------------- Optional query parameter "limit" -------------
 
 	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
@@ -6821,6 +6944,216 @@ func (siw *ServerInterfaceWrapper) ListCDRs(w http.ResponseWriter, r *http.Reque
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ListCDRs(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ExportCDRs operation middleware
+func (siw *ServerInterfaceWrapper) ExportCDRs(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ExportCDRsParams
+
+	// ------------- Optional query parameter "status" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "status", r.URL.Query(), &params.Status, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "status"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "status", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "did" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "did", r.URL.Query(), &params.DID, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "did"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "did", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "number" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "number", r.URL.Query(), &params.Number, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "number"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "number", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "fromNumber" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "fromNumber", r.URL.Query(), &params.FromNumber, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "fromNumber"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "fromNumber", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "toNumber" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "toNumber", r.URL.Query(), &params.ToNumber, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "toNumber"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "toNumber", Err: err})
+		}
+		return
+	}
+
+	// ------------- Required query parameter "from" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "from", r.URL.Query(), &params.From, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "from"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "from", Err: err})
+		}
+		return
+	}
+
+	// ------------- Required query parameter "to" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "to", r.URL.Query(), &params.To, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "to"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "to", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "queueId" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "queueId", r.URL.Query(), &params.QueueID, runtime.BindQueryParameterOptions{Type: "string", Format: "uuid"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "queueId"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "queueId", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "campaignId" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "campaignId", r.URL.Query(), &params.CampaignID, runtime.BindQueryParameterOptions{Type: "string", Format: "uuid"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "campaignId"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "campaignId", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "agentId" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "agentId", r.URL.Query(), &params.AgentID, runtime.BindQueryParameterOptions{Type: "string", Format: "uuid"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "agentId"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "agentId", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "billSecMin" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "billSecMin", r.URL.Query(), &params.BillSecMin, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "billSecMin"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "billSecMin", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "billSecMax" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "billSecMax", r.URL.Query(), &params.BillSecMax, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "billSecMax"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "billSecMax", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "language" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "language", r.URL.Query(), &params.Language, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "language"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "language", Err: err})
+		}
+		return
+	}
+
+	headers := r.Header
+
+	// ------------- Optional header parameter "Accept-Language" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Accept-Language")]; found {
+		var AcceptLanguage string
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "Accept-Language", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Accept-Language", valueList[0], &AcceptLanguage, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "Accept-Language", Err: err})
+			return
+		}
+
+		params.AcceptLanguage = &AcceptLanguage
+
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ExportCDRs(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -8681,6 +9014,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/cdrs", wrapper.ListCDRs)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/cdrs/export", wrapper.ExportCDRs)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/cdrs/mine", wrapper.ListMyCDRs)

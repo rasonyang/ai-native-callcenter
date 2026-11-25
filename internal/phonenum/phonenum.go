@@ -196,6 +196,37 @@ func DialString(e164 string, form DialForm, countryCode string) (string, bool) {
 	return e164, true
 }
 
+// National writes a number the way an operator reads it: a canonical E.164
+// number of countryCode without "+" and the code, a Chinese landline with the
+// trunk 0 the canonical form drops ("+861062345678" is "01062345678"), a
+// mobile number and any other country code's number as the digits after the
+// code. Everything else is returned as it is: a number of another country, one
+// that is not canonical (an extension, a national number as dialled), and one
+// whose digits after the code start with 0, which read back nationally would
+// lose that 0 and be a different number. countryCode is digits only ("86");
+// empty leaves every number as it is.
+//
+// The web client's nationalNumber (web/src/lib/phonenum.ts) is the same rule,
+// so a number the browser writes into a contact export and one the server
+// writes into a call-record export read the same.
+func National(number, countryCode string) string {
+	if countryCode == "" || !isAllDigits(countryCode) || !IsCanonical(number) {
+		return number
+	}
+	prefix := "+" + countryCode
+	if !strings.HasPrefix(number, prefix) || len(number) == len(prefix) {
+		return number
+	}
+	significant := number[len(prefix):]
+	if significant[0] == '0' {
+		return number
+	}
+	if countryCode == "86" && !isChineseMobile(significant) && isChineseLandline(significant) {
+		return "0" + significant
+	}
+	return significant
+}
+
 // isCanonical reports whether s is "+", a digit 1-9, then 7 to 14 digits.
 func isCanonical(s string) bool {
 	if len(s) < 1+1+minTail || len(s) > 1+1+maxTail || s[0] != '+' || s[1] == '0' {

@@ -263,3 +263,40 @@ func TestCanonicalPrefix(t *testing.T) {
 		}
 	}
 }
+
+// The same cases web/src/lib/phonenum.test.ts holds nationalNumber to: the
+// call-record export and the contact export write a number the same way.
+func TestNational(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name, in, cc, want string
+	}{
+		{"a mobile number of the default code", "+8613800138000", "86", "13800138000"},
+		{"another mobile prefix", "+8619900000000", "86", "19900000000"},
+		{"a Beijing landline gets its trunk 0 back", "+861060000000", "86", "01060000000"},
+		{"a Shanghai landline gets its trunk 0 back", "+862155550101", "86", "02155550101"},
+		{"a three-digit area code", "+8675560000000", "86", "075560000000"},
+		{"another country stays international", "+447700900123", "86", "+447700900123"},
+		{"+1 under 86 stays international", "+12025550123", "86", "+12025550123"},
+		{"a +1 number under 1", "+12025550123", "1", "2025550123"},
+		{"a +44 number under 44", "+447700900123", "44", "7700900123"},
+		{"no country code leaves it", "+8613800138000", "", "+8613800138000"},
+		{"a national number as dialled is left", "13800138000", "86", "13800138000"},
+		{"a leading-zero landline as dialled is left", "02155550101", "86", "02155550101"},
+		{"an extension is left", "1001", "86", "1001"},
+		{"the code alone is left", "+86", "86", "+86"},
+		{"digits after the code starting with 0 stay E.164", "+86000000000", "86", "+86000000000"},
+		{"neither mobile nor landline is its digits", "+8610000000", "86", "10000000"},
+		{"a code that is not digits leaves it", "+8613800138000", "+86", "+8613800138000"},
+		{"an anonymous caller is left", "anonymous", "86", "anonymous"},
+		{"empty stays empty", "", "86", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := National(tt.in, tt.cc); got != tt.want {
+				t.Errorf("National(%q, %q) = %q, want %q", tt.in, tt.cc, got, tt.want)
+			}
+		})
+	}
+}

@@ -5,13 +5,23 @@ import i18n from '@/lib/i18n'
 import type { CDR } from '@/lib/ledger'
 import { renderApp, waitForRows } from '@/test/app'
 import { asciiRun, chineseRun, digits, longUrl, mixedNote } from '@/test/hostile'
-import { expectLayout, layoutTest, restoreLanguage } from '@/test/layout'
+import {
+  LayoutViolation, expectLayout, expectNumbersRead, expectOneLine, layoutTest, restoreLanguage,
+  type LayoutContext,
+} from '@/test/layout'
 
 /**
  * The CDR explorer. Its text cells are the caller's number and the dialled
  * number, which the contract leaves unbounded; the rest are enums and
  * durations, so the journey and status cells are filled to their fullest
  * (every leg kind, a missed reason, both badges) rather than with free text.
+ *
+ * The start column is a full date with the year and the time, in the
+ * deployment's zone, beside two durations (the whole call and the billed
+ * part); the filter bar above the table carries a date range, the number box
+ * of either end (which also takes a pasted call id), the caller's and the
+ * called number, the status and a billed range, and wraps rather than
+ * widening the page.
  */
 
 
@@ -78,7 +88,15 @@ function render(rows: CDR[], total = rows.length) {
   return renderApp('/admin/cdr', {
     handle: ({ path, method }) => {
       if (method !== 'GET') return undefined
-      if (path.startsWith('/cdrs?')) return { items: rows, total }
+      if (path.startsWith('/cdrs?')) {
+        return {
+          items: rows,
+          total,
+          // Over the whole filtered set: a month of calls bills thousands of hours.
+          billSecTotal: 3_600_000 + rows.reduce((sum, row) => sum + row.billSec, 0),
+          timeZone: 'Asia/Shanghai',
+        }
+      }
       // One call by id, as a pasted id asks for it: none of these is on file.
       if (path.startsWith('/cdrs/')) {
         return new Response(JSON.stringify({ error: { code: 'NOT_FOUND', message: 'cdr not found' } }), {
@@ -89,6 +107,37 @@ function render(rows: CDR[], total = rows.length) {
       return undefined
     },
   })
+}
+
+/** The duration and billed columns (by position; the journey cell is there, hidden, below 1280). */
+const DURATION_COLUMNS = [5, 6]
+
+/**
+ * Each call's start reads whole: where the card is narrow its time may go
+ * under its date, but neither the date nor the time is broken.
+ */
+function expectStartsWhole(ctx: LayoutContext) {
+  const halves = [...document.querySelectorAll('tbody tr td:first-child a > span')]
+  if (halves.length === 0) throw new LayoutViolation(`${ctx.screen}: no start to measure`)
+  for (const half of halves) {
+    const lines = new Set([...half.getClientRects()].map((rect) => Math.round(rect.top)))
+    if (lines.size > 1) {
+      throw new LayoutViolation(
+        `${ctx.screen} @ ${ctx.viewport.width} [${ctx.lang}]: "${half.textContent}" breaks onto ${lines.size} lines`,
+      )
+    }
+  }
+}
+
+/** The start, the duration and the billed duration each read in full. */
+function expectTimesRead(ctx: LayoutContext) {
+  expectOneLine(ctx, DURATION_COLUMNS)
+  expectStartsWhole(ctx)
+}
+
+/** Types into the control labelled by that translation key, in the language under test. */
+function fill(label: string, value: string) {
+  fireEvent.change(screen.getByLabelText(i18n.t(label)), { target: { value } })
 }
 
 restoreLanguage()
@@ -113,6 +162,34 @@ describe('CDR explorer with ordinary calls', () => {
     ])
     await waitForRows(4)
     await expectLayout(ctx)
+    expectTimesRead(ctx)
+    expectNumbersRead(ctx, 1)
+    expectNumbersRead(ctx, 2)
+  })
+})
+
+describe('CDR explorer with every filter in use', () => {
+  // A date range (which enables the export and hides its hint), a number of
+  // either end, the caller's and the called number, a status and both billed
+  // bounds: the filter bar at its fullest.
+  layoutTest('cdr (filters in use)', async (ctx) => {
+    render(enumRows(), 500)
+    await waitForRows(5)
+    // The days can be picked once the first answer has named the zone.
+    await waitFor(() => expect(screen.getByLabelText(i18n.t('cdr.firstDay'))).toBeEnabled())
+    fill('cdr.firstDay', '2026-12-01')
+    fill('cdr.lastDay', '2027-01-31')
+    fill('cdr.filterNumber', '13800000000')
+    fill('cdr.filterFrom', '02155550101')
+    fill('cdr.filterTo', '13800000001')
+    fill('cdr.billedMin', '60')
+    fill('cdr.billedMax', '3600')
+    expect(screen.getByRole('button', { name: i18n.t('cdr.export.start') })).toBeEnabled()
+    await waitForRows(5)
+    await expectLayout(ctx)
+    expectTimesRead(ctx)
+    expectNumbersRead(ctx, 1)
+    expectNumbersRead(ctx, 2)
   })
 })
 
@@ -123,6 +200,7 @@ describe('CDR explorer with every enum cell at its widest', () => {
     render(enumRows())
     await waitForRows(5)
     await expectLayout(ctx)
+    expectTimesRead(ctx)
   })
 })
 
@@ -185,8 +263,8 @@ describe('CDR explorer with numbers that cannot break', () => {
 
 describe('CDR explorer on a call the platform placed', () => {
   // Stored as from = did = the line it went out from, to = the customer: the
-  // customer's number is the To column, and the filter finds it by number.
-  it('shows the customer under To and filters by number', async () => {
+  // customer's number is the To column, and the called-number filter finds it.
+  it('shows the customer under To and filters by the called number', async () => {
     const { backend } = render([aiOutbound(1)])
     await waitForRows(1)
 
@@ -195,10 +273,24 @@ describe('CDR explorer on a call the platform placed', () => {
     expect(cells[1]).toHaveTextContent('100200')
     expect(cells[2]).toHaveTextContent('13800000000')
 
-    fireEvent.change(screen.getByPlaceholderText(/number/i), { target: { value: '13800' } })
+    fireEvent.change(screen.getByPlaceholderText('To number…'), { target: { value: '13800' } })
     await waitFor(() =>
-      expect(backend.requests.some((r) => r.path.startsWith('/cdrs?') && r.path.includes('number=13800'))).toBe(true),
+      expect(backend.requests.some((r) => r.path.startsWith('/cdrs?') && r.path.includes('toNumber=13800'))).toBe(true),
     )
     expect(backend.requests.some((r) => r.path.includes('fromNumber='))).toBe(false)
+  })
+
+  // The number box matches either end, so it finds the customer too.
+  it('finds the customer by the number box of either end', async () => {
+    const { backend } = render([aiOutbound(1)])
+    await waitForRows(1)
+
+    fireEvent.change(screen.getByPlaceholderText('Number…'), { target: { value: '13800' } })
+    const listed = () =>
+      backend.requests
+        .filter((r) => r.path.startsWith('/cdrs?'))
+        .map((r) => new URLSearchParams(r.path.split('?')[1]))
+    await waitFor(() => expect(listed().at(-1)?.get('number')).toBe('13800'))
+    expect(listed().some((q) => q.has('fromNumber') || q.has('toNumber'))).toBe(false)
   })
 })

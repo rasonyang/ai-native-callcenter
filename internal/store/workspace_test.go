@@ -207,10 +207,11 @@ func TestEachAgentSeesTheirOwnFilingOnTheirOwnCalls(t *testing.T) {
 		{"the agent who finished it", second, "RESOLVED"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			items, _, err := ledger.ListCDRs(ctx, CDRFilter{AgentID: &tc.agentID})
+			page, err := ledger.ListCDRs(ctx, CDRFilter{AgentID: &tc.agentID})
 			if err != nil {
 				t.Fatal(err)
 			}
+			items := page.Items
 			if len(items) != 1 {
 				t.Fatalf("%d calls, want 1", len(items))
 			}

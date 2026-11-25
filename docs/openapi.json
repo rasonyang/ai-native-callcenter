@@ -3674,7 +3674,7 @@
           "cdrs"
         ],
         "summary": "Page the ledger",
-        "description": "Finished calls, newest first, with filters. Unparseable filter values are ignored rather than rejected.",
+        "description": "Finished calls, newest first (ties by `callId`, newest first), with filters. Unparseable filter values are ignored rather than rejected. `total` and `billSecTotal` are over every call the filters select, not over the page.",
         "parameters": [
           {
             "name": "status",
@@ -3703,12 +3703,21 @@
             "in": "query",
             "schema": {
               "type": "string"
+            },
+            "description": "Substring of the caller's number: a call matches when its `fromNumber` contains it."
+          },
+          {
+            "name": "toNumber",
+            "in": "query",
+            "description": "Substring of the called number: a call matches when its `toNumber` contains it. A call this platform placed is stored from the line it went out on to the customer, so the customer's number is its `toNumber`; on an inbound call `toNumber` is the number dialled.",
+            "schema": {
+              "type": "string"
             }
           },
           {
             "name": "from",
             "in": "query",
-            "description": "RFC 3339 window start.",
+            "description": "RFC 3339 window start, inclusive: calls that started at or after it. A client that filters by calendar day takes the day's midnight in the deployment's time zone (`CDRList.timeZone`), as the export does.",
             "schema": {
               "type": "string",
               "format": "date-time"
@@ -3717,7 +3726,7 @@
           {
             "name": "to",
             "in": "query",
-            "description": "RFC 3339 window end.",
+            "description": "RFC 3339 window end, exclusive: calls that started before it.",
             "schema": {
               "type": "string",
               "format": "date-time"
@@ -3749,6 +3758,24 @@
             }
           },
           {
+            "name": "billSecMin",
+            "in": "query",
+            "description": "Only calls whose `billSec` is at least this many seconds (inclusive). `billSecMin=1` keeps the calls that were billed at all.",
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "billSecMax",
+            "in": "query",
+            "description": "Only calls whose `billSec` is at most this many seconds (inclusive).",
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          {
             "name": "limit",
             "in": "query",
             "schema": {
@@ -3776,6 +3803,190 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/CDRList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "security": [
+          {
+            "cookieSession": [
+              "history:read:all"
+            ]
+          },
+          {
+            "apiKeyBearer": [
+              "history:read:all"
+            ]
+          }
+        ]
+      }
+    },
+    "/cdrs/export": {
+      "get": {
+        "operationId": "exportCDRs",
+        "tags": [
+          "cdrs"
+        ],
+        "summary": "Export the ledger as a CSV file",
+        "description": "Every finished call the filters select, as one CSV file: the calls listCDRs pages through for the same filters, in the same order (newest first, ties by `callId`), with no page bound. The window is required and covers at most two calendar months in the deployment's time zone; anything wider is refused before a byte of the file is sent, never cut short.\n\nThe file is UTF-8 with a byte order mark, so a spreadsheet opens Chinese text as UTF-8, and CRLF line ends. One header row, then one row per call, in these columns: callId, start date, start time, callType, fromNumber, toNumber, status, hangupCause, ringSec, talkSec, billSec, totalSec, campaignId, leadIntent. The start date (YYYY-MM-DD) and start time (HH:MM:SS) are `startedAt` in the deployment's time zone (`CDRList.timeZone`), which their two header names state. Durations are whole seconds as recorded. An absent field is an empty cell.\n\nNumbers are written as an operator reads them: a canonical E.164 number of the deployment's default country code is written in national form, without the country code (a Chinese landline with its trunk 0), and every other number as recorded. A number cell starts with a tab, which a spreadsheet keeps as text, so a leading 0 and a long number survive; a cell that would start like a formula (=, +, -, @, a tab or a carriage return) and is not a number gets a leading apostrophe instead. A field holding a comma, a quote or a line break is quoted.\n\nThe file is streamed as it is read. A failure after the first byte aborts the transfer, so a client sees an incomplete download rather than a shorter file. Needs history:read:all, as listCDRs does.",
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "$ref": "#/components/schemas/CDRStatus"
+            }
+          },
+          {
+            "name": "did",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "number",
+            "in": "query",
+            "description": "Substring of either end's number: a call matches when `fromNumber` or `toNumber` contains it, whichever way it went.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "fromNumber",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Substring of the caller's number: a call matches when its `fromNumber` contains it."
+          },
+          {
+            "name": "toNumber",
+            "in": "query",
+            "description": "Substring of the called number: a call matches when its `toNumber` contains it. A call this platform placed is stored from the line it went out on to the customer, so the customer's number is its `toNumber`; on an inbound call `toNumber` is the number dialled.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "description": "RFC 3339 window start, inclusive. Required. A calendar day starts at its midnight in the deployment's time zone (`CDRList.timeZone`).",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "required": true
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "description": "RFC 3339 window end, exclusive. Required, and at most two calendar months after `from` in the deployment's time zone: `from` 2026-12-01T00:00:00+08:00 in Asia/Shanghai allows `to` up to 2027-02-01T00:00:00+08:00.",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "required": true
+          },
+          {
+            "name": "queueId",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "campaignId",
+            "in": "query",
+            "description": "Only calls placed for this campaign.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "agentId",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "billSecMin",
+            "in": "query",
+            "description": "Only calls whose `billSec` is at least this many seconds (inclusive). `billSecMin=1` keeps the calls that were billed at all.",
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "billSecMax",
+            "in": "query",
+            "description": "Only calls whose `billSec` is at most this many seconds (inclusive).",
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "language",
+            "in": "query",
+            "description": "The language of the header row. When absent, the first of en or zh that `Accept-Language` prefers; en otherwise. Only the header row is translated: enum values are written as the API sends them.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "en",
+                "zh"
+              ]
+            }
+          },
+          {
+            "name": "Accept-Language",
+            "in": "header",
+            "description": "Read only when `language` is absent: the tag with the highest quality whose primary subtag is en or zh decides the header row's language.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The file, named `calls-YYYYMMDD-YYYYMMDD.csv` in `Content-Disposition`: the window's first day and the last day it reaches, in the deployment's time zone, so a window of whole days names the days it holds.",
+            "headers": {
+              "Content-Disposition": {
+                "description": "attachment, with the file name.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Answered before any of the file is sent. Code VALIDATION_FAILED: params.field names `from` or `to` when a bound is missing or unparseable; a window longer than two calendar months in the deployment's time zone has params.field `to`, params.rule EXPORT_WINDOW_TOO_LONG and params.maxMonths 2.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -9699,11 +9910,21 @@
           "total": {
             "type": "integer",
             "description": "Total rows matching the filter, for paging."
+          },
+          "billSecTotal": {
+            "type": "integer",
+            "description": "Sum of `billSec` over every call the filter selects, all `total` of them, not over this page. Seconds as recorded; 0 when none was billed."
+          },
+          "timeZone": {
+            "type": "string",
+            "description": "The deployment's time zone, an IANA name such as Asia/Shanghai (AICC_TIME_ZONE; UTC when unset). The same on every answer: the export (exportCDRs) writes each call's start date and time in it, and a client that filters by calendar day turns the day into `from` and `to` in this zone, never its own, so a filtered day and the file exported from it hold the same calls."
           }
         },
         "required": [
           "items",
-          "total"
+          "total",
+          "billSecTotal",
+          "timeZone"
         ]
       },
       "TranscriptKind": {

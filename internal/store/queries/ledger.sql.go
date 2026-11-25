@@ -103,7 +103,7 @@ func (q *Queries) CountAuditLogs(ctx context.Context, arg CountAuditLogsParams) 
 }
 
 const countCDRs = `-- name: CountCDRs :one
-SELECT count(*) FROM cdrs
+SELECT count(*) AS total, coalesce(sum(bill_sec), 0)::bigint AS bill_sec_total FROM cdrs
 WHERE started_at >= coalesce($1::timestamptz, '-infinity'::timestamptz)
   AND started_at <  coalesce($2::timestamptz,   'infinity'::timestamptz)
   AND ($3::uuid IS NULL OR queue_id = $3)
@@ -113,8 +113,11 @@ WHERE started_at >= coalesce($1::timestamptz, '-infinity'::timestamptz)
   AND ($6::text = '' OR status = $6)
   AND ($7::text = '' OR did = $7)
   AND ($8::text = '' OR from_number LIKE '%' || $8 || '%')
-  AND ($9::text = '' OR from_number LIKE '%' || $9 || '%'
-       OR to_number LIKE '%' || $9 || '%')
+  AND ($9::text = '' OR to_number LIKE '%' || $9 || '%')
+  AND ($10::text = '' OR from_number LIKE '%' || $10 || '%'
+       OR to_number LIKE '%' || $10 || '%')
+  AND ($11::int IS NULL OR bill_sec >= $11)
+  AND ($12::int IS NULL OR bill_sec <= $12)
 `
 
 type CountCDRsParams struct {
@@ -126,10 +129,20 @@ type CountCDRsParams struct {
 	Status     string             `json:"status"`
 	Did        string             `json:"did"`
 	FromNumber string             `json:"fromNumber"`
+	ToNumber   string             `json:"toNumber"`
 	Number     string             `json:"number"`
+	BillSecMin *int32             `json:"billSecMin"`
+	BillSecMax *int32             `json:"billSecMax"`
 }
 
-func (q *Queries) CountCDRs(ctx context.Context, arg CountCDRsParams) (int64, error) {
+type CountCDRsRow struct {
+	Total        int64 `json:"total"`
+	BillSecTotal int64 `json:"billSecTotal"`
+}
+
+// How many calls the listing's filter selects and the seconds they were billed
+// for, over all of them rather than a page.
+func (q *Queries) CountCDRs(ctx context.Context, arg CountCDRsParams) (CountCDRsRow, error) {
 	row := q.db.QueryRow(ctx, countCDRs,
 		arg.FromAt,
 		arg.ToAt,
@@ -139,11 +152,14 @@ func (q *Queries) CountCDRs(ctx context.Context, arg CountCDRsParams) (int64, er
 		arg.Status,
 		arg.Did,
 		arg.FromNumber,
+		arg.ToNumber,
 		arg.Number,
+		arg.BillSecMin,
+		arg.BillSecMax,
 	)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
+	var i CountCDRsRow
+	err := row.Scan(&i.Total, &i.BillSecTotal)
+	return i, err
 }
 
 const countCallbacks = `-- name: CountCallbacks :one
@@ -872,29 +888,46 @@ WHERE started_at >= coalesce($1::timestamptz, '-infinity'::timestamptz)
   AND ($6::text = '' OR status = $6)
   AND ($7::text = '' OR did = $7)
   AND ($8::text = '' OR from_number LIKE '%' || $8 || '%')
-  AND ($9::text = '' OR from_number LIKE '%' || $9 || '%'
-       OR to_number LIKE '%' || $9 || '%')
-ORDER BY started_at DESC
-LIMIT $11 OFFSET $10
+  AND ($9::text = '' OR to_number LIKE '%' || $9 || '%')
+  AND ($10::text = '' OR from_number LIKE '%' || $10 || '%'
+       OR to_number LIKE '%' || $10 || '%')
+  AND ($11::int IS NULL OR bill_sec >= $11)
+  AND ($12::int IS NULL OR bill_sec <= $12)
+  AND ($13::uuid IS NULL
+       OR (started_at, call_id) < ($14::timestamptz, $13))
+ORDER BY started_at DESC, call_id DESC
+LIMIT $16 OFFSET $15
 `
 
 type ListCDRsParams struct {
-	FromAt     pgtype.Timestamptz `json:"fromAt"`
-	ToAt       pgtype.Timestamptz `json:"toAt"`
-	QueueID    *uuid.UUID         `json:"queueId"`
-	CampaignID *uuid.UUID         `json:"campaignId"`
-	AgentID    *uuid.UUID         `json:"agentId"`
-	Status     string             `json:"status"`
-	Did        string             `json:"did"`
-	FromNumber string             `json:"fromNumber"`
-	Number     string             `json:"number"`
-	PageOffset int32              `json:"pageOffset"`
-	PageLimit  int32              `json:"pageLimit"`
+	FromAt          pgtype.Timestamptz `json:"fromAt"`
+	ToAt            pgtype.Timestamptz `json:"toAt"`
+	QueueID         *uuid.UUID         `json:"queueId"`
+	CampaignID      *uuid.UUID         `json:"campaignId"`
+	AgentID         *uuid.UUID         `json:"agentId"`
+	Status          string             `json:"status"`
+	Did             string             `json:"did"`
+	FromNumber      string             `json:"fromNumber"`
+	ToNumber        string             `json:"toNumber"`
+	Number          string             `json:"number"`
+	BillSecMin      *int32             `json:"billSecMin"`
+	BillSecMax      *int32             `json:"billSecMax"`
+	BeforeCallID    *uuid.UUID         `json:"beforeCallId"`
+	BeforeStartedAt pgtype.Timestamptz `json:"beforeStartedAt"`
+	PageOffset      int32              `json:"pageOffset"`
+	PageLimit       int32              `json:"pageLimit"`
 }
 
 // An open time bound is coalesced to ±infinity rather than OR-ed with IS NULL,
 // so it stays an Index Cond under a generic plan as well as a custom one.
 // CountCDRs and the two audit-log queries bound their time the same way.
+//
+// The page and the export read the same rows through this one statement: the
+// page by offset, the export (LedgerStore.ExportCDRs) a batch at a time after
+// the last row it read, (before_started_at, before_call_id), newest first. The
+// call id breaks a tie of started_at, so the order is total and the two agree
+// row for row. CountCDRs carries the same filter, word for word up to the
+// cursor (TestTheCDRCountFiltersAsTheListDoes).
 func (q *Queries) ListCDRs(ctx context.Context, arg ListCDRsParams) ([]Cdr, error) {
 	rows, err := q.db.Query(ctx, listCDRs,
 		arg.FromAt,
@@ -905,7 +938,12 @@ func (q *Queries) ListCDRs(ctx context.Context, arg ListCDRsParams) ([]Cdr, erro
 		arg.Status,
 		arg.Did,
 		arg.FromNumber,
+		arg.ToNumber,
 		arg.Number,
+		arg.BillSecMin,
+		arg.BillSecMax,
+		arg.BeforeCallID,
+		arg.BeforeStartedAt,
 		arg.PageOffset,
 		arg.PageLimit,
 	)

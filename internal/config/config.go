@@ -17,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	_ "time/tzdata" // AICC_TIME_ZONE resolves in an image with no zoneinfo
 	"unicode"
 	"unicode/utf8"
 
@@ -212,6 +213,14 @@ type Config struct {
 	// DefaultCountryCode is the built-in 1, which aicc doctor checks against
 	// the do-not-call list (dnc_country_code).
 	IsDefaultCountryCodeSet bool
+	// TimeZone (AICC_TIME_ZONE) is the deployment's own time zone, one IANA
+	// name for every reader: the call-record export dates each call in it, and
+	// the listing names it so that a client turns a calendar day into the same
+	// window. UTC when unset. Never "Local", which would be the host's zone
+	// and differ between a container and a laptop. Nil only in a Config built
+	// by hand (tests), which reads as UTC (Location).
+	TimeZone    *time.Location
+	timeZoneErr error // an unknown name, refused by validate
 	// OutboundDialForm (AICC_OUTBOUND_DIAL_FORM) is how the campaign dialer
 	// writes a number to the trunk: E164 (default), E164_NO_PLUS or NATIONAL.
 	// The bot's take_message writes a callback number in it too.
@@ -502,6 +511,7 @@ func Load() (Config, error) {
 	dialForm, dialFormErr := phonenum.ParseDialForm(env("AICC_OUTBOUND_DIAL_FORM", ""))
 	outboundHeaders, outboundHeadersErr := ParseOutboundSIPHeaders(env(outboundHeadersVar, ""))
 	outboundHours, outboundHoursErr := ParseOutboundHours(env("AICC_OUTBOUND_HOURS", DefaultOutboundHours))
+	timeZone, timeZoneErr := ParseTimeZone(env("AICC_TIME_ZONE", DefaultTimeZone))
 	sessionLimit, sessionPeriod, sessionFrom, sessionErrs := envProviderLimit("SESSION")
 	tokenLimit, tokenPeriod, tokenFrom, tokenErrs := envProviderLimit("TOKEN")
 	c := Config{
@@ -592,6 +602,8 @@ func Load() (Config, error) {
 		OutboundCallerID:              env("AICC_OUTBOUND_CLID", ""),
 		DefaultCountryCode:            env("AICC_DEFAULT_COUNTRY_CODE", "1"),
 		IsDefaultCountryCodeSet:       env("AICC_DEFAULT_COUNTRY_CODE", "") != "",
+		TimeZone:                      timeZone,
+		timeZoneErr:                   timeZoneErr,
 		OutboundDialForm:              dialForm,
 		outboundDialFormErr:           dialFormErr,
 		RecordingBackend:              env("AICC_RECORDING_BACKEND", "FS"),
@@ -817,6 +829,9 @@ func (c Config) validate() error {
 	}
 	if err := ValidateDefaultCountryCode(c.DefaultCountryCode); err != nil {
 		errs = append(errs, err)
+	}
+	if c.timeZoneErr != nil {
+		errs = append(errs, c.timeZoneErr)
 	}
 	if c.outboundDialFormErr != nil {
 		errs = append(errs, c.outboundDialFormErr)
@@ -1126,6 +1141,33 @@ func (c Config) TranscribeProviderName() string {
 		return c.TranscribeProvider
 	}
 	return c.Provider
+}
+
+// DefaultTimeZone is AICC_TIME_ZONE when it is unset.
+const DefaultTimeZone = "UTC"
+
+// ParseTimeZone resolves AICC_TIME_ZONE, an IANA time zone name such as
+// Asia/Shanghai. "Local" is refused: it names whatever zone the host happens
+// to be in, which is not a setting. The zone database is compiled in
+// (time/tzdata), so a name resolves in a container that ships none.
+func ParseTimeZone(name string) (*time.Location, error) {
+	if name == "Local" {
+		return nil, errors.New(`AICC_TIME_ZONE must be an IANA time zone name such as Asia/Shanghai or UTC, got "Local"`)
+	}
+	loc, err := time.LoadLocation(name)
+	if err != nil {
+		return nil, fmt.Errorf("AICC_TIME_ZONE must be an IANA time zone name such as Asia/Shanghai or UTC, got %q", name)
+	}
+	return loc, nil
+}
+
+// Location is the deployment's time zone (TimeZone), UTC when none was
+// loaded.
+func (c Config) Location() *time.Location {
+	if c.TimeZone == nil {
+		return time.UTC
+	}
+	return c.TimeZone
 }
 
 // ValidateDefaultCountryCode accepts empty (unset) or 1 to 3 ASCII digits with
