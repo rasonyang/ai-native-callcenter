@@ -662,6 +662,9 @@ func (d *Dialer) handle(ctx context.Context, m any) {
 		if f := d.flights[uuid.UUID(m)]; f != nil && f.isAnswered && !f.sessionCounted {
 			f.sessionCounted = true
 			d.unstarted--
+			// A leg whose slot is taken counted in InUse and here: the bot
+			// rule has a place again, and no other event may come to say so.
+			d.isDirty = true
 		}
 	case wakeMsg:
 		d.isDirty = true

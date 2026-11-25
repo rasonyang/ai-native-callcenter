@@ -369,3 +369,51 @@ func outboundReqOf(a campaign.Attempt) outbound.AIDialRequest {
 	return outbound.AIDialRequest{CallID: a.CallID, LegID: a.LegID, To: "+86139" + a.CallID.String()[:8],
 		CampaignID: a.CampaignID, AttemptID: a.ID}
 }
+
+// The bot rule with the term (#640), on 5 slots with nothing kept for inbound
+// and every ringing leg planned as an answer. An answered leg holds its place
+// from the answer, before its slot is reserved (the reservation waits for the
+// originate's +OK, design 10 section 6.4); reserved, it counts once, not as a
+// reservation and an unstarted leg; with its slot taken and its start not yet
+// counted it counts twice, the safe direction; counted, once again. A
+// reservation that is no flight's, an AI call placed through the API, still
+// counts.
+func TestTheBotRuleHoldsAPlaceForAnAnsweredLegFromItsAnswer(t *testing.T) {
+	r := newTermRig(t, 0, 100, voice.Usage{Cap: 5})
+	calls := r.placer.placedCalls()
+	if len(calls) != 5 {
+		t.Fatalf("%d calls placed on 5 slots, want 5", len(calls))
+	}
+	ids := callIDs(calls)
+	wantTotal := func(n int, what string) {
+		t.Helper()
+		if got := r.total(); got != n {
+			t.Errorf("%s: %d calls placed, want %d", what, got, n)
+		}
+	}
+	look := func(u voice.Usage) {
+		r.slots.set(u)
+		r.d.Wake()
+		r.settle()
+	}
+
+	r.answer(ids[:3]...)
+	wantTotal(5, "3 answered legs not yet reserved and 2 ringing on 5 slots")
+
+	look(voice.Usage{Reserved: 3, Cap: 5})
+	r.end(ids[3], campaign.OutcomeNoAnswer)
+	wantTotal(6, "the 3 reserved, 1 ringing: one more fits")
+
+	look(voice.Usage{InUse: 3, Cap: 5})
+	r.end(ids[4], campaign.OutcomeNoAnswer)
+	wantTotal(6, "slots taken, starts not counted: each counts twice")
+
+	r.counted(ids[:3]...)
+	wantTotal(7, "starts counted: 3 in use and 1 ringing, one more fits")
+
+	look(voice.Usage{InUse: 3, Reserved: 1, Cap: 5})
+	r.end(r.placer.placedCalls()[5].Req.CallID, campaign.OutcomeNoAnswer)
+	wantTotal(7, "a reservation of a call placed through the API")
+	r.wantTerm(0, "every answered leg counted")
+	r.noViolations()
+}
