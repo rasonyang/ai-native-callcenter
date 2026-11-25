@@ -5,7 +5,7 @@ under one tag, `rasonyang/ai-native-callcenter` and `rasonyang/freeswitch-aicc`;
 run them together. From v0.2.0 on, the GitHub release of the same tag also
 carries the one-line installer's files.
 
-## Unreleased
+## v0.9.2 - 2026-11-25
 
 ### Upgrade notes
 
@@ -16,6 +16,11 @@ carries the one-line installer's files.
   webhook delivery of a call with a `HIGH` or `MEDIUM` lead to arrive up to
   35 seconds after the call ends. Set `AICC_LEAD_JUDGE_ENABLED=false` to keep
   leads as the flow records them.
+- Migration 00051 runs at startup (#661). It adds four columns to
+  `campaign_attempts` (`declared_lead_intent`, `lead_verdict`,
+  `lead_verdict_reason`, `lead_judge_deadline_at`), their CHECKs and a partial
+  index; the columns are NULL on every existing attempt, and no row is
+  rewritten or backfilled.
 - Migration 00052 runs at startup (#702). It adds
   `campaign_attempts.sip_status` (NULL for every existing attempt; nothing is
   backfilled) and widens the outcome CHECKs of attempts and contacts to the
@@ -30,8 +35,11 @@ carries the one-line installer's files.
   `CampaignRetryOutcome` gain `LINE_REJECTED`; a client that switches over
   those enums must handle it. The two outcome breakdowns of the outcome
   summary list twelve outcomes instead of eleven. `CampaignAttempt` gains
-  `sipStatus`. `make api-breaking BASE=main` reports no breaking change for
-  this, only 13 `response-property-enum-value-added` warnings from that value.
+  `sipStatus`.
+- `AICC_TRUNK_BREAKER_COUNT` now also counts `LINE_REJECTED` attempts, so a
+  line that refuses every call pauses its campaign `PAUSED / TRUNK_FAILURE`,
+  and `AICC_OUTBOUND_MAX_DIALS_PER_NUMBER_PER_DAY` does not count them (#702).
+  Neither setting's default changed.
 - **Dashboards and alerts on a provider quota refusal** (#652). The dialer's
   hold reason `PROVIDER_QUOTA_BACKOFF` in
   `aicc_dialer_admission_blocked_total{reason}` is now three values:
@@ -51,7 +59,30 @@ carries the one-line installer's files.
   `listCDRs` gains the optional `toNumber`, `billSecMin` and `billSecMax`; the
   new operation `exportCDRs` (`GET /cdrs/export`) needs `history:read:all`.
   The listing now breaks a tie of `startedAt` by `callId`, newest first.
-  `make api-breaking BASE=main` reports no breaking change.
+- API contract (#661): additive only. The new `CampaignLeadVerdict`, and
+  `declaredLeadIntent`, `leadVerdict` and `leadVerdictReason` on
+  `CampaignAttempt` and on the CDR, which now also carries `leadIntent`: in
+  `GET /cdrs`, `GET /cdrs/mine`, `GET /cdrs/{callId}` and the `cdrDelivery`
+  webhook alike. The `CampaignAttempt` description says which clock
+  `startedAt` and `finishedAt` come from (#704).
+- Two settings added: `AICC_LEAD_JUDGE_ENABLED` (default `true`, #661) and
+  `AICC_TIME_ZONE` (default `UTC`, #711), both above. None removed; no default
+  changed.
+- API contract, the whole release: additive only, and no stored flow needs a
+  change. `make api-breaking BASE=v0.9.1` reports no breaking change: 0 errors
+  and 13 warnings, every one `response-property-enum-value-added` for
+  `LINE_REJECTED` on the campaign operations. `oasdiff changelog` against
+  v0.9.1 lists 32 info-level changes besides: the `exportCDRs` operation,
+  `LINE_REJECTED` in request bodies and query parameters, and the new
+  parameters and properties above, `CDRList`'s two required ones included.
+- Upgrade both images together, as always: they are published under one tag
+  and the deploy stack names both. The switch image changes in this release
+  (#709): it builds FreeSWITCH v1.11.4 with sofia-sip v1.13.19, and its
+  configuration tree changes only in two comments
+  (`sip_profiles/internal.xml`, `autoload_configs/verto.conf.xml`); no Lua
+  script, dialplan or module changed. A switch installed natively needs no
+  file copied in and no `reloadxml`, and the application needs nothing from
+  v1.11.4: moving such a switch to v1.11.4 is a FreeSWITCH upgrade of its own.
 
 ### Added
 
@@ -125,6 +156,15 @@ carries the one-line installer's files.
   caller, called number, status and billed duration, a totals line gives the
   filtered calls' count and billed seconds, and Export downloads the filtered
   set. Below 1280 px the Journey column is hidden to make room.
+- **The campaign import dialog offers a fill-in template** (#586, #683; thanks
+  @sanketpatel32). A Download template button beside the file picker, usable
+  before a file is chosen, downloads a CSV file with a header row only: the
+  number column as the console's language names it (`number`, 「手机号」), then
+  one column for each field the campaign's flow reads, in the flow's order. It
+  has no example row, which would be dialled if it were left in. The dialog's
+  hint now also says that the first row is a header, that a number column is
+  enough, that other columns are ignored unless the flow reads them, and that
+  a file edited in Excel can be saved as `.xlsx` and imported as it is.
 
 ### Changed
 
@@ -157,7 +197,14 @@ carries the one-line installer's files.
   are unchanged: a refused start is still `BOT_START_FAILED`.
 - Newer `golang.org/x/net` (v0.62.0) and `github.com/klauspost/compress`
   (v1.20.2), past three advisories the vuln scan lists at module level; none
-  of them is in code the server calls (#548).
+  of them is in code the server calls (#548, #670; thanks @sanketpatel32).
+- In Chinese, a campaign contact in status `EXHAUSTED` reads 「不再重拨」 (not
+  redialled) instead of 「已用尽」 ("used up"), which said neither what was used
+  up nor what happens to the contact. It holds for both ways a contact ends
+  so: a spent attempt budget, and an outcome the retry policy does not retry.
+  It shows in the campaign list's state summary, the campaign's counts, the
+  contact status filter and the contacts table. Text only: the English label,
+  the enum and the contract are unchanged (#653).
 
 ### Fixed
 
@@ -234,6 +281,16 @@ carries the one-line installer's files.
   that is expected, and `aicc doctor` skips the check. It turns `UP` once the
   `AICC_BOT_ENABLED=false` line is removed and `docker compose up -d` has
   recreated the application (#552, #654; thanks @sanketpatel32).
+
+### Docs and CI
+
+- Tests that failed now and then under `make test-stress` no longer race a
+  fixed wall-clock deadline: the outbound suite bounds every poll-wait and
+  waits on the placement claims instead of a fixed sleep (#584, #671); the
+  caller-turn re-ask test calms only the request watchdog, through a deadline
+  field of its own that production leaves unset (#540, #673); and the
+  provider's unanswered-request and opening-direction tests answer the opening
+  inside the fake's request-read loop (#397, #675). Thanks @sanketpatel32.
 
 ## v0.9.1 - 2026-11-20
 
