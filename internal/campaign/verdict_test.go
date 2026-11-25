@@ -36,8 +36,32 @@ func TestAVerdictLeavesTheLeadTheOwnerDecided(t *testing.T) {
 func TestOnlyHighAndMediumLeadsAreJudged(t *testing.T) {
 	t.Parallel()
 	for _, i := range AllLeadIntents() {
-		if want := i == LeadHigh || i == LeadMedium; IsLeadJudged(i) != want {
-			t.Errorf("IsLeadJudged(%s) = %v", i, !want)
+		if want := i == LeadHigh || i == LeadMedium; IsLeadJudgeable(i) != want {
+			t.Errorf("IsLeadJudgeable(%s) = %v", i, !want)
+		}
+	}
+	// A deployment judges the leads it lists (AICC_LEAD_JUDGE_INTENTS), and
+	// never one a judge cannot read, whatever the list says.
+	for _, c := range []struct {
+		name    string
+		intents LeadJudgeIntents
+		judged  []LeadIntent
+	}{
+		{"HIGH, the default", LeadJudgeIntents{LeadHigh}, []LeadIntent{LeadHigh}},
+		{"MEDIUM alone", LeadJudgeIntents{LeadMedium}, []LeadIntent{LeadMedium}},
+		{"both, as v0.9.2 did", LeadJudgeIntents{LeadHigh, LeadMedium}, []LeadIntent{LeadHigh, LeadMedium}},
+		{"both, in the other order", LeadJudgeIntents{LeadMedium, LeadHigh}, []LeadIntent{LeadHigh, LeadMedium}},
+		{"none: the judge is off", nil, nil},
+		{"a lead no judge reads", LeadJudgeIntents{LeadLow, LeadHigh}, []LeadIntent{LeadHigh}},
+	} {
+		for _, i := range AllLeadIntents() {
+			want := false
+			for _, j := range c.judged {
+				want = want || i == j
+			}
+			if got := c.intents.IsJudged(i); got != want {
+				t.Errorf("%s: IsJudged(%s) = %v, want %v", c.name, i, got, want)
+			}
 		}
 	}
 	if VerdictPending.IsFinal() || !VerdictNotJudged.IsFinal() || LeadVerdict("MAYBE").IsFinal() {

@@ -21,10 +21,19 @@ type judgeEnv struct {
 	hook   uuid.UUID
 }
 
-func openJudged(t *testing.T, isOn bool) *judgeEnv {
+// bothLeads is v0.9.2's AICC_LEAD_JUDGE_INTENTS, HIGH,MEDIUM; highOnly is the
+// default.
+var (
+	bothLeads = campaign.LeadJudgeIntents{campaign.LeadHigh, campaign.LeadMedium}
+	highOnly  = campaign.LeadJudgeIntents{campaign.LeadHigh}
+)
+
+// openJudged opens a store that judges the leads listed; none is the judge
+// off.
+func openJudged(t *testing.T, judged campaign.LeadJudgeIntents) *judgeEnv {
 	t.Helper()
 	e := openAttempts(t)
-	e.st.IsLeadJudgeEnabled = isOn
+	e.st.LeadJudgeIntents = judged
 	e.ledger, e.attempts = e.st.Ledger(), e.st.Attempts()
 	sub, err := e.st.Webhooks().Create(context.Background(), WebhookSubscriptionWrite{
 		Name: "crm", URL: "https://crm.example.com/hook", IsEnabled: true,
@@ -157,11 +166,12 @@ func isAbout(got, want time.Duration) bool {
 }
 
 // Which calls are judged: a campaign call the bot handled alone that recorded
-// HIGH or MEDIUM, on a store that judges. The judgement is owed from the CDR's
+// HIGH or MEDIUM, on a store that judges both (AICC_LEAD_JUDGE_INTENTS
+// HIGH,MEDIUM). The judgement is owed from the CDR's
 // own transaction, and the call's delivery is held for it with a payload that
 // already says NOT_JUDGED; every other call is delivered at once, as before.
 func TestALeadIsOwedAJudgementOnlyWhenItShouldBe(t *testing.T) {
-	e := openJudged(t, true)
+	e := openJudged(t, bothLeads)
 	_, contacts := e.campaign(t, "Judged", "5", 8, nil)
 
 	t.Run("a bot-only HIGH lead is owed one and held", func(t *testing.T) {
@@ -274,25 +284,157 @@ func TestALeadIsOwedAJudgementOnlyWhenItShouldBe(t *testing.T) {
 // HIGH lead files its callback when the call ends, and the delivery is due at
 // once.
 func TestWithTheJudgeOffALeadIsRecordedAsBefore(t *testing.T) {
-	e := openJudged(t, false)
+	e := openJudged(t, nil)
 	_, contacts := e.campaign(t, "Unjudged", "6", 1, nil)
 	a := e.call(t, contacts[0], campaign.LeadHigh, nil)
-	if got := e.attempt(t, a.CallID); got.LeadVerdict != "" || got.LeadIntent != campaign.LeadHigh {
-		t.Errorf("attempt = %q lead %s", got.LeadVerdict, got.LeadIntent)
+	e.isRecordedAsWithTheJudgeOff(t, a, campaign.LeadHigh)
+}
+
+// isRecordedAsWithTheJudgeOff asserts what a store that does not judge a
+// call's lead writes for it: no judgement owed and no deadline, the lead as
+// the flow recorded it, a HIGH lead's callback filed when the call ends, and
+// the delivery due at once with no verdict.
+func (e *judgeEnv) isRecordedAsWithTheJudgeOff(t *testing.T, a campaign.Attempt, lead campaign.LeadIntent) {
+	t.Helper()
+	got := e.attempt(t, a.CallID)
+	if got.LeadVerdict != "" || got.DeclaredLeadIntent != "" || got.LeadIntent != lead || got.LeadVerdictReason != "" {
+		t.Errorf("attempt = %q declared %q lead %s reason %q, want no verdict and the lead %s",
+			got.LeadVerdict, got.DeclaredLeadIntent, got.LeadIntent, got.LeadVerdictReason, lead)
 	}
-	if n := e.callbacks(t, a.CallID); n != 1 {
-		t.Errorf("%d callbacks, want 1", n)
+	var hasDeadline bool
+	if err := e.st.Pool.QueryRow(context.Background(),
+		`SELECT lead_judge_deadline_at IS NOT NULL FROM campaign_attempts WHERE call_id = $1`, a.CallID).Scan(&hasDeadline); err != nil {
+		t.Fatal(err)
 	}
-	if d := e.delivery(t, a.CallID); d.dueIn > time.Second || d.verdict != "" || d.lead != campaign.LeadHigh {
-		t.Errorf("delivery due in %s, verdict %q lead %q", d.dueIn, d.verdict, d.lead)
+	if hasDeadline {
+		t.Error("the attempt has a judgement deadline")
 	}
+	if f := e.lastFinished(t, a.CallID); f.IsLeadJudgementOwed {
+		t.Error("the finish says a judgement is owed")
+	}
+	wantCallbacks := 0
+	if lead == campaign.LeadHigh {
+		wantCallbacks = 1
+	}
+	if n := e.callbacks(t, a.CallID); n != wantCallbacks {
+		t.Errorf("%d callbacks, want %d", n, wantCallbacks)
+	}
+	if d := e.delivery(t, a.CallID); d.dueIn > time.Second || d.verdict != "" || d.declared != "" || d.lead != lead {
+		t.Errorf("delivery due in %s, verdict %q declared %q lead %q", d.dueIn, d.verdict, d.declared, d.lead)
+	}
+	pending, err := e.judges.PendingLeadJudgements(context.Background(), 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range pending {
+		if p.CallID == a.CallID {
+			t.Error("the call is listed as owed a judgement")
+		}
+	}
+}
+
+// A lead AICC_LEAD_JUDGE_INTENTS leaves out is finished exactly as with the
+// judge off, while a lead it lists is still owed its judgement: by default
+// (HIGH) a MEDIUM lead is delivered at once as the flow recorded it; with
+// MEDIUM alone a HIGH lead files its callback when the call ends.
+func TestALeadTheListLeavesOutIsRecordedAsWithTheJudgeOff(t *testing.T) {
+	t.Run("HIGH, the default", func(t *testing.T) {
+		e := openJudged(t, highOnly)
+		_, contacts := e.campaign(t, "High only", "4", 2, nil)
+		medium := e.call(t, contacts[0], campaign.LeadMedium, nil)
+		e.isRecordedAsWithTheJudgeOff(t, medium, campaign.LeadMedium)
+
+		high := e.call(t, contacts[1], campaign.LeadHigh, nil)
+		if got := e.attempt(t, high.CallID); got.LeadVerdict != campaign.VerdictPending || got.DeclaredLeadIntent != campaign.LeadHigh {
+			t.Errorf("HIGH: attempt = %s declared %s, want PENDING HIGH", got.LeadVerdict, got.DeclaredLeadIntent)
+		}
+		if f := e.lastFinished(t, high.CallID); !f.IsLeadJudgementOwed {
+			t.Error("HIGH: the finish did not say the judgement is owed")
+		}
+		if d := e.delivery(t, high.CallID); !isAbout(d.dueIn, campaign.LeadJudgeHold) || d.verdict != campaign.VerdictNotJudged {
+			t.Errorf("HIGH: delivery due in %s with %q, want held about %s", d.dueIn, d.verdict, campaign.LeadJudgeHold)
+		}
+		if n := e.callbacks(t, high.CallID); n != 0 {
+			t.Errorf("HIGH: %d callbacks filed before the verdict", n)
+		}
+	})
+	t.Run("MEDIUM alone", func(t *testing.T) {
+		e := openJudged(t, campaign.LeadJudgeIntents{campaign.LeadMedium})
+		_, contacts := e.campaign(t, "Medium only", "3", 2, nil)
+		high := e.call(t, contacts[0], campaign.LeadHigh, nil)
+		e.isRecordedAsWithTheJudgeOff(t, high, campaign.LeadHigh)
+
+		medium := e.call(t, contacts[1], campaign.LeadMedium, nil)
+		if got := e.attempt(t, medium.CallID); got.LeadVerdict != campaign.VerdictPending || got.DeclaredLeadIntent != campaign.LeadMedium {
+			t.Errorf("MEDIUM: attempt = %s declared %s, want PENDING MEDIUM", got.LeadVerdict, got.DeclaredLeadIntent)
+		}
+	})
+}
+
+// The upgrade from v0.9.2, which judged MEDIUM too, onto the default HIGH: a
+// MEDIUM lead the run before left owed is settled NOT_JUDGED by the judge that
+// starts (internal/leadjudge), at once. The declared lead stands and the held
+// delivery goes out now, rebuilt with the verdict; a later fuller CDR of the
+// same call owes nothing again. A MEDIUM lead of a call made after the restart
+// is not judged at all.
+func TestARestartOntoTheDefaultListSettlesAnOwedMediumLeadAtOnce(t *testing.T) {
+	ctx := context.Background()
+	before := openJudged(t, bothLeads)
+	c, contacts := before.campaign(t, "Upgrade", "2", 2, nil)
+	owed := before.call(t, contacts[0], campaign.LeadMedium, nil)
+	if got := before.attempt(t, owed.CallID); got.LeadVerdict != campaign.VerdictPending {
+		t.Fatalf("before the restart: %q, want PENDING", got.LeadVerdict)
+	}
+
+	// The restart: the same database, a store built with the default list.
+	before.st.LeadJudgeIntents = highOnly
+	e := &judgeEnv{attemptEnv: before.attemptEnv, judges: before.st.LeadJudgements(), hook: before.hook}
+	e.ledger, e.attempts = e.st.Ledger(), e.st.Attempts()
+
+	pending, err := e.judges.PendingLeadJudgements(ctx, 10)
+	if err != nil || len(pending) != 1 || pending[0].CallID != owed.CallID {
+		t.Fatalf("pending after the restart = %+v, %v", pending, err)
+	}
+	lead, applied, err := e.judges.ApplyLeadVerdict(ctx, owed.CallID, campaign.VerdictNotJudged, "")
+	if err != nil || !applied || lead != campaign.LeadMedium {
+		t.Fatalf("settle = %s %v %v, want MEDIUM applied", lead, applied, err)
+	}
+	got := e.attempt(t, owed.CallID)
+	if got.LeadVerdict != campaign.VerdictNotJudged || got.LeadIntent != campaign.LeadMedium ||
+		got.DeclaredLeadIntent != campaign.LeadMedium || got.LeadVerdictReason != "" {
+		t.Errorf("attempt = %s lead %s declared %s reason %q", got.LeadVerdict, got.LeadIntent, got.DeclaredLeadIntent, got.LeadVerdictReason)
+	}
+	if ct := e.contact(t, c, contacts[0].ID); ct.LeadIntent != campaign.LeadMedium {
+		t.Errorf("contact lead = %s, want MEDIUM", ct.LeadIntent)
+	}
+	if d := e.delivery(t, owed.CallID); d.dueIn > time.Second || d.verdict != campaign.VerdictNotJudged || d.lead != campaign.LeadMedium {
+		t.Errorf("delivery due in %s with %s lead %s, want released at once", d.dueIn, d.verdict, d.lead)
+	}
+	if pending, _ := e.judges.PendingLeadJudgements(ctx, 10); len(pending) != 0 {
+		t.Errorf("still owed after the settle: %+v", pending)
+	}
+
+	// A fuller CDR of the settled call changes no verdict.
+	start := ny(t, "2026-06-01 10:00")
+	cdr := cdrOf(owed.CallID, "NORMAL_CLEARING", CDRStatusAnswered, true, start, start.Add(2*time.Minute))
+	cdr.Legs = append(cdr.Legs, Leg{Kind: "BOT", Label: "bot", DurationSec: 115})
+	if err := e.ledger.InsertCDR(ctx, cdr); err != nil {
+		t.Fatal(err)
+	}
+	if got := e.attempt(t, owed.CallID); got.LeadVerdict != campaign.VerdictNotJudged || got.LeadIntent != campaign.LeadMedium {
+		t.Errorf("after a fuller CDR: %s lead %s", got.LeadVerdict, got.LeadIntent)
+	}
+
+	// A call made after the restart is not judged.
+	fresh := e.call(t, contacts[1], campaign.LeadMedium, nil)
+	e.isRecordedAsWithTheJudgeOff(t, fresh, campaign.LeadMedium)
 }
 
 // A verdict in time settles everything in one transaction: the attempt's lead,
 // the contact's, the callback a lead still HIGH files, and the delivery,
 // rebuilt with the final lead and released.
 func TestAVerdictInTimeDecidesTheLeadAndReleasesTheDelivery(t *testing.T) {
-	e := openJudged(t, true)
+	e := openJudged(t, bothLeads)
 	c, contacts := e.campaign(t, "Verdicts", "7", 5, nil)
 	for i, k := range []struct {
 		declared campaign.LeadIntent
@@ -356,7 +498,7 @@ func TestAVerdictInTimeDecidesTheLeadAndReleasesTheDelivery(t *testing.T) {
 // which already said NOT_JUDGED, goes out by itself at its bound, unchanged.
 func TestAJudgementPastItsDeadlineIsNotJudgedAndItsDeliveryGoesOutAsHeld(t *testing.T) {
 	ctx := context.Background()
-	e := openJudged(t, true)
+	e := openJudged(t, bothLeads)
 	c, contacts := e.campaign(t, "Late", "8", 2, nil)
 	high := e.call(t, contacts[0], campaign.LeadHigh, nil)
 	medium := e.call(t, contacts[1], campaign.LeadMedium, nil)
@@ -435,7 +577,7 @@ func TestAJudgementPastItsDeadlineIsNotJudgedAndItsDeliveryGoesOutAsHeld(t *test
 // contact's latest; the attempt's lead moves either way.
 func TestAVerdictLeavesALaterCallsContactAlone(t *testing.T) {
 	ctx := context.Background()
-	e := openJudged(t, true)
+	e := openJudged(t, bothLeads)
 	c, contacts := e.campaign(t, "Later", "9", 1, nil)
 	a := e.call(t, contacts[0], campaign.LeadHigh, nil)
 	// Another call has settled the contact since.

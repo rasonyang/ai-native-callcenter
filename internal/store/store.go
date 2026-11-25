@@ -79,12 +79,14 @@ type Store struct {
 	// (AICC_OUTBOUND_HOURS). A campaign contact's retry is never scheduled
 	// outside them. The zero value means no outer limit.
 	OutboundHours dayrange.Range
-	// IsLeadJudgeEnabled says a text model judges the leads of campaign calls
-	// (design 10 section 11.1): a CDR that finishes a bot-only campaign call
-	// with a HIGH or MEDIUM lead then marks its judgement owed and holds the
-	// call's webhook deliveries for it. Off, a CDR writes what it always did.
-	// Read when Ledger and Attempts are built, so set it before.
-	IsLeadJudgeEnabled bool
+	// LeadJudgeIntents are the declared leads a text model judges on campaign
+	// calls (design 10 section 11.1, AICC_LEAD_JUDGE_INTENTS): a CDR that
+	// finishes a bot-only campaign call with one of them marks its judgement
+	// owed and holds the call's webhook deliveries for it. Empty, the judge is
+	// off; for a call with any other lead, or with the judge off, a CDR
+	// writes what it always did. Read when Ledger and Attempts are built, so
+	// set it before.
+	LeadJudgeIntents campaign.LeadJudgeIntents
 	// FlowPublishRules are the checks a flow must pass, beyond loading, before
 	// this deployment will let it answer a call. They depend on what the
 	// installation runs — which speech provider, today — and the store has no

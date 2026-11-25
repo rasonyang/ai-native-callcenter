@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -17,6 +18,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/rasonyang/ai-native-callcenter/internal/aicall"
+	"github.com/rasonyang/ai-native-callcenter/internal/campaign"
 	"github.com/rasonyang/ai-native-callcenter/internal/config"
 	"github.com/rasonyang/ai-native-callcenter/internal/events"
 	"github.com/rasonyang/ai-native-callcenter/internal/flow"
@@ -453,7 +455,7 @@ func TestTheLeadJudgeJudgesOnlyWhenEverythingItNeedsIsConfigured(t *testing.T) {
 	on := config.Config{
 		TextLLMEndpoint: "https://llm.example/v1", TextLLMModel: "m",
 		TextLLMTimeout: time.Second, TextLLMContextChars: 8000,
-		IsLeadJudgeEnabled: true,
+		IsLeadJudgeEnabled: true, LeadJudgeIntents: []string{"HIGH"},
 	}
 	withKey := func(k string) string {
 		if k == "TEXT_LLM_API_KEY" {
@@ -478,6 +480,7 @@ func TestTheLeadJudgeJudgesOnlyWhenEverythingItNeedsIsConfigured(t *testing.T) {
 		{"no key", func(*config.Config) {}, noKey, false},
 		{"switched off", func(c *config.Config) { c.IsLeadJudgeEnabled = false }, withKey, false},
 		{"caller transcription off", func(c *config.Config) { c.ProviderTranscribeModel = "OFF" }, withKey, false},
+		{"no lead listed", func(c *config.Config) { c.LeadJudgeIntents = nil }, withKey, false},
 	}
 	for _, c := range cases {
 		cfg := on
@@ -488,6 +491,54 @@ func TestTheLeadJudgeJudgesOnlyWhenEverythingItNeedsIsConfigured(t *testing.T) {
 		}
 		if got.IsJudging() != c.want {
 			t.Errorf("%s: judging = %v, want %v", c.name, got.IsJudging(), c.want)
+		}
+		if !c.want && got.JudgedIntents() != nil {
+			t.Errorf("%s: the store would owe judgements for %v", c.name, got.JudgedIntents())
+		}
+	}
+}
+
+// The store owes a judgement for exactly the leads AICC_LEAD_JUDGE_INTENTS
+// lists, and the startup line names them. Every value config accepts is a lead
+// a judge can read.
+func TestTheLeadJudgeJudgesTheListedIntents(t *testing.T) {
+	withKey := func(k string) string {
+		if k == "TEXT_LLM_API_KEY" {
+			return "secret"
+		}
+		return ""
+	}
+	for _, list := range [][]string{{"HIGH"}, {"MEDIUM"}, {"HIGH", "MEDIUM"}, {"MEDIUM", "HIGH"}} {
+		var buf bytes.Buffer
+		log := slog.New(slog.NewTextHandler(&buf, nil))
+		cfg := config.Config{
+			TextLLMEndpoint: "https://llm.example/v1", TextLLMModel: "m",
+			TextLLMTimeout: time.Second, TextLLMContextChars: 8000,
+			IsLeadJudgeEnabled: true, LeadJudgeIntents: list,
+		}
+		got := leadJudge(cfg, nil, withKey, log).JudgedIntents()
+		want := leadJudgeIntents(list)
+		if !slices.Equal(got, want) {
+			t.Errorf("%v: judged %v, want %v", list, got, want)
+		}
+		for _, lead := range campaign.AllLeadIntents() {
+			if got.IsJudged(lead) != slices.Contains(list, string(lead)) {
+				t.Errorf("%v: IsJudged(%s) = %v", list, lead, got.IsJudged(lead))
+			}
+		}
+		if line := buf.String(); !strings.Contains(line, "campaign leads are judged") ||
+			!strings.Contains(line, "intents="+strings.Join(list, ",")) {
+			t.Errorf("%v: the startup line does not name the intents:\n%s", list, line)
+		}
+	}
+	for _, v := range config.LeadJudgeableIntents() {
+		if !campaign.IsLeadJudgeable(campaign.LeadIntent(v)) {
+			t.Errorf("config accepts %q, which no judge reads", v)
+		}
+	}
+	for _, lead := range campaign.AllLeadIntents() {
+		if campaign.IsLeadJudgeable(lead) && !slices.Contains(config.LeadJudgeableIntents(), string(lead)) {
+			t.Errorf("config refuses %s, which a judge reads", lead)
 		}
 	}
 }

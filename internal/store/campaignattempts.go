@@ -33,14 +33,14 @@ type attemptFinisher struct {
 	// zero Range means none.
 	outer dayrange.Range
 	now   func() time.Time
-	// isLeadJudgeOn is Store.IsLeadJudgeEnabled: a CDR that finishes a
-	// bot-only campaign call with a HIGH or MEDIUM lead marks its judgement
-	// owed.
-	isLeadJudgeOn bool
+	// judged is Store.LeadJudgeIntents: a CDR that finishes a bot-only
+	// campaign call with one of these leads marks its judgement owed. Empty,
+	// the judge is off.
+	judged campaign.LeadJudgeIntents
 }
 
 func (s *Store) finisher() attemptFinisher {
-	return attemptFinisher{outer: s.OutboundHours, now: time.Now, isLeadJudgeOn: s.IsLeadJudgeEnabled}
+	return attemptFinisher{outer: s.OutboundHours, now: time.Now, judged: s.LeadJudgeIntents}
 }
 
 // AttemptStore keeps the attempts of campaigns: the write-ahead row, the
@@ -237,10 +237,11 @@ func (f attemptFinisher) fromCDR(ctx context.Context, q *queries.Queries, cdr CD
 	}
 	// The judgement of the lead becomes owed before the finish routine runs, so
 	// the routine already sees it PENDING and leaves a HIGH lead's callback to
-	// the verdict (leadSideEffects).
+	// the verdict (leadSideEffects). A lead the deployment does not judge is
+	// finished as with the judge off.
 	isOwed := false
-	if f.isLeadJudgeOn && att.DeclaredLeadIntent == nil &&
-		campaign.IsLeadJudged(campaign.LeadIntent(deref(att.LeadIntent))) && isJudgedCall(cdr) {
+	if att.DeclaredLeadIntent == nil &&
+		f.judged.IsJudged(campaign.LeadIntent(deref(att.LeadIntent))) && isJudgedCall(cdr) {
 		owed, err := q.OweLeadJudgement(ctx, queries.OweLeadJudgementParams{
 			ID: att.ID, DeadlineSec: int32(campaign.LeadJudgeDeadline / time.Second),
 		})

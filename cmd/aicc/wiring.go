@@ -918,15 +918,18 @@ func wrapUpDrafter(cfg config.Config, st wrapupdraft.Store, pub wrapupdraft.Publ
 // leadJudge builds the judge of campaign leads (design 10 section 11.1). It
 // always returns a service: one with no text model only settles, at their
 // deadline, judgements an earlier run left owed, so a lead never stays PENDING
-// and its callback is still filed. Its IsJudging is what the store's switch
-// follows, and it is true only when every part is there: the feature on, the
-// text model configured with a key, and the caller's words in the bot phase's
-// transcript (the conversation session transcribes them unless
-// AICC_PROVIDER_TRANSCRIBE_MODEL is "off"; with no callee line every lead
-// would be judged NO_EVIDENCE and dropped). Live transcription of the human
-// phase is not needed: a judged call never reached a person.
+// and its callback is still filed. Its JudgedIntents are what the store
+// follows, and they are AICC_LEAD_JUDGE_INTENTS only when every part is there:
+// the feature on, the text model configured with a key, and the caller's words
+// in the bot phase's transcript (the conversation session transcribes them
+// unless AICC_PROVIDER_TRANSCRIBE_MODEL is "off"; with no callee line every
+// lead would be judged NO_EVIDENCE and dropped). Live transcription of the
+// human phase is not needed: a judged call never reached a person.
 func leadJudge(cfg config.Config, st leadjudge.Store, getenv func(string) string, log *slog.Logger) *leadjudge.Service {
-	judgeCfg := leadjudge.Config{Timeout: cfg.TextLLMTimeout, BudgetChars: cfg.TextLLMContextChars}
+	judgeCfg := leadjudge.Config{
+		Timeout: cfg.TextLLMTimeout, BudgetChars: cfg.TextLLMContextChars,
+		Intents: leadJudgeIntents(cfg.LeadJudgeIntents),
+	}
 	off := func(reason string) *leadjudge.Service {
 		if reason != "" {
 			log.Info("campaign leads are not judged: " + reason)
@@ -936,6 +939,9 @@ func leadJudge(cfg config.Config, st leadjudge.Store, getenv func(string) string
 	switch {
 	case !cfg.IsLeadJudgeEnabled:
 		return off("AICC_LEAD_JUDGE_ENABLED is false")
+	case len(judgeCfg.Intents) == 0:
+		// config.Load never leaves the list empty; a Config assembled in code can.
+		return off("AICC_LEAD_JUDGE_INTENTS lists no lead")
 	case cfg.TextLLMEndpoint == "" || cfg.TextLLMModel == "":
 		return off("")
 	case strings.EqualFold(cfg.ProviderTranscribeModel, "off"):
@@ -953,8 +959,19 @@ func leadJudge(cfg config.Config, st leadjudge.Store, getenv func(string) string
 		log.Error("campaign leads are not judged", "error", err)
 		return off("")
 	}
-	log.Info("campaign leads are judged", "model", cfg.TextLLMModel)
+	log.Info("campaign leads are judged", "model", cfg.TextLLMModel,
+		"intents", strings.Join(cfg.LeadJudgeIntents, ","))
 	return leadjudge.New(st, llm, judgeCfg, log)
+}
+
+// leadJudgeIntents are the parsed AICC_LEAD_JUDGE_INTENTS as campaign lead
+// intents; config spells them as the campaign package does.
+func leadJudgeIntents(names []string) campaign.LeadJudgeIntents {
+	out := make(campaign.LeadJudgeIntents, 0, len(names))
+	for _, n := range names {
+		out = append(out, campaign.LeadIntent(n))
+	}
+	return out
 }
 
 // removedSettings are AICC_* variables an earlier release read and this one

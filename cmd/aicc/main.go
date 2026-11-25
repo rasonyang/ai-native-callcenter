@@ -170,11 +170,12 @@ func run() error {
 	st.CampaignFrequencyWindow = cfg.CampaignFrequencyWindow
 	// A text model judges the lead of a campaign call the bot handled alone
 	// once it ends (design 10 section 11.1). The store marks a judgement owed
-	// only when the judge can make one; set before any store is built from st.
+	// only when the judge can make one, and only for the leads
+	// AICC_LEAD_JUDGE_INTENTS lists; set before any store is built from st.
 	// With no text model the judge still settles, at their deadline, the
 	// judgements an earlier run left owed.
 	leadJudges := leadJudge(cfg, st.LeadJudgements(), os.Getenv, slog.Default())
-	st.IsLeadJudgeEnabled = leadJudges.IsJudging()
+	st.LeadJudgeIntents = leadJudges.JudgedIntents()
 	leadJudges.Start()
 	defer leadJudges.Stop()
 	// The dialer is built further down, after the services it depends on; what
