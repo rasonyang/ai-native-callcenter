@@ -22,6 +22,8 @@ import (
 	"log/slog"
 	"math"
 	"net/http"
+	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -61,7 +63,40 @@ type Config struct {
 	// it. Default DefaultResponseGrace.
 	ResponseGrace time.Duration
 
+	// Refusals, when set, refuse sessions during setup the way a provider
+	// refuses one for its quota: the upgrade is accepted, the client's first
+	// message (its session.update) is read, and the socket is closed with
+	// the refusal's code and text, as qwen closed production sessions with
+	// 1007 and its quota text (#604, #652). Session n (counted from 1) gets
+	// Refusals[(n-1) % len(Refusals)]. RefuseSessions refuses only the first
+	// that many sessions and serves the rest; 0 refuses every session.
+	Refusals       []Refusal
+	RefuseSessions int
+
 	Log *slog.Logger
+}
+
+// Refusal is a close frame a refused session gets.
+type Refusal struct {
+	Code int
+	Text string
+}
+
+// ParseRefusal reads "CODE:TEXT", e.g. "1007:Requests rate limit exceeded,
+// please try again later.". The code is one an endpoint may send (1000-4999,
+// not 1004-1006 or 1015) and the text fits a close frame (at most 123 bytes).
+func ParseRefusal(s string) (Refusal, error) {
+	code, text, ok := strings.Cut(s, ":")
+	n, err := strconv.Atoi(strings.TrimSpace(code))
+	switch {
+	case !ok || err != nil:
+		return Refusal{}, fmt.Errorf("refusal %q: want CODE:TEXT", s)
+	case n < 1000 || n > 4999 || n == 1004 || n == 1005 || n == 1006 || n == 1015:
+		return Refusal{}, fmt.Errorf("refusal %q: close code %d cannot be sent", s, n)
+	case len(text) > 123:
+		return Refusal{}, fmt.Errorf("refusal %q: text of %d bytes, a close frame carries at most 123", s, len(text))
+	}
+	return Refusal{Code: n, Text: text}, nil
 }
 
 func (c *Config) applyDefaults() {
@@ -109,6 +144,7 @@ type Server struct {
 	// resultsWithoutCreate counts awaited results with no response.create
 	// after them inside the grace period.
 	resultsWithoutCreate atomic.Int64
+	refused              atomic.Int64 // sessions closed with a Refusal
 
 	// meters are the uplink meters of the most recent sessions, oldest first.
 	metersMu sync.Mutex
@@ -147,6 +183,8 @@ type Stats struct {
 	// ResultsWithoutCreate counts tool results the script continued past
 	// after the grace period, with no response.create following.
 	ResultsWithoutCreate int64 `json:"resultsWithoutCreate"`
+	// Refused counts the sessions closed during setup with a Refusal.
+	Refused int64 `json:"refused"`
 
 	// Sessions is what each of the most recent sessions heard of the
 	// application's uplink; served only by GET StatsPath?sessions=1, never by
@@ -192,6 +230,7 @@ func (s *Server) Stats() Stats {
 		Unmatched:     s.unmatched.Load(),
 
 		ResultsWithoutCreate: s.resultsWithoutCreate.Load(),
+		Refused:              s.refused.Load(),
 	}
 }
 
@@ -234,11 +273,34 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	defer s.sessions.Add(-1)
 
+	if n := len(s.cfg.Refusals); n > 0 && (s.cfg.RefuseSessions <= 0 || seq <= int64(s.cfg.RefuseSessions)) {
+		s.refuse(conn, seq, s.cfg.Refusals[(seq-1)%int64(n)])
+		return
+	}
+
 	sess := newSession(s, conn)
 	sess.meter = newUplinkMeter(seq)
 	s.addMeter(sess.meter)
 	defer sess.meter.close()
 	sess.run()
+}
+
+// refuse closes a session during setup with the refusal's code and text,
+// after the client's first message, and waits briefly for its close reply.
+func (s *Server) refuse(conn *websocket.Conn, seq int64, r Refusal) {
+	defer conn.Close()
+	_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	_, _, _ = conn.ReadMessage()
+	_ = conn.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(r.Code, r.Text),
+		time.Now().Add(2*time.Second))
+	s.refused.Add(1)
+	s.cfg.Log.Warn("mockprovider: session refused", "session", seq, "code", r.Code, "text", r.Text)
+	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	for {
+		if _, _, err := conn.ReadMessage(); err != nil {
+			return
+		}
+	}
 }
 
 // session is one conversation.
