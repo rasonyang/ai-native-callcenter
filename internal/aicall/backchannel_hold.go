@@ -134,10 +134,42 @@ type openCut struct {
 	// isWaitOver says a tool call waited cutVerdictWait for the verdict and no
 	// final came: the lead guard (#612) does not wait for it again.
 	isWaitOver bool
-	// isCounted says the cut is already in aicc_bot_turn_cuts_total (#626):
-	// set once, so a final judged after a MISSING was counted does not count
-	// it twice.
+	// line is where the cut fell, decided when it was made (openCut):
+	// obs.TurnCutLineOpening when isOpening, TurnCutLineClosing over the armed
+	// ending's closing line (Config.IsClosingLine), else TurnCutLineLater.
+	// isCounted says the cut is in aicc_bot_turn_cuts_total and the call's
+	// tally (countCut, #626): set once, so a final that arrives after the cut
+	// was counted MISSING does not count it again.
+	line      string
 	isCounted bool
+}
+
+// turnCutTally is a call's cuts as aicc_bot_turn_cuts_total counts them, by
+// words and by line, for the call's one "ai turn cuts" line (#626). Guarded by
+// backchannelState.mu.
+type turnCutTally struct {
+	words, blank, missing   int
+	opening, later, closing int
+}
+
+// add counts one cut.
+func (t *turnCutTally) add(words, line string) {
+	switch words {
+	case obs.TurnCutWords:
+		t.words++
+	case obs.TurnCutWordsBlank:
+		t.blank++
+	case obs.TurnCutWordsMissing:
+		t.missing++
+	}
+	switch line {
+	case obs.TurnCutLineOpening:
+		t.opening++
+	case obs.TurnCutLineClosing:
+		t.closing++
+	case obs.TurnCutLineLater:
+		t.later++
+	}
 }
 
 // backchannelState is everything the session keeps for backchannels. mu is
@@ -159,6 +191,8 @@ type backchannelState struct {
 	// (noteOpeningHeard).
 	isOpeningOwed bool
 	owedAfterTurn int
+	// cuts is the call's tally of counted cuts (countCut).
+	cuts turnCutTally
 }
 
 // isHolding reports whether this session holds backchannels: the provider's
@@ -508,6 +542,9 @@ func (s *Session) openCut(cut Event) {
 	}
 	isOpeningLine := s.isOpeningTurn(cut.Turn)
 	isOpening := isOpeningLine
+	// Where the cut fell is fixed now, not when it is counted (#626). Asked
+	// with no lock held: the actions take their own (Config.IsClosingLine).
+	isClosingLine := s.cfg.IsClosingLine != nil && s.cfg.IsClosingLine(cut.Turn)
 	s.bc.mu.Lock()
 	if s.bc.isOpeningOwed {
 		isOpening = true
@@ -516,7 +553,15 @@ func (s *Session) openCut(cut Event) {
 		s.bc.isOpeningOwed = true
 		s.bc.owedAfterTurn = max(s.bc.owedAfterTurn, cut.Turn)
 	}
-	next := &openCut{event: cut, isOpening: isOpening, isOpeningLine: isOpeningLine, done: make(chan struct{})}
+	line := obs.TurnCutLineLater
+	switch {
+	case isOpening:
+		line = obs.TurnCutLineOpening
+	case isClosingLine:
+		line = obs.TurnCutLineClosing
+	}
+	next := &openCut{event: cut, isOpening: isOpening, isOpeningLine: isOpeningLine, line: line,
+		done: make(chan struct{})}
 	if isOpening {
 		// The lead guard's record of who spoke over the opening (#612).
 		s.noteOpeningCut(next)
@@ -533,8 +578,8 @@ func (s *Session) openCut(cut Event) {
 	s.bc.cut = next
 	s.bc.mu.Unlock()
 	if prev != nil {
-		// The final transcript of the cut this one replaces never judged
-		// it: it counts as missing (#626).
+		// No final can judge the cut this one replaces any more: unless one
+		// already has, it counts as missing (#626).
 		s.countCut(prev, obs.TurnCutWordsMissing)
 	}
 }
@@ -603,10 +648,11 @@ func (s *Session) noteCutVerdict(event provider.Event) (replayCut *openCut) {
 	return replayCut
 }
 
-// countCut records the cut in aicc_bot_turn_cuts_total, once (#626): words is
-// what its final transcript made of it — obs.TurnCutWords, TurnCutWordsBlank
-// or TurnCutWordsMissing — and line is where it fell, the call's opening, the
-// armed ending's closing line, or any other.
+// countCut records the cut in aicc_bot_turn_cuts_total and the call's tally,
+// once (#626): words is what its final transcript made of it, obs.TurnCutWords,
+// TurnCutWordsBlank or TurnCutWordsMissing; the line it fell on was fixed when
+// it was made (openCut). The first count of a cut is the one kept. It calls
+// nothing with bc.mu held and takes no other lock.
 func (s *Session) countCut(cut *openCut, words string) {
 	s.bc.mu.Lock()
 	if cut.isCounted {
@@ -614,15 +660,37 @@ func (s *Session) countCut(cut *openCut, words string) {
 		return
 	}
 	cut.isCounted = true
+	s.bc.cuts.add(words, cut.line)
 	s.bc.mu.Unlock()
-	line := obs.TurnCutLineLater
-	switch {
-	case cut.isOpening:
-		line = obs.TurnCutLineOpening
-	case s.cfg.IsEndingArmed != nil && s.cfg.IsEndingArmed():
-		line = obs.TurnCutLineClosing
+	obs.RecordBotTurnCut(s.providerName, words, cut.line)
+}
+
+// finishTurnCuts counts the cut the call ended on as MISSING, unless a final
+// judged it, and logs the call's cuts in one line when it had any (#626). It
+// runs once every pump has returned, so no final can judge a cut any more and
+// no cut can open; a tool call still waiting on a cut (cutVerdictOf) can only
+// count that same cut, once.
+func (s *Session) finishTurnCuts() {
+	s.bc.mu.Lock()
+	cut := s.bc.cut
+	s.bc.mu.Unlock()
+	if cut != nil {
+		s.countCut(cut, obs.TurnCutWordsMissing)
 	}
-	obs.RecordBotTurnCut(s.providerName, words, line)
+	s.bc.mu.Lock()
+	t := s.bc.cuts
+	s.bc.mu.Unlock()
+	if t.words+t.blank+t.missing == 0 {
+		return
+	}
+	args := []any{
+		"cutsWords", t.words, "cutsBlank", t.blank, "cutsMissing", t.missing,
+		"cutsOpening", t.opening, "cutsLater", t.later, "cutsClosing", t.closing,
+	}
+	if s.cfg.CampaignID != "" {
+		args = append(args, "campaignId", s.cfg.CampaignID)
+	}
+	s.log.Info("ai turn cuts", args...)
 }
 
 // judgeCut is the verdict on the open cut for a final transcript
@@ -783,6 +851,10 @@ func (s *Session) cutVerdictOf(cut *openCut) (verdict cutVerdict, waited time.Du
 			if s.expireOpeningCut(cut) {
 				s.log.Info("no verdict on the cut of the opening within the wait; the callee's words are not known",
 					"turn", cut.event.Turn, "waitedMs", waited.Milliseconds())
+				// The wait settled it: a final that arrives later judges
+				// nothing, so the cut is MISSING (#626). Any other cut stays
+				// open to its final and is counted by it, by the cut that
+				// replaces it or at the call's end.
 				s.countCut(cut, obs.TurnCutWordsMissing)
 				return cutVerdictWordsUnknown, waited, true
 			}
@@ -794,11 +866,9 @@ func (s *Session) cutVerdictOf(cut *openCut) (verdict cutVerdict, waited time.Du
 				// A final judged it as the wait ran out.
 				return verdict, waited, false
 			}
-			s.countCut(cut, obs.TurnCutWordsMissing)
 			s.log.Info("no verdict on the cut within the wait; the tool call runs as it always did")
 			return cutVerdictUnknown, waited, false
 		case <-s.done:
-			s.countCut(cut, obs.TurnCutWordsMissing)
 			return cutVerdictUnknown, time.Since(began), false
 		}
 	}

@@ -1691,6 +1691,10 @@ func startToolPathFull(t *testing.T, profile provider.Profile, lang, flowJSON,
 			a := actionsRef.Load()
 			return a != nil && a.isArmed()
 		},
+		IsClosingLine: func(turn int) bool {
+			a := actionsRef.Load()
+			return a != nil && a.isClosingLine(turn)
+		},
 	})
 	awaitBridgeEvent(t, session, EventTypeReady)
 
