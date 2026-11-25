@@ -3923,7 +3923,7 @@ export interface components {
             startedAt: string;
             /**
              * Format: date-time
-             * @description Absent while DIALING.
+             * @description Absent while DIALING. startedAt is the application's clock when the attempt was written and finishedAt the switch's stamp of the call's end (the application's clock for a call that never made a channel), so the two can disagree by the hosts' clock difference, but finishedAt is never reported earlier than startedAt.
              */
             finishedAt?: string;
         };

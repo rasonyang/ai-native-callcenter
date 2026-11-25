@@ -66,6 +66,16 @@ carries the one-line installer's files.
 
 ### Fixed
 
+- **A campaign attempt no longer finishes before it started** (#704). An
+  attempt's `startedAt` is the application's clock when the dialer writes it,
+  and its `finishedAt` the switch's stamp of the call's end. With the switch
+  on another host whose clock is behind, a call refused at once (a line
+  answering 402 before any ring) was listed with `finishedAt` earlier than
+  `startedAt`, and a duration computed from the two came out negative. The
+  stored `finishedAt` is now never earlier than `startedAt`; the retry is still
+  scheduled from the end of the call as the switch stamped it. Attempts
+  finished before the upgrade are not rewritten. The `CampaignAttempt`
+  description in the API says which clock each stamp comes from.
 - **A carrier that refuses campaign calls is a line fault, not callees
   declining** (#702). The switch reports a carrier's own refusal of an INVITE
   (402 Payment Required for an account out of credit, 401 or 407 for the

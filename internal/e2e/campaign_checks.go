@@ -25,6 +25,7 @@ var AfterRunChecks = []AfterRunCheck{
 	{Name: "no-invite-after-answer", Run: CheckNoInviteAfterAnswer},
 	{Name: "capacity-released", Run: CheckCapacityReleased},
 	{Name: "attempts-finished-once", Run: CheckAttemptsFinishedOnce},
+	{Name: "finished-not-before-started", Run: CheckFinishedNotBeforeStarted},
 	{Name: "one-cdr-per-channel", Run: CheckOneCDRPerChannel},
 }
 

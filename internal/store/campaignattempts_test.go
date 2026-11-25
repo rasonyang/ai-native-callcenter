@@ -279,6 +279,73 @@ func TestACDRFinishesItsAttemptInItsOwnTransaction(t *testing.T) {
 	}
 }
 
+// An attempt's start is the application's clock and its end the switch's
+// stamp (#704). With the switch's clock behind, a call refused at once ends
+// before it started: the stored finishedAt is the start, never earlier, and
+// the retry is still the ending as the switch stamped it plus the interval.
+// An ending after the start is stored as it came, through the CDR and through
+// the standalone finish alike.
+func TestAnEndingStampedBeforeTheStartIsNeverStoredBeforeIt(t *testing.T) {
+	ctx := context.Background()
+	e := openAttempts(t)
+	c, contacts := e.campaign(t, "Two clocks", "6", 4, nil)
+	start := ny(t, "2026-06-01 10:00")
+	early := start.Add(-100 * time.Millisecond)
+	late := start.Add(100 * time.Millisecond)
+	backoff := campaign.DefaultRetryPolicy().TransientBackoff.Wait(1)
+
+	for i, tt := range []struct {
+		name         string
+		endedAt      time.Time
+		isCDR        bool
+		wantFinished time.Time
+	}{
+		{"a CDR stamped before the start", early, true, start},
+		{"a CDR stamped after the start", late, true, late},
+		{"a standalone finish before the start", early, false, start},
+		{"a standalone finish after the start", late, false, late},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			a := e.begin(t, contacts[i], start)
+			if tt.isCDR {
+				// A line's 402 the switch stamped 50 ms after the leg began, on its
+				// own clock.
+				refused := cdrOf(a.CallID, "CALL_REJECTED", CDRStatusNoAnswer, false,
+					tt.endedAt.Add(-50*time.Millisecond), tt.endedAt)
+				refused.Tech = map[string]any{CDRTechSIPStatus: 402, CDRTechEndedBy: "PEER"}
+				if err := e.ledger.InsertCDR(ctx, refused); err != nil {
+					t.Fatal(err)
+				}
+			} else if _, err := e.attempts.Finish(ctx, a.CallID, campaign.Ending{
+				Outcome: campaign.OutcomeOriginateFailed, EndedAt: tt.endedAt,
+			}); err != nil {
+				t.Fatal(err)
+			}
+			got, err := e.attempts.Get(ctx, a.CallID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !got.StartedAt.Equal(start) || got.FinishedAt == nil || !got.FinishedAt.Equal(tt.wantFinished) {
+				t.Errorf("attempt started %v and finished %v, want %v and %v", got.StartedAt, got.FinishedAt, start, tt.wantFinished)
+			}
+			want := tt.endedAt.Add(backoff)
+			ct := e.contact(t, c, contacts[i].ID)
+			if ct.Status != campaign.ContactActive || ct.NextAttemptAt == nil || !ct.NextAttemptAt.Equal(want) {
+				t.Errorf("contact = %s, next attempt %v; want ACTIVE and %v (the ending as stamped plus the first backoff)",
+					ct.Status, ct.NextAttemptAt, want)
+			}
+			select {
+			case f := <-e.finished:
+				if f.CallID != a.CallID || f.NextAttemptAt == nil || !f.NextAttemptAt.Equal(want) {
+					t.Errorf("announced %+v, want call %s with next attempt %v", f, a.CallID, want)
+				}
+			default:
+				t.Error("the finish was not announced")
+			}
+		})
+	}
+}
+
 // The CDR and the attempt commit together or not at all.
 func TestTheCDRAndTheAttemptStandOrFallTogether(t *testing.T) {
 	ctx := context.Background()

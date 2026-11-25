@@ -389,6 +389,9 @@ func (f attemptFinisher) apply(ctx context.Context, q *queries.Queries, att quer
 
 	talk := int32(e.TalkSec)
 	cause := textPtr(e.HangupCause)
+	// The stored finished_at is never earlier than started_at, which is the
+	// application's clock while endedAt is the switch's (#704); the contact's
+	// schedule below is still measured from endedAt, the ending as it happened.
 	if err := q.FinishCampaignAttempt(ctx, queries.FinishCampaignAttemptParams{
 		ID: att.ID, Outcome: textPtr(string(e.Outcome)), HangupCause: cause, TalkSec: &talk,
 		IsTouched: campaign.IsTouched(e.Outcome), FinishedAt: pgtype.Timestamptz{Time: endedAt, Valid: true},

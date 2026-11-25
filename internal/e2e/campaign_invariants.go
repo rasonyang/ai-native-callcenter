@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/rasonyang/ai-native-callcenter/internal/api"
 	"github.com/rasonyang/ai-native-callcenter/internal/calleesim"
@@ -357,6 +358,31 @@ func CheckAttemptsFinishedOnce(_ context.Context, v *RunView, c *Checks) {
 		c.That(delta == byOutcome[o], "%s{outcome=%q} moved by the %.0f attempt(s) with that outcome (+%.0f)", MetricCampaignAttempts, o, byOutcome[o], delta)
 	}
 	c.That(total > 0 && sum == float64(total), "%s moved by the run's %d attempts, once each (+%.0f)", MetricCampaignAttempts, total, sum)
+}
+
+// CheckFinishedNotBeforeStarted: no finished attempt ends before it started.
+// An attempt's startedAt is the dialer's clock when it wrote the attempt, and
+// its finishedAt the switch's stamp of the call's end; a call that ends sooner
+// than the switch's clock is behind (C12's line refusal) would read as ending
+// before it began, and the store never keeps such an end (issue #704). An
+// attempt with no end is attempts-finished-once's to fail, not this check's.
+func CheckFinishedNotBeforeStarted(_ context.Context, v *RunView, c *Checks) {
+	finished := 0
+	var early []string
+	for _, p := range pairAttempts(v) {
+		a := p.attempt
+		if a.State != attemptFinished || a.FinishedAt == nil {
+			continue
+		}
+		finished++
+		if a.FinishedAt.Before(a.StartedAt) {
+			early = append(early, fmt.Sprintf("%s: finished %s, %s before it started %s", p.label(),
+				a.FinishedAt.Format(time.RFC3339Nano), a.StartedAt.Sub(*a.FinishedAt), a.StartedAt.Format(time.RFC3339Nano)))
+		}
+	}
+	c.That(finished > 0 && len(early) == 0,
+		"each of the run's %d finished attempts has its finishedAt at or after its startedAt (%d do not: %s)",
+		finished, len(early), strings.Join(early, "; "))
 }
 
 // CheckOneCDRPerChannel: every attempt that created a channel has exactly one
