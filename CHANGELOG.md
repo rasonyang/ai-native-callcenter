@@ -75,6 +75,21 @@ carries the one-line installer's files.
   delivery (surrounding spaces and any letter case are fine); an ID no call has
   is said to be not found and leaves the list and its filters as they were.
   Anything else in the box filters by number as before. No contract change.
+- **The cuts of the bot's lines are counted**, the measurement step of #626
+  (sound on the callee's side taken for the callee); no call behaves
+  differently. `aicc_bot_turn_cuts_total{provider,words,line}` counts, once
+  each, the cuts an engine that detects turns by itself (qwen, grok, gateway,
+  doubao) makes over a bot line: `words` is what the final transcript of the
+  words that cut made of them (`WORDS`, `BLANK`, or `MISSING` when no final
+  judged the cut), `line` is where it fell, fixed when it was made (`OPENING`,
+  `CLOSING` for a turn after the one the armed ending was armed in, `LATER`).
+  Nothing is counted on openai, whose client holds the caller's speech until
+  the words are known, nor for a keypress or a line the platform cut itself.
+  Each call with a cut logs one `ai turn cuts` line with `cutsWords`,
+  `cutsBlank`, `cutsMissing`, `cutsOpening`, `cutsLater`, `cutsClosing` and,
+  on a campaign call, `campaignId`, so the counts add up per call and per
+  campaign. `docs/design/11-backchannels.md` says exactly what is counted
+  (#626, #678; thanks @sanketpatel32).
 
 ### Changed
 
@@ -222,11 +237,6 @@ carries the one-line installer's files.
 
 ### Changed
 
-- **Every engine-made cut of a bot line is counted** (#626, step 0):
-  `aicc_bot_turn_cuts_total{provider,words,line}` — what its final transcript
-  made of it (WORDS, BLANK, MISSING) and where it fell (OPENING, LATER,
-  CLOSING). A deployment whose BLANK and MISSING cuts climb is hearing
-  background sound taken for the callee.
 - **Campaign admission paces by each limit's own period** (#644). Session
   starts are judged over the session period, or over 10 seconds when the period
   is shorter, with the limit scaled to it; tokens over the token period. After
