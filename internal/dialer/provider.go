@@ -110,7 +110,7 @@ func backoffReason(limit ratemeter.Limit) string {
 }
 
 // providerHold applies the provider's quota to one more admission (design 10
-// section 6.3, as built for #604 and #644):
+// section 6.3, as built for #604, #644 and #652):
 //
 //	now >= lastQuotaRefusal_L + backoff_L                          for each limit L
 //	starts_W + n <= sessionLimit x W / sessionPeriod               when sessionLimit > 0
