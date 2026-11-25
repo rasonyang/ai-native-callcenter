@@ -8,7 +8,6 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -27,20 +26,66 @@ import (
 // counted in aicc_bot_turn_cuts_total once, by what the final transcript of the
 // words that cut made of it (WORDS, BLANK, MISSING) and the line it fell on
 // (OPENING, LATER, CLOSING), and the call logs its cuts in one "ai turn cuts"
-// line. The tests drive real sessions over the fake model. Each gives its
-// provider a name of its own, so the global meter's counts for that name are
-// the test's alone (the shared reader of turn_unanswered_test.go watches it).
+// line. The tests drive real sessions over the fake model. Each names its
+// provider after itself, so the global meter's counts for that name are the
+// test's alone (the shared reader of turn_unanswered_test.go watches it), and
+// compares them before and after: a name per run would grow the reader's
+// series with every run of -count, and every collection with them.
 
-var turnCutProviders atomic.Int64
+// cutMeter reads aicc_bot_turn_cuts_total for one provider name, as counted
+// since the meter was made.
+type cutMeter struct {
+	name   string
+	before map[string]int64
+}
 
-// turnCutProfile is base under a provider name no other test uses. It installs
-// the reader first: the global meter drops what is recorded before it has one.
-func turnCutProfile(base provider.Profile) provider.Profile {
+// newCutMeter is base under the test's own provider name, and a meter of what
+// that name counts from now on. It installs the reader first: the global meter
+// drops what is recorded before it has one.
+func newCutMeter(t *testing.T, base provider.Profile) (provider.Profile, *cutMeter) {
+	t.Helper()
 	setTurnReaders.Do(func() {
 		otel.SetMeterProvider(sdkmetric.NewMeterProvider(sdkmetric.WithReader(turnReader)))
 	})
-	base.Name = fmt.Sprintf("%s-turncut-%d", base.Name, turnCutProviders.Add(1))
-	return base
+	base.Name = base.Name + "-turncut-" + strings.ReplaceAll(t.Name(), "/", "-")
+	return base, &cutMeter{name: base.Name, before: turnCutCounts(t, base.Name)}
+}
+
+// since is what the name has counted since the meter was made, by cutKey.
+func (m *cutMeter) since(t *testing.T) map[string]int64 {
+	t.Helper()
+	out := map[string]int64{}
+	for key, n := range turnCutCounts(t, m.name) {
+		if d := n - m.before[key]; d != 0 {
+			out[key] = d
+		}
+	}
+	return out
+}
+
+// assert fails unless the counts since the meter was made are exactly want.
+func (m *cutMeter) assert(t *testing.T, want map[string]int64) {
+	t.Helper()
+	got := m.since(t)
+	if len(got) != len(want) {
+		t.Errorf("counts = %v, want %v", got, want)
+		return
+	}
+	for key, n := range want {
+		if got[key] != n {
+			t.Errorf("counts = %v, want %v", got, want)
+			return
+		}
+	}
+}
+
+// countedIn is how many cuts the session has counted so far: its own tally,
+// which a test can poll without collecting the meter.
+func countedIn(s *Session) int {
+	s.bc.mu.Lock()
+	defer s.bc.mu.Unlock()
+	c := s.bc.cuts
+	return c.words + c.blank + c.missing
 }
 
 // cutKey names a count by its labels.
@@ -78,22 +123,6 @@ func turnCutCounts(t *testing.T, providerName string) map[string]int64 {
 	return out
 }
 
-// assertTurnCuts fails unless the provider's counts are exactly want.
-func assertTurnCuts(t *testing.T, providerName string, want map[string]int64) {
-	t.Helper()
-	got := turnCutCounts(t, providerName)
-	if len(got) != len(want) {
-		t.Errorf("counts = %v, want %v", got, want)
-		return
-	}
-	for key, n := range want {
-		if got[key] != n {
-			t.Errorf("counts = %v, want %v", got, want)
-			return
-		}
-	}
-}
-
 // turnCutRig is one session on an engine, its events drained, its log kept.
 type turnCutRig struct {
 	session *Session
@@ -101,7 +130,7 @@ type turnCutRig struct {
 	model   *fakeModel
 	logs    *syncBuffer
 	wait    *verdictWait
-	name    string
+	meter   *cutMeter
 	// ended closes when the session's stream has closed: the call's cuts are
 	// all counted and its line logged.
 	ended chan struct{}
@@ -119,9 +148,9 @@ func startTurnCutRig(t *testing.T, opening string, configure func(*Config)) *tur
 func startTurnCutRigOn(t *testing.T, base provider.Profile, opening string,
 	wrap func(*fakeModel) provider.VoiceSession, configure func(*Config)) *turnCutRig {
 	t.Helper()
-	profile := turnCutProfile(base)
+	profile, meter := newCutMeter(t, base)
 	r := &turnCutRig{leg: newFakeLeg(media.LawMu), model: newFakeModel(), logs: &syncBuffer{},
-		wait: newVerdictWait(), name: profile.Name, ended: make(chan struct{})}
+		wait: newVerdictWait(), meter: meter, ended: make(chan struct{})}
 	var voice provider.VoiceSession = r.model
 	if wrap != nil {
 		voice = wrap(r.model)
@@ -209,12 +238,7 @@ func (r *turnCutRig) final(item, text string) {
 }
 
 // counted is how many cuts the call has counted so far.
-func (r *turnCutRig) counted() int {
-	r.session.bc.mu.Lock()
-	defer r.session.bc.mu.Unlock()
-	c := r.session.bc.cuts
-	return c.words + c.blank + c.missing
-}
+func (r *turnCutRig) counted() int { return countedIn(r.session) }
 
 func (r *turnCutRig) awaitCounted(t *testing.T, n int) {
 	t.Helper()
@@ -299,7 +323,7 @@ func TestACutIsCountedOnceByWhatItsFinalSaid(t *testing.T) {
 				r.awaitCounted(t, 1)
 			}
 			r.end(t)
-			assertTurnCuts(t, r.name, map[string]int64{cutKey(tt.words, obs.TurnCutLineLater): 1})
+			r.meter.assert(t, map[string]int64{cutKey(tt.words, obs.TurnCutLineLater): 1})
 			r.assertCutLine(t, tt.log, "cutsLater=1", "cutsOpening=0", "cutsClosing=0")
 		})
 	}
@@ -314,13 +338,13 @@ func TestACutAnotherReplacesIsCountedOnce(t *testing.T) {
 		r.cutBySpeech(t, r.botSpeaks(t), "u1")
 		r.cutBySpeech(t, r.botSpeaks(t), "u2")
 		r.awaitCounted(t, 1)
-		assertTurnCuts(t, r.name, map[string]int64{cutKey(obs.TurnCutWordsMissing, obs.TurnCutLineLater): 1})
+		r.meter.assert(t, map[string]int64{cutKey(obs.TurnCutWordsMissing, obs.TurnCutLineLater): 1})
 
 		r.final("u1", "I said I am busy.") // the replaced cut's own final, late
 		r.final("u2", "Please call me next week.")
 		r.awaitCounted(t, 2)
 		r.end(t)
-		assertTurnCuts(t, r.name, map[string]int64{
+		r.meter.assert(t, map[string]int64{
 			cutKey(obs.TurnCutWordsMissing, obs.TurnCutLineLater): 1,
 			cutKey(obs.TurnCutWords, obs.TurnCutLineLater):        1,
 		})
@@ -333,7 +357,7 @@ func TestACutAnotherReplacesIsCountedOnce(t *testing.T) {
 		r.awaitCounted(t, 1)
 		r.cutBySpeech(t, r.botSpeaks(t), "u2")
 		r.end(t)
-		assertTurnCuts(t, r.name, map[string]int64{
+		r.meter.assert(t, map[string]int64{
 			cutKey(obs.TurnCutWords, obs.TurnCutLineLater):        1,
 			cutKey(obs.TurnCutWordsMissing, obs.TurnCutLineLater): 1,
 		})
@@ -353,7 +377,7 @@ func TestACutOfTheOpeningIsCountedOnTheOpening(t *testing.T) {
 	r.final("u2", "Who is this, please?")
 	r.awaitCounted(t, 2)
 	r.end(t)
-	assertTurnCuts(t, r.name, map[string]int64{
+	r.meter.assert(t, map[string]int64{
 		cutKey(obs.TurnCutWordsBlank, obs.TurnCutLineOpening): 1,
 		cutKey(obs.TurnCutWords, obs.TurnCutLineOpening):      1,
 	})
@@ -405,7 +429,7 @@ func TestACutIsCountedOnceWhateverEndsItFirst(t *testing.T) {
 				}
 				wg.Wait()
 				r.end(t)
-				got := turnCutCounts(t, r.name)
+				got := r.meter.since(t)
 				total := int64(0)
 				for key, n := range got {
 					total += n
@@ -468,7 +492,7 @@ func TestOnlyACutTheEngineMadeIsCounted(t *testing.T) {
 			tt.act(t, r)
 			r.probeCut(t)
 			r.end(t)
-			assertTurnCuts(t, r.name, map[string]int64{cutKey(obs.TurnCutWords, obs.TurnCutLineLater): 1})
+			r.meter.assert(t, map[string]int64{cutKey(obs.TurnCutWords, obs.TurnCutLineLater): 1})
 			r.assertCutLine(t, "cutsWords=1", "cutsLater=1", "cutsMissing=0")
 		})
 	}
@@ -495,25 +519,25 @@ func TestNothingIsCountedOnAnEngineThatHoldsSpeech(t *testing.T) {
 	r.final("u2", "What does the plan cost?")
 	waitLong(t, "the words to take the floor", func() bool { return r.leg.clears() >= 1 })
 	r.end(t)
-	assertTurnCuts(t, r.name, map[string]int64{})
+	r.meter.assert(t, map[string]int64{})
 	if lines := r.cutLines(); len(lines) != 0 {
 		t.Errorf("logged %v, want no \"ai turn cuts\" line", lines)
 	}
 }
 
-// newTurnCutDamageRig is a damageRig whose provider has a name of its own, on
-// a call whose opening is opening ("" for none).
-func newTurnCutDamageRig(t *testing.T, opening string) (*damageRig, string) {
+// newTurnCutDamageRig is a damageRig whose provider is named after the test,
+// on a call whose opening is opening ("" for none), with its meter.
+func newTurnCutDamageRig(t *testing.T, opening string) (*damageRig, *cutMeter) {
 	t.Helper()
 	wait := newVerdictWait()
-	profile := turnCutProfile(provider.QwenProfile())
+	profile, meter := newCutMeter(t, provider.QwenProfile())
 	h := newClaimsHarnessModel(t, profile, quietFlow, "en", "", quietConfig(), nil, func(c *claimsHarness) {
 		c.session.cutWait = wait.after
 		c.session.holdAfter = (&holdClock{}).after
 		c.session.cfg.OnCutAcknowledged = c.actions.onCutAcknowledged
 		c.session.cfg.Session.OpeningText = opening
 	})
-	return &damageRig{quietHarness: &quietHarness{claimsHarness: h}, wait: wait}, profile.Name
+	return &damageRig{quietHarness: &quietHarness{claimsHarness: h}, wait: wait}, meter
 }
 
 // endCall closes the call and waits until drive has returned, which is after
@@ -537,7 +561,7 @@ func TestALateFinalAfterTheToolsWaitCountsTheCutOnce(t *testing.T) {
 	// The tool's move is to a phase that ends nothing, so the call goes on.
 	const maybe = `{"value":"maybe"}`
 	t.Run("a later line", func(t *testing.T) {
-		r, name := newTurnCutDamageRig(t, "")
+		r, meter := newTurnCutDamageRig(t, "")
 		r.botSpeaksUntilCut(t, "u1")
 		r.started()
 		r.toolCall("fc_1", "classify", maybe)
@@ -545,17 +569,17 @@ func TestALateFinalAfterTheToolsWaitCountsTheCutOnce(t *testing.T) {
 		r.wait.expire()
 		r.ended()
 		r.awaitResult(t)
-		if n := r.countedCuts(); n != 0 {
+		if n := countedIn(r.session); n != 0 {
 			t.Fatalf("%d cuts counted when the wait ran out, want none: the cut is still open to its final", n)
 		}
 
 		r.callerFinal("u1", "Maybe, let me think about it.")
-		waitLong(t, "the late final to count the cut", func() bool { return r.countedCuts() == 1 })
+		waitLong(t, "the late final to count the cut", func() bool { return countedIn(r.session) == 1 })
 		r.endCall(t)
-		assertTurnCuts(t, name, map[string]int64{cutKey(obs.TurnCutWords, obs.TurnCutLineLater): 1})
+		meter.assert(t, map[string]int64{cutKey(obs.TurnCutWords, obs.TurnCutLineLater): 1})
 	})
 	t.Run("the opening", func(t *testing.T) {
-		r, name := newTurnCutDamageRig(t, openingLine)
+		r, meter := newTurnCutDamageRig(t, openingLine)
 		r.botSpeaksUntilCut(t, "u1") // turn 1 is the opening
 		r.started()
 		r.toolCall("fc_1", "classify", maybe)
@@ -563,7 +587,7 @@ func TestALateFinalAfterTheToolsWaitCountsTheCutOnce(t *testing.T) {
 		r.wait.expire()
 		r.ended()
 		r.awaitResult(t)
-		assertTurnCuts(t, name, map[string]int64{cutKey(obs.TurnCutWordsMissing, obs.TurnCutLineOpening): 1})
+		meter.assert(t, map[string]int64{cutKey(obs.TurnCutWordsMissing, obs.TurnCutLineOpening): 1})
 
 		r.callerFinal("u1", "Maybe, let me think about it.")
 		// The call stays in its phase (the move was refused): a later
@@ -573,16 +597,8 @@ func TestALateFinalAfterTheToolsWaitCountsTheCutOnce(t *testing.T) {
 		r.ended()
 		waitFor(t, "the probe to be answered", func() bool { return len(r.model.recordedToolResults()) == 2 })
 		r.endCall(t)
-		assertTurnCuts(t, name, map[string]int64{cutKey(obs.TurnCutWordsMissing, obs.TurnCutLineOpening): 1})
+		meter.assert(t, map[string]int64{cutKey(obs.TurnCutWordsMissing, obs.TurnCutLineOpening): 1})
 	})
-}
-
-// countedCuts is how many cuts the call has counted so far.
-func (r *damageRig) countedCuts() int {
-	r.session.bc.mu.Lock()
-	defer r.session.bc.mu.Unlock()
-	c := r.session.bc.cuts
-	return c.words + c.blank + c.missing
 }
 
 // Where a cut fell is fixed when it is made, by the armed ending's own notion
@@ -592,7 +608,7 @@ func (r *damageRig) countedCuts() int {
 // itself is CLOSING.
 func TestACutIsCountedOnTheLineItFellOn(t *testing.T) {
 	t.Run("a later line, then the ending armed", func(t *testing.T) {
-		profile := turnCutProfile(provider.QwenProfile())
+		profile, meter := newCutMeter(t, provider.QwenProfile())
 		h := startToolPathFull(t, profile, "en", owedLineFlow, "", map[string]any{"name": "Ann"}, &syncBuffer{})
 		h.leg.holdFrames(40)
 		h.model.events <- provider.Event{Type: provider.EventTypeResponseStarted}
@@ -616,10 +632,10 @@ func TestACutIsCountedOnTheLineItFellOn(t *testing.T) {
 		}
 		h.session.Close(context.Background())
 		h.awaitDone(t)
-		assertTurnCuts(t, profile.Name, map[string]int64{cutKey(obs.TurnCutWordsMissing, obs.TurnCutLineLater): 1})
+		meter.assert(t, map[string]int64{cutKey(obs.TurnCutWordsMissing, obs.TurnCutLineLater): 1})
 	})
 	t.Run("the turn the ending was armed in", func(t *testing.T) {
-		profile := turnCutProfile(provider.QwenProfile())
+		profile, meter := newCutMeter(t, provider.QwenProfile())
 		h := startToolPathFull(t, profile, "en", claimsFlow, "", nil, &syncBuffer{})
 		h.actions.mu.Lock()
 		h.actions.graceCap = time.Minute
@@ -638,13 +654,13 @@ func TestACutIsCountedOnTheLineItFellOn(t *testing.T) {
 		h.model.events <- provider.Event{Type: provider.EventTypeSpeechStarted, ItemID: "u1"}
 		h.model.events <- provider.Event{Type: provider.EventTypeInputTranscript, ItemID: "u1",
 			Text: "Wait, one more question.", IsFinal: true}
-		waitLong(t, "the cut to be counted", func() bool { return len(turnCutCounts(t, profile.Name)) == 1 })
+		waitLong(t, "the cut to be counted", func() bool { return countedIn(h.session) == 1 })
 		h.session.Close(context.Background())
 		h.awaitDone(t)
-		assertTurnCuts(t, profile.Name, map[string]int64{cutKey(obs.TurnCutWords, obs.TurnCutLineLater): 1})
+		meter.assert(t, map[string]int64{cutKey(obs.TurnCutWords, obs.TurnCutLineLater): 1})
 	})
 	t.Run("the closing line", func(t *testing.T) {
-		profile := turnCutProfile(provider.QwenProfile())
+		profile, meter := newCutMeter(t, provider.QwenProfile())
 		r := startCutRigOn(t, profile, time.Minute)
 		r.lineTurn(t, shortLineFrames, 100, cutLine)
 		r.interrupt(t, 100, 1) // 2 s of the line left: an interruption
@@ -652,10 +668,10 @@ func TestACutIsCountedOnTheLineItFellOn(t *testing.T) {
 			t.Fatal("the cut ended the call")
 		}
 		r.callerFinal("Wait, when will they call?")
-		waitLong(t, "the cut to be counted", func() bool { return len(turnCutCounts(t, profile.Name)) == 1 })
+		waitLong(t, "the cut to be counted", func() bool { return countedIn(r.session) == 1 })
 		r.session.Close(context.Background())
 		r.awaitDone(t)
-		assertTurnCuts(t, profile.Name, map[string]int64{cutKey(obs.TurnCutWords, obs.TurnCutLineClosing): 1})
+		meter.assert(t, map[string]int64{cutKey(obs.TurnCutWords, obs.TurnCutLineClosing): 1})
 	})
 }
 
