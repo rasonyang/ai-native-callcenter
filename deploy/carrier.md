@@ -167,3 +167,30 @@ How the application treats them:
 - The application log's `ai outbound placed` line carries `ringTimeoutSec`, the
   ring timeout the call was placed with, so a call ended by the carrier before
   that time can be told from one the application cancelled.
+
+## Placing a first test call
+
+Once the trunk is wired, `aicc testcall` inside the app container places one
+real AI outbound call and reports what the call left behind:
+
+```sh
+docker compose exec app aicc testcall --to <number> [--did <caller-id>] [--flow <slug>] [--wait 180s]
+```
+
+- The caller-ID number defaults to `AICC_OUTBOUND_CALLER_ID`; pass `--did` to
+  use another. When the number does not exist the command creates it bound to
+  a built-in one-sentence flow (`aicc_testcall`), so a fresh deployment can
+  place the call with nothing seeded; `--flow` repoints it at a published flow
+  of yours instead.
+- It waits, within `--wait`, for the CDR, and — when the call was answered and
+  recording was started on it — for the recording to be booked. With a spool
+  backend the upload lands seconds after `endedAt`, so a client reading the
+  CDR the moment it exists sees `hasRecording: false`; the CDR's
+  `recordingState` (`NONE` / `PENDING` / `STORED`) is what says a file is
+  still on its way, and the command waits on exactly that distinction.
+- The summary prints the callId, status, hangupCause, answeredAt,
+  ringSec/billSec, the called number only masked with its digit count, the
+  recording state and the transcript line count.
+- Exit codes: `0` answered, `2` placed but not answered, `3` the placement
+  was refused, `4` no CDR within the wait, `5` answered but the recording
+  never arrived within it.

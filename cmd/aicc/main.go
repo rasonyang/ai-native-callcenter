@@ -63,6 +63,8 @@ func main() {
 			handler = runTranscribeRecordings
 		case "doctor":
 			handler = runDoctor
+		case "testcall":
+			handler = runTestCall
 		case "version", "-version", "--version":
 			handler = runVersion
 		}

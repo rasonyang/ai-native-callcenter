@@ -103,6 +103,27 @@ func (e Availability) Valid() bool {
 	}
 }
 
+// Defines values for CDRRecordingState.
+const (
+	CDRRecordingStateNONE    CDRRecordingState = "NONE"
+	CDRRecordingStatePENDING CDRRecordingState = "PENDING"
+	CDRRecordingStateSTORED  CDRRecordingState = "STORED"
+)
+
+// Valid indicates whether the value is a known member of the CDRRecordingState enum.
+func (e CDRRecordingState) Valid() bool {
+	switch e {
+	case CDRRecordingStateNONE:
+		return true
+	case CDRRecordingStatePENDING:
+		return true
+	case CDRRecordingStateSTORED:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for CDRStatus.
 const (
 	CDRStatusANSWERED CDRStatus = "ANSWERED"
@@ -1608,6 +1629,9 @@ type CDR struct {
 	// QueueWaitSec Seconds the caller waited in queue, from joining to being bridged to an agent, or to leaving if they never were. Ringing happens inside this window, so ringSec is a sub-interval of it rather than an addition to it. On a call that passed through several queues it is the first stay's wait, in the queue queueId names; the journey (legs) carries every stay's own wait.
 	QueueWaitSec int `json:"queueWaitSec"`
 
+	// RecordingState Where the call's recording is. STORED: the object exists and `recordings` lists it. PENDING: the switch announced RECORD_START and the object has not been booked yet — the upload lands after hangup, within seconds to a few tens of seconds, and the spool sweep books stragglers, so a client that wants the file reads again instead of concluding there is none. NONE: recording never started on the call, `recordings` stays empty. Replaces guessing from hasRecording alone, which reads false both while a booking is in flight and on a call that was never recorded.
+	RecordingState CDRRecordingState `json:"recordingState"`
+
 	// RingSec Seconds spent ringing. On a call placed to an outside number (callType OUTBOUND), the ringing of the carrier-facing leg, the one dialled to the customer: from its first 180 or 183 provisional response to its answer when it answered, or to its release when it did not; 0 when that leg never sent a 180 or 183 (it answered, or ended, without ringing). This holds whichever way the call ended, so an AI outbound call that a person later took over still reports the customer's ringing, not the agent leg's. For an agent-placed call the carrier-facing leg is the dialled leg that answered, or, when none did, the one that began ringing first. On other calls: for a call a person answered, from the answering leg's creation to its bridge; for one nobody answered, from the first leg dialled to the last one released — a queue that re-offers dials a fresh leg each time, so no single leg holds the answer. For an inbound call the bot answered and that never reached a person, the ringing before the bot answered: from startedAt to answeredAt.
 	//
 	// Not a segment of the call to be added to the others: on a queued call it lies inside queueWaitSec, and on a call that never queued there is no queue window for it to lie inside, so it overlaps whatever else was happening. See totalSec.
@@ -1637,10 +1661,15 @@ type CDR struct {
 	WrapUp *WrapUp `json:"wrapUp,omitempty"`
 }
 
+// CDRRecordingState Where the call's recording is. STORED: the object exists and `recordings` lists it. PENDING: the switch announced RECORD_START and the object has not been booked yet — the upload lands after hangup, within seconds to a few tens of seconds, and the spool sweep books stragglers, so a client that wants the file reads again instead of concluding there is none. NONE: recording never started on the call, `recordings` stays empty. Replaces guessing from hasRecording alone, which reads false both while a booking is in flight and on a call that was never recorded.
+type CDRRecordingState string
+
 // CDRDetail One finished call with everything it left behind, in one round trip.
 type CDRDetail struct {
 	// CDR One finished call. totalSec always equals the sum of its parts.
-	CDR        CDR              `json:"cdr"`
+	CDR CDR `json:"cdr"`
+
+	// Recordings The call's stored recordings. Fills in after hangup — with a spool backend the upload is booked seconds after endedAt — so an empty list right after the call ends does not mean there is no recording; the CDR's recordingState says whether one is still on its way.
 	Recordings []Recording      `json:"recordings"`
 	Transcript []TranscriptLine `json:"transcript"`
 }

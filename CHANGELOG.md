@@ -166,6 +166,24 @@ carries the one-line installer's files.
   enough, that other columns are ignored unless the flow reads them, and that
   a file edited in Excel can be saved as `.xlsx` and imported as it is.
 
+### Added
+
+- **`aicc testcall` places a first AI test call after wiring a carrier trunk**
+  (#538). Run inside the container (`aicc testcall --to <number> [--did …]
+  [--flow …] [--wait 180s]`), it places one call through the configured
+  outbound endpoint, waits for the CDR — and, on an answered call whose
+  recording started, for the object to be booked — and prints a fixed summary
+  with the callee masked. A missing DID is created bound to a built-in
+  one-sentence flow, so a fresh deployment needs nothing seeded. Exit codes
+  separate answered / not answered / placement refused / no CDR in time /
+  answered without the recording in time.
+- **The CDR says its recording is still on its way** (#538): `recordingState`
+  (`NONE` / `PENDING` / `STORED`), derived from the new
+  `cdrs.recording_expected` column the assembler stamps when the switch
+  announces RECORD_START. A client that reads the CDR the moment it exists
+  can now tell "recording started, object pending" from "never recorded"
+  instead of guessing from `hasRecording: false`.
+
 ### Changed
 
 - **The switch image builds FreeSWITCH v1.11.4, up from v1.11.3** (#709).
