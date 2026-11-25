@@ -1,6 +1,8 @@
 import { createFileRoute } from '@tanstack/react-router'
+import { useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 
+import { CopyButton } from '@/components/copy-button'
 import { PageHeader } from '@/components/page-header'
 import { RecordingPlayer } from '@/components/recording-player'
 import { useNameThisPage } from '@/lib/breadcrumb'
@@ -51,7 +53,8 @@ function CallDetail() {
     <>
       <PageHeader
         title={`${cdr.fromNumber || t('cdr.unknownNumber')} → ${cdr.toNumber || '—'}`}
-        description={`${startFormat.format(new Date(cdr.startedAt))} · ${cdr.callId}`}
+        description={startFormat.format(new Date(cdr.startedAt))}
+        actions={<CallIdItem callId={cdr.callId} />}
       />
 
       <div className="mb-4 grid grid-cols-[minmax(0,1fr)_360px] items-start gap-4">
@@ -136,6 +139,29 @@ function CallDetail() {
           </ol>
         )}
       </div>
+    </>
+  )
+}
+
+/**
+ * The id the call is filed under, whole and copyable: it is the trace key in
+ * the logs and the id in webhook deliveries, so it is where an analysis starts
+ * (#714). It sits with the header's actions, which never shrink, so it stays
+ * on one line and the title is what gives way.
+ */
+function CallIdItem({ callId }: { callId: string }) {
+  const { t } = useTranslation()
+  const shown = useRef<HTMLElement>(null)
+  return (
+    <>
+      <span className="text-xs text-muted-foreground">{t('agent.callId')}</span>
+      <code
+        ref={shown}
+        className="inline-flex h-7 items-center whitespace-nowrap rounded-md border bg-background px-2 font-mono text-xs tabular"
+      >
+        {callId}
+      </code>
+      <CopyButton key={callId} value={callId} target={shown} />
     </>
   )
 }

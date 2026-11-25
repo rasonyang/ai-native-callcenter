@@ -510,7 +510,10 @@
       "HUMAN_AGENT": "Agent"
     },
     "noRecord": "No call record",
-    "noRecordHint": "This call has no record in the ledger. Calls that never reached the switch, such as a skipped number, leave none."
+    "noRecordHint": "This call has no record in the ledger. Calls that never reached the switch, such as a skipped number, leave none.",
+    "callIdCopyFailed": "Call ID not copied: open the call to copy it",
+    "callNotFound": "No call has the ID {{callId}}. The list below is not filtered by it.",
+    "callLookupFailed": "Could not look up call {{callId}}: {{reason}}"
   },
   "callbacks": {
     "hint": "Promises the bot made on the phone. Claim one before you ring.",

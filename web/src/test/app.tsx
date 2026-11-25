@@ -17,7 +17,9 @@ import {
  * would measure a width no user ever sees; this one cannot, because there is no
  * second shell to drift from the first.
  *
- * Browser tests only (`*.layout.test.tsx`): it pulls in every route.
+ * It pulls in every route, so it is for the browser tests (`*.layout.test.tsx`)
+ * and for a jsdom test that needs the real route tree: a page that reads its
+ * own route's params, or a move from one page to another.
  */
 
 /** An EventSource that never connects. The shell opens one for the live feed. */

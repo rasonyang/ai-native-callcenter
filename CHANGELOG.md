@@ -66,6 +66,15 @@ carries the one-line installer's files.
   counter `aicc_campaign_lead_verdicts_total{verdict}` counts the verdicts
   written. `docs/flow-authoring.md` section 2.7.1 says what this means for a
   flow's opening and `notes`.
+- **A call's ID can be copied from Call records, and a pasted one opens the
+  call** (#714). The call page shows the ID in full as its own item with a
+  copy button, out of the line under the title. Each row of the list has an
+  icon button beside the play button that copies the row's call ID without
+  opening the call; the list has no ID column. The list's filter box opens a
+  call when it holds a whole call ID, as pasted from a log line or a webhook
+  delivery (surrounding spaces and any letter case are fine); an ID no call has
+  is said to be not found and leaves the list and its filters as they were.
+  Anything else in the box filters by number as before. No contract change.
 
 ### Changed
 
