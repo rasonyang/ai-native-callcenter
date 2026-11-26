@@ -389,6 +389,15 @@ type Session struct {
 	replayTurn        int
 	isReplayWaiting   bool
 	replayStop        func() bool
+	// The opening's tail (#715), from the moment the opening line or its
+	// replay finishes generating with audio, not muted, until the caller has
+	// heard all of it or a flush has taken some of it: isOpeningTailQueued says
+	// it is on its way, framesBehindOpening counts the frames later turns have
+	// queued behind it. The leg's queue is first in, first out, so the opening
+	// has played in full once no more than those are left, whether or not its
+	// own playback marker outlived a later turn's start (settleOpeningTail).
+	isOpeningTailQueued bool
+	framesBehindOpening int
 	// turnOwedUntil is when an asked-for turn that has not started yet stops
 	// counting as the bot's floor; zero is none. See askedForATurn.
 	turnOwedUntil time.Time
@@ -1143,6 +1152,9 @@ func (s *Session) queueFrame(frame []byte) {
 		s.audibleUntil = s.audibleUntil.Add(frameDurationMs * time.Millisecond)
 	}
 	s.framesQueued++
+	if s.isOpeningTailQueued {
+		s.framesBehindOpening++
+	}
 	if !s.isFirstAudioRecorded {
 		s.recordFirstAudio()
 	}
@@ -1606,6 +1618,14 @@ func (s *Session) stopPlayback(endsTheTurn bool) (playedMs int, hadQueued bool) 
 func (s *Session) stopPlaybackLocked(endsTheTurn bool) (playedMs int, hadQueued bool, cleared int) {
 	cleared = s.leg.ClearTx()
 	s.framer.reset()
+	// The opening's tail, if one was on its way: a flush that took only the
+	// frames queued behind it found it played in full (#715).
+	if s.isOpeningTailQueued {
+		s.isOpeningTailQueued = false
+		if cleared <= s.framesBehindOpening {
+			s.ct.markOpeningHeard()
+		}
+	}
 
 	// What was queued, less what never made it out of the queue. Anything
 	// already handed to the wire counts as heard.
@@ -1869,6 +1889,10 @@ func (s *Session) finishTurn(isAbandoned bool) playbackMarker {
 	if hasAudio {
 		s.audioTurns++
 		s.lastAudioTurn = s.turnSeq
+		if s.mutedTurn != s.turnSeq && s.isOpeningTurnLocked(s.turnSeq) {
+			// After the framer's flush: every frame of the opening is queued.
+			s.isOpeningTailQueued, s.framesBehindOpening = true, 0
+		}
 	}
 	if isAbandoned && !hasAudio {
 		s.timer.onResponseAbandoned()
@@ -1922,6 +1946,9 @@ func (s *Session) watchPlayback() {
 		if !drained {
 			continue
 		}
+		// The queue has drained: an opening queued ahead of this turn has been
+		// heard too, its own marker spent or not (#715).
+		s.settleOpeningTail()
 		s.noteOpeningHeard(marker.turn, marker.hasAudio)
 		s.emit(Event{Type: EventTypePlaybackDone, Turn: marker.turn, HasAudio: marker.hasAudio,
 			IsAside: marker.isAside})

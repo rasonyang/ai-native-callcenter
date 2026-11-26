@@ -103,11 +103,31 @@ func (c *callerTurns) markOpeningHeard() {
 
 // isOpeningHeard reports whether the caller has heard the opening, or its
 // replay, to its final clause at least once (callerTurns.isOpeningHeard).
-// A call with no opening line never has.
+// A call with no opening line never has. An opening whose audio has all left
+// the queue by now counts, though no playback marker has said so yet
+// (settleOpeningTail).
 func (s *Session) isOpeningHeard() bool {
+	s.settleOpeningTail()
 	s.ct.mu.Lock()
 	defer s.ct.mu.Unlock()
 	return s.ct.isOpeningHeard
+}
+
+// settleOpeningTail records the opening as heard when its tail, queued when
+// it finished generating (Session.isOpeningTailQueued), has all left the leg's
+// queue: no more frames are waiting than later turns queued behind it. Its own
+// playback marker can miss that, because a turn that starts while the opening
+// still plays (the response a tool result asks for while the replay is heard)
+// makes the marker stale; the flush that ends the tail without it being heard
+// is judged in stopPlaybackLocked.
+func (s *Session) settleOpeningTail() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.isOpeningTailQueued || s.leg.Pending() > s.framesBehindOpening {
+		return
+	}
+	s.isOpeningTailQueued = false
+	s.ct.markOpeningHeard()
 }
 
 // noteCallerStarted records a caller utterance starting. It is called before
