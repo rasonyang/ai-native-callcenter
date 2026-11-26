@@ -255,6 +255,7 @@ func newTalkRigWith(t *testing.T, profile provider.Profile, cfg Config, setup fu
 	if err != nil {
 		t.Fatalf("new session: %v", err)
 	}
+	freezeToolTalkClock(session)
 	if setup != nil {
 		setup(session)
 	}
@@ -272,6 +273,29 @@ func newTalkRigWith(t *testing.T, profile provider.Profile, cfg Config, setup fu
 	}()
 	r.await(t, "READY", func(e Event) bool { return e.Type == EventTypeReady })
 	return r
+}
+
+// freezeToolTalkClock stops the gate's clock, so a hold ends at its cap only
+// when a test moves the clock or holds 2 s of audio, never because a loaded
+// machine took that long between two events. Set before the session's first
+// event.
+func freezeToolTalkClock(s *Session) {
+	frozen := time.Now()
+	s.talkNow = func() time.Time { return frozen }
+}
+
+// awaitTalk waits for cond as waitUntil does, with a deadline a machine as
+// loaded as test-stress makes it (CONTRIBUTING.md) does not reach while the
+// pumps and the collector are only slow.
+func awaitTalk(t *testing.T, what string, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for !cond() {
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for %s", what)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
 }
 
 // talkConfig switches the guards off, so a test exercises the gate alone.
@@ -310,7 +334,7 @@ func (r *talkRig) all(match func(Event) bool) []Event {
 func (r *talkRig) await(t *testing.T, what string, match func(Event) bool) Event {
 	t.Helper()
 	var found Event
-	waitUntil(t, what, func() bool {
+	awaitTalk(t, what, func() bool {
 		e, ok := r.find(match)
 		found = e
 		return ok
@@ -537,7 +561,7 @@ func TestTheHoldEndsAtItsCapAndAToolTalkTurnPastItIsMissed(t *testing.T) {
 		for i := range 101 {
 			r.send(provider.Event{Type: provider.EventTypeAudioDelta, Audio: talkChunk(i)})
 		}
-		waitUntil(t, "the held audio to be released at the cap", func() bool { return len(r.leg.sentFrames()) > 0 })
+		awaitTalk(t, "the held audio to be released at the cap", func() bool { return len(r.leg.sentFrames()) > 0 })
 		r.send(provider.Event{Type: provider.EventTypeOutputTranscript, Text: "工具调用", IsFinal: true},
 			provider.Event{Type: provider.EventTypeResponseDone})
 		if done := r.turnDone(t, 1); done.IsInterrupted || !done.HasAudio {
@@ -558,14 +582,14 @@ func TestTheHoldEndsAtItsCapAndAToolTalkTurnPastItIsMissed(t *testing.T) {
 		r.send(provider.Event{Type: provider.EventTypeResponseStarted},
 			provider.Event{Type: provider.EventTypeOutputTranscript, Text: "工具"},
 			provider.Event{Type: provider.EventTypeAudioDelta, Audio: talkChunk(1)})
-		waitUntil(t, "the chunk to be held", func() bool {
+		awaitTalk(t, "the chunk to be held", func() bool {
 			r.session.mu.Lock()
 			defer r.session.mu.Unlock()
 			return len(r.session.talk.held) == 1
 		})
 		clock.advance(toolTalkHoldCap)
 		r.send(provider.Event{Type: provider.EventTypeAudioDelta, Audio: talkChunk(2)})
-		waitUntil(t, "the held audio to be released at the cap", func() bool { return len(r.leg.sentFrames()) > 0 })
+		awaitTalk(t, "the held audio to be released at the cap", func() bool { return len(r.leg.sentFrames()) > 0 })
 		r.send(provider.Event{Type: provider.EventTypeOutputTranscript, Text: "调用"},
 			provider.Event{Type: provider.EventTypeResponseDone})
 		r.turnDone(t, 1)
@@ -623,7 +647,7 @@ func TestAHeldTurnThatIsCutLosesWhatWasHeld(t *testing.T) {
 	cuts := map[string]func(r *talkRig){
 		"keypress": func(r *talkRig) {
 			r.leg.digits <- "1"
-			waitUntil(t, "the keypress to cut the turn", func() bool {
+			awaitTalk(t, "the keypress to cut the turn", func() bool {
 				_, ok := r.find(func(e Event) bool { return e.Type == EventTypeDigit })
 				return ok
 			})
@@ -647,7 +671,7 @@ func TestAHeldTurnThatIsCutLosesWhatWasHeld(t *testing.T) {
 				provider.Event{Type: provider.EventTypeOutputTranscript, Text: "工具调用"},
 				provider.Event{Type: provider.EventTypeAudioDelta, Audio: talkChunk(1)},
 				provider.Event{Type: provider.EventTypeAudioDelta, Audio: talkChunk(2)})
-			waitUntil(t, "the turn's audio to be held", func() bool {
+			awaitTalk(t, "the turn's audio to be held", func() bool {
 				r.session.mu.Lock()
 				defer r.session.mu.Unlock()
 				return len(r.session.talk.held) == 2
@@ -724,7 +748,7 @@ func TestATurnThatMayHoldAnotherTurnsLateWordsIsNotJudged(t *testing.T) {
 			// its own and no words.
 			r.send(provider.Event{Type: provider.EventTypeOutputTranscript, Text: "工具调用"},
 				provider.Event{Type: provider.EventTypeAudioDelta, Audio: talkChunk(1)})
-			waitUntil(t, "the turn's audio to play at once", func() bool { return len(r.leg.sentFrames()) > 0 })
+			awaitTalk(t, "the turn's audio to play at once", func() bool { return len(r.leg.sentFrames()) > 0 })
 			r.send(provider.Event{Type: provider.EventTypeResponseDone})
 			r.await(t, "the turn's TURN_DONE", func(e Event) bool {
 				return e.Type == EventTypeTurnDone && e.Turn == 2 && e.HasAudio
@@ -832,6 +856,7 @@ func TestADroppedTurnDoesNotAdvanceAWallOfOne(t *testing.T) {
 			var playbacks atomic.Int32
 			h := newClaimsHarnessSetup(t, talkProfile(provider.QwenProfile(), true), talkWallFlow, "en", "",
 				talkConfig(), func(h *claimsHarness) {
+					freezeToolTalkClock(h.session)
 					h.session.afterPlaybackDone = func() { playbacks.Add(1) }
 				})
 			want := int32(1)
@@ -845,13 +870,13 @@ func TestADroppedTurnDoesNotAdvanceAWallOfOne(t *testing.T) {
 			if name == "played" {
 				// Heard before the next turn starts, so its playback is not
 				// superseded.
-				waitUntil(t, "the first reply to be heard", func() bool { return playbacks.Load() == 1 })
+				awaitTalk(t, "the first reply to be heard", func() bool { return playbacks.Load() == 1 })
 			}
 			h.callerSays("no")
 			for _, e := range talkTurn([]string{"Sure, ", "anything else?"}, 3, 10) {
 				h.model.events <- e
 			}
-			waitUntil(t, "the second reply to be heard", func() bool { return playbacks.Load() == want })
+			awaitTalk(t, "the second reply to be heard", func() bool { return playbacks.Load() == want })
 			// The probe's call is on the stream after the second reply's
 			// PLAYBACK_DONE: once it is answered, drive has handled that.
 			h.model.events <- provider.Event{Type: provider.EventTypeResponseStarted}
@@ -884,7 +909,10 @@ func TestAToolTalkTurnThatArmsTheHangupIsUnheardAndTheLineIsStillSaid(t *testing
 	t.Parallel()
 	profile := talkProfile(provider.QwenProfile(), true)
 	toolTalkCounts(t, profile.Name) // the meter provider is set before anything counts
-	h, sink := startOwedLinePath(t, profile, "en", 0)
+	// A cap no loaded machine runs out first: the line's playback ends the call.
+	h, sink := startOwedLinePath(t, profile, "en", time.Minute)
+	t.Cleanup(h.actions.disarm)
+	freezeToolTalkClock(h.session)
 	line := owedLines["en"]
 
 	h.model.events <- provider.Event{Type: provider.EventTypeResponseStarted}
@@ -893,11 +921,11 @@ func TestAToolTalkTurnThatArmsTheHangupIsUnheardAndTheLineIsStillSaid(t *testing
 	h.model.events <- provider.Event{Type: provider.EventTypeAudioDelta, Audio: talkChunk(2)}
 	h.model.events <- provider.Event{Type: provider.EventTypeToolCall, ToolCallID: "fc_1",
 		ToolName: "hangup", ToolArgs: goodbyeHangup}
-	waitUntil(t, "the hangup to be answered", func() bool { return len(h.model.recordedToolResults()) == 1 })
+	awaitTalk(t, "the hangup to be answered", func() bool { return len(h.model.recordedToolResults()) == 1 })
 	h.model.events <- provider.Event{Type: provider.EventTypeAudioDelta, Audio: talkChunk(3)}
 	h.model.events <- provider.Event{Type: provider.EventTypeOutputTranscript, Text: "工具调用", IsFinal: true}
 	h.model.events <- provider.Event{Type: provider.EventTypeResponseDone}
-	waitUntil(t, "the arming turn to end", func() bool {
+	awaitTalk(t, "the arming turn to end", func() bool {
 		h.session.mu.Lock()
 		defer h.session.mu.Unlock()
 		return !h.session.isResponding && h.session.talk.isSettled
@@ -927,28 +955,51 @@ func TestAToolTalkTurnThatArmsTheHangupIsUnheardAndTheLineIsStillSaid(t *testing
 
 // The closing line's own turn is only tool talk: it is dropped as a turn cut
 // before anything was heard, so it neither counts as the line nor runs the
-// ending, and the cap (never moved by it) ends the call, as it does when a
-// line's turn is cut before any of it was queued and nothing follows. Nothing
-// asks for the line again: that is the armed ending's to decide (#262), and it
-// judges only turns that were heard.
-func TestADroppedClosingLineIsNotTheLineAndTheCapEndsTheCall(t *testing.T) {
+// ending, and the cap is neither restarted nor moved by it. The call is left
+// to the cap that was running, as when a line's turn is cut before any of it
+// was queued and nothing follows. Nothing asks for the line again: that is the
+// armed ending's to decide (#262), and it judges only turns that were heard.
+// The cap is long here, so that a loaded machine cannot run it out first; the
+// cap's own end is TestAModelThatNeverSpeaksTheOwedLineEndsAtTheCapWithAWarning's.
+func TestADroppedClosingLineNeitherCountsAsTheLineNorMovesTheCap(t *testing.T) {
 	t.Parallel()
-	h, sink := startOwedLinePath(t, talkProfile(provider.QwenProfile(), true), "en", 300*time.Millisecond)
+	h, _ := startOwedLinePath(t, talkProfile(provider.QwenProfile(), true), "en", time.Minute)
+	t.Cleanup(h.actions.disarm)
+	freezeToolTalkClock(h.session)
 	h.callTool(t, flow.ToolHangup, goodbyeHangup)
 	h.endResponse() // the turn that carried the tool call; no audio
+	h.actions.mu.Lock()
+	capDue := h.actions.capDue
+	h.actions.mu.Unlock()
 
 	for _, e := range talkTurn([]string{"工具调用"}, 3, 1) {
 		h.model.events <- e
 	}
-	h.awaitCallEnded(t, 3*time.Second)
+	// A probe after it: a tool the closing phase does not offer, refused.
+	// Once it is answered, drive has handled the dropped turn's TURN_DONE.
+	h.model.events <- provider.Event{Type: provider.EventTypeResponseStarted}
+	h.model.events <- provider.Event{Type: provider.EventTypeToolCall, ToolCallID: "fc_probe",
+		ToolName: "note_name", ToolArgs: `{"value":"probe"}`}
+	awaitTalk(t, "the probe to be answered", func() bool { return len(h.model.recordedToolResults()) == 2 })
+
 	if n := len(h.leg.sentFrames()); n != 0 {
 		t.Errorf("%d frames of the tool talk reached the leg", n)
 	}
-	if !strings.Contains(sink.String(), "running an armed action at the cap; no closing line was generated") {
-		t.Errorf("the call did not end on the cap:\n%s", sink.String())
+	if h.isCallEnded() {
+		t.Fatal("the call ended on the dropped line")
 	}
-	if n := strings.Count(sink.String(), "hanging up after the farewell"); n != 1 {
-		t.Errorf("the hangup ran %d times, want once", n)
+	h.actions.mu.Lock()
+	defer h.actions.mu.Unlock()
+	if h.actions.armed == nil || h.actions.isLineSpoken || !h.actions.isLineOwed {
+		t.Errorf("armed %v, line spoken %v, owed %v; want the ending armed and the line still owed",
+			h.actions.armed != nil, h.actions.isLineSpoken, h.actions.isLineOwed)
+	}
+	if !h.actions.capDue.Equal(capDue) || h.actions.interruptions != 0 {
+		t.Errorf("cap moved by %v, interruptions %d; want the cap as armed and no interruption",
+			h.actions.capDue.Sub(capDue), h.actions.interruptions)
+	}
+	if got := h.model.spokenLines(); len(got) != 0 {
+		t.Errorf("spoken = %v, want nothing asked for", got)
 	}
 }
 
@@ -965,6 +1016,7 @@ func TestADroppedOpeningReplayIsSaidAgainOnce(t *testing.T) {
 			c.session.holdAfter = clock.after
 			c.session.cfg.OnCutAcknowledged = c.actions.onCutAcknowledged
 			c.session.cfg.Session.OpeningText = openingLine
+			freezeToolTalkClock(c.session)
 		})
 
 	// The opening, its words first as qwen sends them, cut by a greeting.
@@ -973,7 +1025,7 @@ func TestADroppedOpeningReplayIsSaidAgainOnce(t *testing.T) {
 	h.model.events <- provider.Event{Type: provider.EventTypeOutputTranscript, Text: openingLine}
 	h.model.events <- provider.Event{Type: provider.EventTypeAudioDelta, Audio: make([]byte, media.FrameSamples*50)}
 	h.model.events <- provider.Event{Type: provider.EventTypeSpeechStarted, ItemID: "u1"}
-	waitUntil(t, "the cut to be recorded", func() bool {
+	awaitTalk(t, "the cut to be recorded", func() bool {
 		h.session.bc.mu.Lock()
 		defer h.session.bc.mu.Unlock()
 		return h.session.bc.cut != nil
@@ -981,9 +1033,9 @@ func TestADroppedOpeningReplayIsSaidAgainOnce(t *testing.T) {
 	h.model.events <- provider.Event{Type: provider.EventTypeInterrupted, InterruptedBy: provider.InterruptReasonSpeech}
 	h.leg.holdFrames(0)
 	h.model.events <- provider.Event{Type: provider.EventTypeInputTranscript, ItemID: "u1", Text: "hello", IsFinal: true}
-	waitUntil(t, "the replay to wait for the reply", func() bool { return clock.pending() == 1 })
+	awaitTalk(t, "the replay to wait for the reply", func() bool { return clock.pending() == 1 })
 	clock.advance(replayWaitCap)
-	waitUntil(t, "the opening to be asked for again", func() bool { return len(h.model.spokenLines()) == 1 })
+	awaitTalk(t, "the opening to be asked for again", func() bool { return len(h.model.spokenLines()) == 1 })
 	heard := len(h.leg.sentFrames())
 
 	// The replay's turn says only tool talk: the opening is said once more.
@@ -993,7 +1045,7 @@ func TestADroppedOpeningReplayIsSaidAgainOnce(t *testing.T) {
 		for _, e := range talkTurn([]string{"工具调用"}, 3, 10*i)[1:] {
 			h.model.events <- e
 		}
-		waitUntil(t, "the dropped replay to be settled", func() bool {
+		awaitTalk(t, "the dropped replay to be settled", func() bool {
 			h.session.mu.Lock()
 			defer h.session.mu.Unlock()
 			return h.session.talk.isSettled && h.session.mutedTurn == 2+i
@@ -1007,7 +1059,7 @@ func TestADroppedOpeningReplayIsSaidAgainOnce(t *testing.T) {
 	for _, e := range talkTurn([]string{"Sorry, ", "go ahead."}, 2, 50) {
 		h.model.events <- e
 	}
-	waitUntil(t, "a later turn to be settled", func() bool {
+	awaitTalk(t, "a later turn to be settled", func() bool {
 		h.session.mu.Lock()
 		defer h.session.mu.Unlock()
 		return h.session.turnSeq == 4 && h.session.talk.isSettled
