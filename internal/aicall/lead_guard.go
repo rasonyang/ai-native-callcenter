@@ -80,8 +80,9 @@ import (
 // that follows asks for the one turn it always did.
 //
 // One line per judged call (the verdict, the guard, when the final came
-// against the call, the wait), never the words; one count per call
-// (aicc_bot_lead_guard_total{reason, provider}).
+// against the call, the wait, and whether the call's opening had been heard to
+// its final clause by then, isOpeningHeard, #715), never the words; one count
+// per call (aicc_bot_lead_guard_total{reason, provider}).
 
 // leadFinalWait is how long a guarded tool waits for the final transcript of
 // the caller utterance it answered. Owner decision, 2026-11-19.
@@ -162,6 +163,9 @@ func (o *Orchestrator) refusesInterest(event Event, g *interestGuard, session *S
 	if answered != nil {
 		seq = answered.seq
 	}
+	// Logged on every flow and every engine (#715): read before anything
+	// waits, as the state the call was made in.
+	isOpeningHeard := session.isOpeningHeard()
 	var verdict interestVerdict
 	isSameResponse := g.last.isSet && g.last.turn == event.Turn && g.last.seq == seq
 	isSaidAgain := false
@@ -242,7 +246,8 @@ func (o *Orchestrator) refusesInterest(event Event, g *interestGuard, session *S
 		"tool", event.ToolName, "turn", event.Turn, "callerTurn", seq, "guard", guardName,
 		"verdict", verdict.reason(), "isRefused", isRefused, "final", final,
 		"waitedMs", waited.Milliseconds(), "isOpeningSaidAgain", isSaidAgain,
-		"isSameResponse", isSameResponse, "isEndingUnderway", isEndingNear)
+		"isSameResponse", isSameResponse, "isEndingUnderway", isEndingNear,
+		"isOpeningHeard", isOpeningHeard)
 	obs.RecordLeadGuard(reason, o.cfg.Profile.Name)
 	if !isRefused {
 		return "", nil, false
