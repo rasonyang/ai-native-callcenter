@@ -92,8 +92,9 @@ carries the one-line installer's files.
   line as written. And a bot turn whose words are only a tool's name, "工具调用"
   or "tool call" is now held on qwen and dropped before the caller hears any of
   it, logged at WARN with its words: the call goes on as after a turn the
-  caller cut before hearing it, the dead-air prompt picks up the silence, and a
-  dropped opening line is said again. On the other engines such a turn is
+  caller cut before hearing it, the dead-air prompt picks up the silence, a
+  dropped opening line is said again, and a dropped closing line is asked for
+  once more before the call ends. On the other engines such a turn is
   counted and played. The new metric `aicc_bot_tool_talk_total` counts these
   turns by verdict (`DROPPED`, `MISSED`, `CONTAINED` for such words among
   others). Not reproduced on the development stack; the new wording and the
