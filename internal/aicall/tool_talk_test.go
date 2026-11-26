@@ -440,6 +440,34 @@ func TestATurnThatIsOnlyToolTalkIsDroppedUnheardOnQwen(t *testing.T) {
 	}
 }
 
+// The final transcript of a held turn waits for the turn's verdict, so that a
+// dropped turn is muted before anyone reads its words: an event the session
+// handles after the final but before the response's end reaches the stream
+// first, and the final comes with the verdict, right before TURN_DONE.
+func TestAHeldTurnsFinalWaitsForItsVerdict(t *testing.T) {
+	t.Parallel()
+	r := newTalkRig(t, talkProfile(provider.QwenProfile(), true), talkConfig(), talkTools...)
+	script := talkTurn([]string{"工具调用"}, 3, 1)
+	r.send(script[:len(script)-1]...) // all but the response's end; the final is last
+	r.send(provider.Event{Type: provider.EventTypeInputTranscript, Text: "喂？", IsFinal: true})
+	r.await(t, "the caller's words", func(e Event) bool { return e.Type == EventTypeCustomerSaid })
+	r.send(script[len(script)-1])
+	r.turnDone(t, 1)
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var order []EventType
+	for _, e := range r.events {
+		if e.Type == EventTypeCustomerSaid || e.Type == EventTypeTurnDone || (e.Type == EventTypeBotSaid && e.IsFinal) {
+			order = append(order, e.Type)
+		}
+	}
+	want := []EventType{EventTypeCustomerSaid, EventTypeBotSaid, EventTypeTurnDone}
+	if len(order) != len(want) || order[0] != want[0] || order[1] != want[1] || order[2] != want[2] {
+		t.Errorf("order = %v, want %v: the final went out before the verdict", order, want)
+	}
+}
+
 // Tool talk among other words is played whole, in order, and counted once.
 func TestContainedToolTalkIsPlayedAndCounted(t *testing.T) {
 	t.Parallel()
