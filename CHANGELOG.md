@@ -41,6 +41,22 @@ carries the one-line installer's files.
   the intents. `docs/flow-authoring.md` section 2.7.1 says what it means for a
   flow.
 
+### Fixed
+
+- **The end of a bot turn is always reported before the end of its playback**
+  (#627, #692; thanks @sanketpatel32). When a turn's audio had almost finished
+  playing as the model finished the turn, the call could learn that the caller
+  had heard the turn before it learned that the turn was over. Everything that
+  acts on a heard turn then judged it without what the turn's end records: the
+  turns-without-a-tool wall waited one bot reply too many before the goodbye,
+  an armed transfer or hangup could run on a turn that was not the closing
+  line, so the caller never heard the line, a promise the bot made without a
+  tool call was not asked about when the caller had heard it, and a goodbye
+  the bot said without hanging up was ended by the dead-air backstop instead
+  of the short grace after it. The turn's end is now reported first on every
+  path, including an opening held for a callee who speaks first. Found in
+  testing; not seen on a live call.
+
 ## v0.9.2 - 2026-11-25
 
 ### Upgrade notes
