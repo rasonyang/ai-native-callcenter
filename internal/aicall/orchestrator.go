@@ -700,9 +700,14 @@ func (o *Orchestrator) drive(ctx context.Context, session *Session,
 				if event.IsFinal && event.IsBackchannel {
 					// An acknowledgement said over the bot, held and
 					// declined: the caller's words in the transcript, and
-					// nothing else. The flow, the farewell watch and the
-					// dead-air accounting never hear it.
+					// nothing else. The farewell watch and the dead-air
+					// accounting never hear it; the flow hears only the
+					// count, so a run of acknowledgement-only turns that
+					// drew no tool call cannot hold the call open (#635).
 					recorder.say(store.SpeakerCustomer, event.Text)
+					if moved := runtime.OnCallerAcknowledged(); moved != "" {
+						o.afterMove(moved, session, runtime, actions, log)
+					}
 				} else if event.IsFinal {
 					recorder.say(store.SpeakerCustomer, event.Text)
 					runtime.OnCallerSpoke(event.Text)

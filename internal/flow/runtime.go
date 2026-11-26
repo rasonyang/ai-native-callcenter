@@ -648,13 +648,15 @@ func (r *Runtime) RefuseAsUnconfirmed(name string) string {
 func (r *Runtime) RefuseAsAcknowledgement(name string, isOpeningSaidAgain bool) string {
 	r.log.Info("tool refused: the caller only acknowledged, it is not an answer",
 		"tool", name, "node", r.engine.NodeID(), "isOpeningSaidAgain", isOpeningSaidAgain)
-	reason := "the caller only acknowledged what was said (a short \"mm-hmm\" or \"okay\"); " +
-		"that is not an answer, so " + name + " was not carried out"
+	reason := "the caller only acknowledged what was said — a few words that cut the bot short, not an answer " +
+		"to what was asked — so " + name + " was not carried out. Put the question to them again; " +
+		"their answer to it counts, a short \"okay\" or \"yes\" included"
 	if isOpeningSaidAgain {
 		reason += ". The opening is said to them again; wait for their answer to it"
 	}
 	if r.engine.Lang() == LangZH {
-		reason = "来电者只是应了一声(如“嗯”“好的”),并没有回答问题,所以没有执行 " + name
+		reason = "来电者只是应了一声,打断了机器人,并没有回答问题,所以没有执行 " + name +
+			"。请把刚才的问题再问一遍,对方的回答就作数,一句简短的“好的”或“好”也算回答"
 		if isOpeningSaidAgain {
 			reason += "。开场白会再对他说一遍,等对方回答之后再继续"
 		}
@@ -738,6 +740,11 @@ func (r *Runtime) RefuseWhileAnswering(name string, isTurnAsked bool) string {
 // OnNoInput reports dead air to the flow, returning the new phase if the flow
 // treats silence as a reason to move on.
 func (r *Runtime) OnNoInput() string { return r.engine.OnNoInput() }
+
+// OnCallerAcknowledged reports a finished caller utterance that was only an
+// acknowledgement said over the bot and held, returning the new phase when
+// the run of such turns hit its bound (Engine.OnCallerAcknowledged).
+func (r *Runtime) OnCallerAcknowledged() string { return r.engine.OnCallerAcknowledged() }
 
 // OnCallerSpoke reports a finished caller utterance by its transcript. An
 // empty one is ignored; words end a run of silence and give the next bot turn

@@ -31,12 +31,12 @@ var slotNamePattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]*$`)
 // the first turn on.
 var engineSlots = []string{
 	"caller", "entry", "did", "lang", "language", "node", "turns", "turnsWithoutTool",
-	"lastTool", "noInput.count",
+	"lastTool", "noInput.count", "ackOnly.count",
 }
 
 // reservedSlotNames cannot be claimed by a slot tool: the engine's own, and the
 // roots of the namespaces it fills.
-var reservedSlotNames = append(slices.Clone(engineSlots), "result", "userData", "noInput")
+var reservedSlotNames = append(slices.Clone(engineSlots), "result", "userData", "noInput", "ackOnly")
 
 // ModelParameters is the JSON Schema the model is given for the tool. A slot
 // tool's is generated, so a flow cannot misdescribe it.
