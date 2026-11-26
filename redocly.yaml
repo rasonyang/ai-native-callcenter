@@ -5,3 +5,9 @@
 # per-event-type SSE payloads).
 extends:
   - recommended
+rules:
+  no-invalid-schema-examples: error
+  # Recommended lints media-type examples at warn; the operations integrators
+  # meet first now carry them, so an example that drifts from its schema must
+  # fail the lint, not pass with a notice nobody reads.
+  no-invalid-media-type-examples: error

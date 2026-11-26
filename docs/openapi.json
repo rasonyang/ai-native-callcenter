@@ -1249,6 +1249,68 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/CallList"
+                },
+                "examples": {
+                  "liveFloor": {
+                    "summary": "One live call, talking to an agent after the bot",
+                    "value": {
+                      "items": [
+                        {
+                          "callId": "01a1c5df-9644-78a1-8000-123456789abc",
+                          "callType": "OUTBOUND",
+                          "state": "RUNNING",
+                          "language": "en",
+                          "parties": [
+                            {
+                              "partyId": "01a1c5df-968a-71b2-8000-a1b2c3d4e5f6",
+                              "channelId": "01a1c5df-9658-72ab-8000-c0ffee001122",
+                              "role": "ORIGINATOR",
+                              "state": "TALKING",
+                              "number": "+18005550167",
+                              "otherNumber": "1001",
+                              "createdAt": "2026-11-10T14:32:07Z",
+                              "answeredAt": "2026-11-10T14:32:19Z"
+                            },
+                            {
+                              "partyId": "01a1c5df-c8bc-73c4-8000-b2c3d4e5f6a1",
+                              "channelId": "01a1c5df-c9a0-7b11-8000-b07aabbccdd1",
+                              "role": "TARGET",
+                              "state": "RELEASED",
+                              "number": "8005550199",
+                              "otherNumber": "+18005550167",
+                              "isBotLeg": true,
+                              "createdAt": "2026-11-10T14:32:20Z",
+                              "answeredAt": "2026-11-10T14:32:21Z",
+                              "releasedAt": "2026-11-10T14:32:47Z"
+                            },
+                            {
+                              "partyId": "01a1c5e0-dbbc-75d6-8000-c3d4e5f6a1b2",
+                              "channelId": "01a1c5e0-db10-7c22-8000-c1a2b3c4d5e6",
+                              "role": "TARGET",
+                              "state": "TALKING",
+                              "number": "1001",
+                              "otherNumber": "+18005550167",
+                              "agentId": "01a1c478-a228-7222-8000-222233334444",
+                              "createdAt": "2026-11-10T14:33:05Z",
+                              "answeredAt": "2026-11-10T14:33:16Z"
+                            }
+                          ],
+                          "userData": {
+                            "accountId": "ACC-2204",
+                            "crmCaseId": "CASE-44821",
+                            "triage": "initial"
+                          },
+                          "queue": {
+                            "name": "support-en",
+                            "joinedAt": "2026-11-10T14:32:47Z",
+                            "bridgedAt": "2026-11-10T14:33:19Z"
+                          },
+                          "createdAt": "2026-11-10T14:32:07Z"
+                        }
+                      ]
+                    },
+                    "description": "The AI outbound call of createCall's example, mid-conversation: the customer leg bridged to Wei's phone, the bot leg released when the caller left the queue."
+                  }
                 }
               }
             }
@@ -1307,6 +1369,38 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/CreateCallRequest"
+              },
+              "examples": {
+                "aiOutbound": {
+                  "summary": "Dial a customer and hand the answer to the bot behind the DID",
+                  "value": {
+                    "callId": "01a1c5df-9644-78a1-8000-123456789abc",
+                    "kind": "AI_OUTBOUND",
+                    "to": "+18005550167",
+                    "did": "8005550199",
+                    "language": "en",
+                    "userData": {
+                      "accountId": "ACC-2204",
+                      "crmCaseId": "CASE-44821",
+                      "triage": "initial"
+                    }
+                  },
+                  "description": "An API-key caller needs calls:create and calls:create:ai. The client-minted callId makes the request safe to retry."
+                },
+                "agentOutbound": {
+                  "summary": "Click-to-dial: raise an agent's phone first, then the destination",
+                  "value": {
+                    "callId": "01a1c5a1-0000-7abc-8000-fedcba098765",
+                    "kind": "AGENT_OUTBOUND",
+                    "to": "+18005550167",
+                    "extensionNumber": "1001",
+                    "userData": {
+                      "accountId": "ACC-2204",
+                      "crmCaseId": "CASE-44821"
+                    }
+                  },
+                  "description": "A supervisor or an API key names the extension; a signed-in agent may omit it to dial from the phone they signed in at."
+                }
               }
             }
           }
@@ -1318,6 +1412,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/CreateCallResponse"
+                },
+                "examples": {
+                  "duplicateRetry": {
+                    "summary": "The callId was already placed — no second call",
+                    "value": {
+                      "callId": "01a1c5df-9644-78a1-8000-123456789abc",
+                      "isDuplicate": true
+                    },
+                    "description": "A retry with the same client-minted callId answers this, whether the first attempt answered 201, 202 or is still being placed."
+                  }
                 }
               }
             }
@@ -1328,6 +1432,14 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/CreateCallResponse"
+                },
+                "examples": {
+                  "placed": {
+                    "summary": "The call is being placed",
+                    "value": {
+                      "callId": "01a1c5df-9644-78a1-8000-123456789abc"
+                    }
+                  }
                 }
               }
             }
@@ -1338,24 +1450,149 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/CreateCallResponse"
+                },
+                "examples": {
+                  "placementUnconfirmed": {
+                    "summary": "The switch has not confirmed — the customer may still be called",
+                    "value": {
+                      "callId": "01a1c5df-9644-78a1-8000-123456789abc"
+                    }
+                  }
                 }
               }
             }
           },
           "400": {
-            "$ref": "#/components/responses/BadRequest"
+            "description": "The request is malformed: unparseable body or an invalid identifier. Codes VALIDATION_FAILED, USER_DATA_TOO_LARGE.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "examples": {
+                  "userDataTooLarge": {
+                    "summary": "A userData value is over the byte limit",
+                    "value": {
+                      "error": {
+                        "code": "USER_DATA_TOO_LARGE",
+                        "message": "userData[\"notes\"] is 2031 bytes, at most 1024 are accepted",
+                        "params": {
+                          "maxKeys": 32,
+                          "maxValueBytes": 1024
+                        }
+                      }
+                    },
+                    "description": "Refused before anything is dialled: a call written with half a customer's details is worse than none. Byte counts, not characters."
+                  }
+                }
+              }
+            }
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
           "403": {
-            "$ref": "#/components/responses/Forbidden"
+            "description": "The identity lacks the role, the CSRF header is missing, the account is suspended, or the account is not an agent. Codes FORBIDDEN, USER_SUSPENDED, NOT_CALL_PARTY. An AI_OUTBOUND request from a credential holding calls:create but not calls:create:ai answers INSUFFICIENT_SCOPE, params.requiredScope naming what is missing.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "examples": {
+                  "insufficientScope": {
+                    "summary": "The credential cannot start a bot on a number",
+                    "value": {
+                      "error": {
+                        "code": "INSUFFICIENT_SCOPE",
+                        "message": "starting the bot on a number is not the same act as placing a call",
+                        "params": {
+                          "requiredScope": "calls:create:ai"
+                        }
+                      }
+                    },
+                    "description": "The second scope is stated by x-body-scopes on this operation: a key issued for click-to-dial carries calls:create and stops here."
+                  }
+                }
+              }
+            }
           },
           "409": {
-            "$ref": "#/components/responses/Conflict"
+            "description": "The request collides with current state. For createCall: the DID is at its outbound line limit (DID_CHANNELS_EXHAUSTED), the deployment cannot dial out (OUTBOUND_NOT_CONFIGURED), or something the request names cannot run as asked (CONFLICT: no number marked default-outbound, a DID with no published flow, a callback somebody else holds, a phone not registered or not answering). Nothing was placed and no CDR was written.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "examples": {
+                  "didChannelsExhausted": {
+                    "summary": "The DID is at its outbound line limit",
+                    "value": {
+                      "error": {
+                        "code": "DID_CHANNELS_EXHAUSTED",
+                        "message": "the number is at its outbound line limit; retry when a call on it ends"
+                      }
+                    },
+                    "description": "The DID's maxOutboundChannels sells as many lines as the carrier gives it: single calls are refused, a campaign would wait."
+                  },
+                  "outboundNotConfigured": {
+                    "summary": "The deployment has no outbound endpoint",
+                    "value": {
+                      "error": {
+                        "code": "OUTBOUND_NOT_CONFIGURED",
+                        "message": "this deployment has no outbound endpoint configured (AICC_OUTBOUND_ENDPOINT); see deploy/carrier.md"
+                      }
+                    },
+                    "description": "AI_OUTBOUND cannot run without one; AGENT_OUTBOUND still can — the code names which is broken."
+                  }
+                }
+              }
+            }
           },
           "422": {
-            "$ref": "#/components/responses/UnprocessableEntity"
+            "description": "The body parsed but a field is missing or invalid. For createCall: VALIDATION_FAILED names the offender in params.field (and params.rule where there is one), a listed destination is refused with NUMBER_ON_DNC, and a DID that cannot place calls with DID_NOT_OUTBOUND. Nothing was placed and no CDR was written.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "examples": {
+                  "numberOnDnc": {
+                    "summary": "The destination is on the do-not-call list",
+                    "value": {
+                      "error": {
+                        "code": "NUMBER_ON_DNC",
+                        "message": "that number is on the do-not-call list"
+                      }
+                    },
+                    "description": "Compared as canonical E.164 — national input is completed with the deployment's default country code first. dnc:write takes the number back off the list."
+                  },
+                  "didNotOutbound": {
+                    "summary": "The DID cannot place calls",
+                    "value": {
+                      "error": {
+                        "code": "DID_NOT_OUTBOUND",
+                        "message": "the DID does not allow outbound calls; set allowOutbound on it first"
+                      }
+                    },
+                    "description": "An AI_OUTBOUND request names the DID it presents as caller id; updateDID (PUT /dids/{didId}) sets allowOutbound on it."
+                  },
+                  "callIdNotUuidV7": {
+                    "summary": "The client-minted callId is not a UUIDv7",
+                    "value": {
+                      "error": {
+                        "code": "VALIDATION_FAILED",
+                        "message": "callId must be a UUIDv7 (version 7, RFC 4122 variant); leave it out to have one minted",
+                        "params": {
+                          "field": "callId",
+                          "rule": "UUID_V7"
+                        }
+                      }
+                    },
+                    "description": "A client-minted id orders with time, which is what makes idempotent retries list cleanly beside their calls."
+                  }
+                }
+              }
+            }
           },
           "502": {
             "$ref": "#/components/responses/BadGateway"
@@ -1770,7 +2007,8 @@
             "required": true,
             "schema": {
               "type": "string",
-              "format": "uuid"
+              "format": "uuid",
+              "example": "01a1c5df-9644-78a1-8000-123456789abc"
             }
           }
         ],
@@ -1791,7 +2029,26 @@
             "$ref": "#/components/responses/NotFound"
           },
           "409": {
-            "$ref": "#/components/responses/Conflict"
+            "description": "The request collides with current state: the call has no leg at an extension to hang up (CONFLICT). An agent's own calls end through their leg; a call with no agent leg — one the bot still holds — cannot be ended through this operation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "examples": {
+                  "noExtensionLeg": {
+                    "summary": "The call has no leg at an extension",
+                    "value": {
+                      "error": {
+                        "code": "CONFLICT",
+                        "message": "this call has no leg at an extension to hang up"
+                      }
+                    },
+                    "description": "An outbound call still on its way to the bot has a customer leg and a bot leg and no phone to hang up — the answer for it."
+                  }
+                }
+              }
+            }
           },
           "500": {
             "$ref": "#/components/responses/InternalError"
@@ -1830,7 +2087,8 @@
             "required": true,
             "schema": {
               "type": "string",
-              "format": "uuid"
+              "format": "uuid",
+              "example": "01a1c5df-9644-78a1-8000-123456789abc"
             }
           }
         ],
@@ -1840,6 +2098,15 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/TransferRequest"
+              },
+              "examples": {
+                "backToQueue": {
+                  "summary": "Send the caller back to the English support queue",
+                  "value": {
+                    "destination": "7001"
+                  },
+                  "description": "A queue extension or a dialable number — 1 to 20 digits with an optional leading +. The agent's own leg ends when the far end moves; the caller waits for the next answer."
+                }
               }
             }
           }
@@ -1861,8 +2128,35 @@
             "$ref": "#/components/responses/NotFound"
           },
           "409": {
-            "$ref": "#/components/responses/Conflict",
-            "description": "The call is INTERNAL: code OPERATION_NOT_ALLOWED_FOR_CALL_TYPE. One extension calling another has no third party to pass it to. Or a transfer of the caller is already on its way and the switch has not confirmed it: code TRANSFER_IN_PROGRESS. Nothing was sent; the outcome of the first arrives on the event stream."
+            "description": "The call is INTERNAL: code OPERATION_NOT_ALLOWED_FOR_CALL_TYPE. One extension calling another has no third party to pass it to. Or a transfer of the caller is already on its way and the switch has not confirmed it: code TRANSFER_IN_PROGRESS. Nothing was sent; the outcome of the first arrives on the event stream.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "examples": {
+                  "internalCall": {
+                    "summary": "Transfer refused on an INTERNAL call",
+                    "value": {
+                      "error": {
+                        "code": "OPERATION_NOT_ALLOWED_FOR_CALL_TYPE",
+                        "message": "this is not available on an internal call"
+                      }
+                    }
+                  },
+                  "transferInProgress": {
+                    "summary": "A transfer is already on its way",
+                    "value": {
+                      "error": {
+                        "code": "TRANSFER_IN_PROGRESS",
+                        "message": "a transfer of this caller is already on its way and the switch has not confirmed it; its outcome arrives on the event stream"
+                      }
+                    },
+                    "description": "Do not retry: a second transfer while the first is unconfirmed would race it. The leg's events settle it, or a minute does."
+                  }
+                }
+              }
+            }
           },
           "422": {
             "$ref": "#/components/responses/UnprocessableEntity"
@@ -2091,7 +2385,8 @@
             "required": true,
             "schema": {
               "type": "string",
-              "format": "uuid"
+              "format": "uuid",
+              "example": "01a1c5df-9644-78a1-8000-123456789abc"
             }
           },
           {
@@ -2125,6 +2420,130 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/CallTranscript"
+                },
+                "examples": {
+                  "liveTranscript": {
+                    "summary": "The call mid-conversation: bot phase, then the agent's ASR lines",
+                    "value": {
+                      "items": [
+                        {
+                          "seq": 1,
+                          "occurredAt": "2026-11-10T14:32:22.300Z",
+                          "speaker": "BOT",
+                          "kind": "TEXT",
+                          "content": {
+                            "text": "Hi, this is NovaNet Support calling about your open case. Is now a good time?"
+                          },
+                          "offsetMs": 3300,
+                          "source": "MODEL"
+                        },
+                        {
+                          "seq": 2,
+                          "occurredAt": "2026-11-10T14:32:27.600Z",
+                          "speaker": "CUSTOMER",
+                          "kind": "TEXT",
+                          "content": {
+                            "text": "Sure — my internet has been dropping all morning."
+                          },
+                          "offsetMs": 8600,
+                          "source": "MODEL"
+                        },
+                        {
+                          "seq": 3,
+                          "occurredAt": "2026-11-10T14:32:30.200Z",
+                          "speaker": "BOT",
+                          "kind": "TEXT",
+                          "content": {
+                            "text": "I am sorry to hear that. I can look into it, or connect you to our support team."
+                          },
+                          "offsetMs": 11200,
+                          "source": "MODEL"
+                        },
+                        {
+                          "seq": 4,
+                          "occurredAt": "2026-11-10T14:32:38.900Z",
+                          "speaker": "CUSTOMER",
+                          "kind": "TEXT",
+                          "content": {
+                            "text": "I would rather speak to someone about a technician visit."
+                          },
+                          "offsetMs": 19900,
+                          "source": "MODEL"
+                        },
+                        {
+                          "seq": 5,
+                          "occurredAt": "2026-11-10T14:32:40.600Z",
+                          "speaker": "BOT",
+                          "kind": "TOOL_CALL",
+                          "content": {
+                            "name": "transfer_to_agent",
+                            "args": "{\"queue\":\"support-en\",\"reason\":\"caller asked for a person\",\"summary\":\"Internet dropping since this morning; customer wants a technician visit.\"}"
+                          },
+                          "offsetMs": 21600,
+                          "source": "MODEL"
+                        },
+                        {
+                          "seq": 6,
+                          "occurredAt": "2026-11-10T14:32:40.900Z",
+                          "speaker": "BOT",
+                          "kind": "TOOL_RESULT",
+                          "content": {
+                            "name": "transfer_to_agent",
+                            "output": "{\"ok\":\"1\",\"queue\":\"support-en\"}",
+                            "movedTo": "finish_transfer"
+                          },
+                          "offsetMs": 21900,
+                          "source": "MODEL"
+                        },
+                        {
+                          "seq": 7,
+                          "occurredAt": "2026-11-10T14:32:42.500Z",
+                          "speaker": "BOT",
+                          "kind": "TEXT",
+                          "content": {
+                            "text": "Certainly — I am putting you through to the support team now. Please stay on the line."
+                          },
+                          "offsetMs": 23500,
+                          "source": "MODEL"
+                        },
+                        {
+                          "seq": 8,
+                          "occurredAt": "2026-11-10T14:33:21.400Z",
+                          "speaker": "HUMAN_AGENT",
+                          "kind": "TEXT",
+                          "content": {
+                            "text": "Hi, this is Wei from NovaNet support. Thanks for holding."
+                          },
+                          "partyId": "01a1c5e0-dbbc-75d6-8000-c3d4e5f6a1b2",
+                          "agentId": "01a1c478-a228-7222-8000-222233334444",
+                          "offsetMs": 62400,
+                          "language": "en",
+                          "source": "ASR",
+                          "provider": "openai",
+                          "utteranceId": "HUMAN_AGENT:item_9f3ac2"
+                        },
+                        {
+                          "seq": 9,
+                          "occurredAt": "2026-11-10T14:33:26.800Z",
+                          "speaker": "CUSTOMER",
+                          "kind": "TEXT",
+                          "content": {
+                            "text": "My connection drops every few minutes since this morning."
+                          },
+                          "partyId": "01a1c5e0-dbbc-75d6-8000-c3d4e5f6a1b2",
+                          "offsetMs": 67800,
+                          "language": "en",
+                          "source": "ASR",
+                          "provider": "openai",
+                          "utteranceId": "CUSTOMER:item_b81e04"
+                        }
+                      ],
+                      "nextSinceSeq": 9,
+                      "isLive": true,
+                      "state": "LIVE"
+                    },
+                    "description": "MODEL lines are the model's own transcript of the bot phase and carry no party; ASR lines name the agent leg they came from. Tail with sinceSeq=nextSinceSeq and the event stream."
+                  }
                 }
               }
             }
@@ -3552,7 +3971,8 @@
             "required": true,
             "schema": {
               "type": "string",
-              "format": "uuid"
+              "format": "uuid",
+              "example": "01a1c478-aac0-7444-8000-444455556666"
             }
           }
         ],
@@ -3562,6 +3982,15 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/FlowPublish"
+              },
+              "examples": {
+                "withNote": {
+                  "summary": "Publish with a note the revision keeps",
+                  "value": {
+                    "note": "Speak the transfer-out line before the caller hears hold music"
+                  },
+                  "description": "Optional — the body itself is optional. The note is kept with the immutable revision, so a later reader can see why it went live."
+                }
               }
             }
           }
@@ -3573,6 +4002,22 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Flow"
+                },
+                "examples": {
+                  "published": {
+                    "summary": "The flow, pointing at its new revision",
+                    "value": {
+                      "flowId": "01a1c478-aac0-7444-8000-444455556666",
+                      "slug": "novanet_support",
+                      "name": "NovaNet support",
+                      "publishedRevisionId": "01a1c478-af0c-7555-8000-555566667777",
+                      "publishedAt": "2026-11-10T09:20:04Z",
+                      "hasUnpublishedChanges": false,
+                      "createdAt": "2026-10-02T08:00:00Z",
+                      "updatedAt": "2026-11-10T09:20:04Z"
+                    },
+                    "description": "Calls starting now run the new revision; calls already in progress keep the one they started on."
+                  }
                 }
               }
             }
@@ -3590,10 +4035,56 @@
             "$ref": "#/components/responses/NotFound"
           },
           "409": {
-            "$ref": "#/components/responses/Conflict"
+            "description": "The request collides with current state: publishing this revision would hand a campaign that has not finished a way to a person — code CAMPAIGN_FLOW_HAS_TRANSFER, params.campaigns counting how many. Cancel or finish the campaign, or remove the transfer.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "examples": {
+                  "campaignBlock": {
+                    "summary": "A live campaign dials this flow",
+                    "value": {
+                      "error": {
+                        "code": "CAMPAIGN_FLOW_HAS_TRANSFER",
+                        "message": "this revision can transfer the caller to a person, and a campaign that has not finished dials with this flow; cancel the campaign or remove the transfer",
+                        "params": {
+                          "campaigns": 1
+                        }
+                      }
+                    },
+                    "description": "A campaign call has no way to a person, so a flow that offers transfer_to_agent cannot go live under one."
+                  }
+                }
+              }
+            }
           },
           "422": {
-            "$ref": "#/components/responses/UnprocessableEntity"
+            "description": "The body parsed but a field is missing or invalid. For publishFlow: VALIDATION_FAILED names the offender, and TERMINAL_ANNOUNCE_REQUIRED names the phases an announce would have to cover on this deployment's speech provider, in params.nodes.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "examples": {
+                  "missingAnnounce": {
+                    "summary": "A terminal phase the provider cannot speak",
+                    "value": {
+                      "error": {
+                        "code": "TERMINAL_ANNOUNCE_REQUIRED",
+                        "message": "flow novanet_support cannot run on this deployment: its speech provider cannot be prompted to speak by text, so a phase the call does not leave needs an announce of its own; these have none: farewell",
+                        "params": {
+                          "nodes": [
+                            "farewell"
+                          ]
+                        }
+                      }
+                    },
+                    "description": "The spec is not malformed — the same flow publishes where the provider can be prompted. The phases listed need an announce of their own here."
+                  }
+                }
+              }
+            }
           },
           "503": {
             "$ref": "#/components/responses/ServiceUnavailable"
@@ -3803,6 +4294,129 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/CDRList"
+                },
+                "examples": {
+                  "page": {
+                    "summary": "A page: the transferred outbound call, and one the bot contained",
+                    "value": {
+                      "items": [
+                        {
+                          "callId": "01a1c5df-9644-78a1-8000-123456789abc",
+                          "startedAt": "2026-11-10T14:32:07Z",
+                          "answeredAt": "2026-11-10T14:32:19Z",
+                          "endedAt": "2026-11-10T14:38:03Z",
+                          "callType": "OUTBOUND",
+                          "language": "en",
+                          "fromNumber": "8005550199",
+                          "toNumber": "+18005550167",
+                          "did": "8005550199",
+                          "flowId": "01a1c478-aac0-7444-8000-444455556666",
+                          "queueId": "01a1c478-9ddc-7111-8000-111122223333",
+                          "agentIds": [
+                            "01a1c478-a228-7222-8000-222233334444",
+                            "01a1c478-a674-7333-8000-333344445555"
+                          ],
+                          "primaryAgentId": "01a1c478-a228-7222-8000-222233334444",
+                          "ringSec": 11,
+                          "botSec": 26,
+                          "queueWaitSec": 32,
+                          "talkSec": 265,
+                          "billSec": 344,
+                          "totalSec": 356,
+                          "status": "ANSWERED",
+                          "hangupCause": "NORMAL_CLEARING",
+                          "isContained": false,
+                          "hasRecording": true,
+                          "userData": {
+                            "accountId": "ACC-2204",
+                            "botReason": "caller asked for a person",
+                            "botSummary": "Internet dropping since this morning; customer wants a technician visit.",
+                            "callbackReason": "technician visit",
+                            "crmCaseId": "CASE-44821",
+                            "orderId": "ORD-2026-1177"
+                          },
+                          "tech": {
+                            "callerChannelId": "01a1c5df-9658-72ab-8000-c0ffee001122",
+                            "ringStartedAt": "2026-11-10T14:32:08.214Z",
+                            "endedBy": "PEER",
+                            "switchBillSec": 344
+                          },
+                          "legs": [
+                            {
+                              "kind": "BOT",
+                              "label": "novanet_support",
+                              "durationSec": 26
+                            },
+                            {
+                              "kind": "QUEUE",
+                              "label": "support-en",
+                              "durationSec": 32
+                            },
+                            {
+                              "kind": "AGENT",
+                              "label": "1001",
+                              "durationSec": 88
+                            },
+                            {
+                              "kind": "QUEUE",
+                              "label": "support-en",
+                              "durationSec": 18
+                            },
+                            {
+                              "kind": "AGENT",
+                              "label": "1000",
+                              "durationSec": 183
+                            }
+                          ],
+                          "wrapUp": {
+                            "agentId": "01a1c478-a228-7222-8000-222233334444",
+                            "dispositionCode": "ESCALATED",
+                            "dispositionLabel": "Escalated",
+                            "note": "Customer needs an on-site technician; transferred to Amy in support-en.",
+                            "createdAt": "2026-11-10T14:35:12Z",
+                            "isConfirmed": true
+                          }
+                        },
+                        {
+                          "callId": "01a1c5f0-219e-79ab-8000-9999aaaabbbb",
+                          "startedAt": "2026-11-10T14:05:12Z",
+                          "answeredAt": "2026-11-10T14:05:15Z",
+                          "endedAt": "2026-11-10T14:07:38Z",
+                          "callType": "INBOUND",
+                          "language": "en",
+                          "fromNumber": "+13125550142",
+                          "toNumber": "8005550199",
+                          "did": "8005550199",
+                          "flowId": "01a1c478-aac0-7444-8000-444455556666",
+                          "ringSec": 3,
+                          "botSec": 143,
+                          "queueWaitSec": 0,
+                          "talkSec": 0,
+                          "billSec": 143,
+                          "totalSec": 146,
+                          "status": "ANSWERED",
+                          "hangupCause": "NORMAL_CLEARING",
+                          "isContained": true,
+                          "hasRecording": true,
+                          "userData": {
+                            "botReason": "CALLER_GOODBYE"
+                          },
+                          "tech": {
+                            "callerChannelId": "01a1c5f0-1c44-7d99-8000-ffee00112233"
+                          },
+                          "legs": [
+                            {
+                              "kind": "BOT",
+                              "label": "novanet_support",
+                              "durationSec": 143
+                            }
+                          ]
+                        }
+                      ],
+                      "total": 2
+                    },
+                    "description": "Newest first. isContained is the containment figure; a call the bot handed to a person reports it false and names the people it reached in agentIds and legs."
+                  }
                 }
               }
             }
@@ -4136,7 +4750,8 @@
             "required": true,
             "schema": {
               "type": "string",
-              "format": "uuid"
+              "format": "uuid",
+              "example": "01a1c5df-9644-78a1-8000-123456789abc"
             }
           }
         ],
@@ -4147,6 +4762,310 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/CDRDetail"
+                },
+                "examples": {
+                  "finishedCall": {
+                    "summary": "The same call, finished: CDR, transcript and recording",
+                    "value": {
+                      "cdr": {
+                        "callId": "01a1c5df-9644-78a1-8000-123456789abc",
+                        "startedAt": "2026-11-10T14:32:07Z",
+                        "answeredAt": "2026-11-10T14:32:19Z",
+                        "endedAt": "2026-11-10T14:38:03Z",
+                        "callType": "OUTBOUND",
+                        "language": "en",
+                        "fromNumber": "8005550199",
+                        "toNumber": "+18005550167",
+                        "did": "8005550199",
+                        "flowId": "01a1c478-aac0-7444-8000-444455556666",
+                        "queueId": "01a1c478-9ddc-7111-8000-111122223333",
+                        "agentIds": [
+                          "01a1c478-a228-7222-8000-222233334444",
+                          "01a1c478-a674-7333-8000-333344445555"
+                        ],
+                        "primaryAgentId": "01a1c478-a228-7222-8000-222233334444",
+                        "ringSec": 11,
+                        "botSec": 26,
+                        "queueWaitSec": 32,
+                        "talkSec": 265,
+                        "billSec": 344,
+                        "totalSec": 356,
+                        "status": "ANSWERED",
+                        "hangupCause": "NORMAL_CLEARING",
+                        "isContained": false,
+                        "hasRecording": true,
+                        "userData": {
+                          "accountId": "ACC-2204",
+                          "botReason": "caller asked for a person",
+                          "botSummary": "Internet dropping since this morning; customer wants a technician visit.",
+                          "callbackReason": "technician visit",
+                          "crmCaseId": "CASE-44821",
+                          "orderId": "ORD-2026-1177"
+                        },
+                        "tech": {
+                          "callerChannelId": "01a1c5df-9658-72ab-8000-c0ffee001122",
+                          "ringStartedAt": "2026-11-10T14:32:08.214Z",
+                          "endedBy": "PEER",
+                          "switchBillSec": 344
+                        },
+                        "legs": [
+                          {
+                            "kind": "BOT",
+                            "label": "novanet_support",
+                            "durationSec": 26
+                          },
+                          {
+                            "kind": "QUEUE",
+                            "label": "support-en",
+                            "durationSec": 32
+                          },
+                          {
+                            "kind": "AGENT",
+                            "label": "1001",
+                            "durationSec": 88
+                          },
+                          {
+                            "kind": "QUEUE",
+                            "label": "support-en",
+                            "durationSec": 18
+                          },
+                          {
+                            "kind": "AGENT",
+                            "label": "1000",
+                            "durationSec": 183
+                          }
+                        ],
+                        "wrapUp": {
+                          "agentId": "01a1c478-a228-7222-8000-222233334444",
+                          "dispositionCode": "ESCALATED",
+                          "dispositionLabel": "Escalated",
+                          "note": "Customer needs an on-site technician; transferred to Amy in support-en.",
+                          "createdAt": "2026-11-10T14:35:12Z",
+                          "isConfirmed": true
+                        }
+                      },
+                      "transcript": [
+                        {
+                          "seq": 1,
+                          "occurredAt": "2026-11-10T14:32:22.300Z",
+                          "speaker": "BOT",
+                          "kind": "TEXT",
+                          "content": {
+                            "text": "Hi, this is NovaNet Support calling about your open case. Is now a good time?"
+                          },
+                          "offsetMs": 3300,
+                          "source": "MODEL"
+                        },
+                        {
+                          "seq": 2,
+                          "occurredAt": "2026-11-10T14:32:27.600Z",
+                          "speaker": "CUSTOMER",
+                          "kind": "TEXT",
+                          "content": {
+                            "text": "Sure — my internet has been dropping all morning."
+                          },
+                          "offsetMs": 8600,
+                          "source": "MODEL"
+                        },
+                        {
+                          "seq": 3,
+                          "occurredAt": "2026-11-10T14:32:30.200Z",
+                          "speaker": "BOT",
+                          "kind": "TEXT",
+                          "content": {
+                            "text": "I am sorry to hear that. I can look into it, or connect you to our support team."
+                          },
+                          "offsetMs": 11200,
+                          "source": "MODEL"
+                        },
+                        {
+                          "seq": 4,
+                          "occurredAt": "2026-11-10T14:32:38.900Z",
+                          "speaker": "CUSTOMER",
+                          "kind": "TEXT",
+                          "content": {
+                            "text": "I would rather speak to someone about a technician visit."
+                          },
+                          "offsetMs": 19900,
+                          "source": "MODEL"
+                        },
+                        {
+                          "seq": 5,
+                          "occurredAt": "2026-11-10T14:32:40.600Z",
+                          "speaker": "BOT",
+                          "kind": "TOOL_CALL",
+                          "content": {
+                            "name": "transfer_to_agent",
+                            "args": "{\"queue\":\"support-en\",\"reason\":\"caller asked for a person\",\"summary\":\"Internet dropping since this morning; customer wants a technician visit.\"}"
+                          },
+                          "offsetMs": 21600,
+                          "source": "MODEL"
+                        },
+                        {
+                          "seq": 6,
+                          "occurredAt": "2026-11-10T14:32:40.900Z",
+                          "speaker": "BOT",
+                          "kind": "TOOL_RESULT",
+                          "content": {
+                            "name": "transfer_to_agent",
+                            "output": "{\"ok\":\"1\",\"queue\":\"support-en\"}",
+                            "movedTo": "finish_transfer"
+                          },
+                          "offsetMs": 21900,
+                          "source": "MODEL"
+                        },
+                        {
+                          "seq": 7,
+                          "occurredAt": "2026-11-10T14:32:42.500Z",
+                          "speaker": "BOT",
+                          "kind": "TEXT",
+                          "content": {
+                            "text": "Certainly — I am putting you through to the support team now. Please stay on the line."
+                          },
+                          "offsetMs": 23500,
+                          "source": "MODEL"
+                        },
+                        {
+                          "seq": 8,
+                          "occurredAt": "2026-11-10T14:33:21.400Z",
+                          "speaker": "HUMAN_AGENT",
+                          "kind": "TEXT",
+                          "content": {
+                            "text": "Hi, this is Wei from NovaNet support. Thanks for holding."
+                          },
+                          "partyId": "01a1c5e0-dbbc-75d6-8000-c3d4e5f6a1b2",
+                          "agentId": "01a1c478-a228-7222-8000-222233334444",
+                          "offsetMs": 62400,
+                          "language": "en",
+                          "source": "ASR",
+                          "provider": "openai",
+                          "utteranceId": "HUMAN_AGENT:item_9f3ac2"
+                        },
+                        {
+                          "seq": 9,
+                          "occurredAt": "2026-11-10T14:33:26.800Z",
+                          "speaker": "CUSTOMER",
+                          "kind": "TEXT",
+                          "content": {
+                            "text": "My connection drops every few minutes since this morning."
+                          },
+                          "partyId": "01a1c5e0-dbbc-75d6-8000-c3d4e5f6a1b2",
+                          "offsetMs": 67800,
+                          "language": "en",
+                          "source": "ASR",
+                          "provider": "openai",
+                          "utteranceId": "CUSTOMER:item_b81e04"
+                        },
+                        {
+                          "seq": 10,
+                          "occurredAt": "2026-11-10T14:34:40.200Z",
+                          "speaker": "HUMAN_AGENT",
+                          "kind": "TEXT",
+                          "content": {
+                            "text": "Let me hand you to my colleague Amy — she handles technician visits."
+                          },
+                          "partyId": "01a1c5e0-dbbc-75d6-8000-c3d4e5f6a1b2",
+                          "agentId": "01a1c478-a228-7222-8000-222233334444",
+                          "offsetMs": 141200,
+                          "language": "en",
+                          "source": "ASR",
+                          "provider": "openai",
+                          "utteranceId": "HUMAN_AGENT:item_77d4e1"
+                        },
+                        {
+                          "seq": 11,
+                          "occurredAt": "2026-11-10T14:35:06.300Z",
+                          "speaker": "HUMAN_AGENT",
+                          "kind": "TEXT",
+                          "content": {
+                            "text": "Hi, I am Amy — I hear the connection keeps dropping."
+                          },
+                          "partyId": "01a1c5e2-88a4-77e8-8000-d4e5f6a1b2c3",
+                          "agentId": "01a1c478-a674-7333-8000-333344445555",
+                          "offsetMs": 167300,
+                          "language": "en",
+                          "source": "ASR",
+                          "provider": "openai",
+                          "utteranceId": "HUMAN_AGENT:item_21c9a0"
+                        },
+                        {
+                          "seq": 12,
+                          "occurredAt": "2026-11-10T14:35:12.700Z",
+                          "speaker": "CUSTOMER",
+                          "kind": "TEXT",
+                          "content": {
+                            "text": "Yes — every few minutes since this morning."
+                          },
+                          "partyId": "01a1c5e2-88a4-77e8-8000-d4e5f6a1b2c3",
+                          "offsetMs": 173700,
+                          "language": "en",
+                          "source": "ASR",
+                          "provider": "openai",
+                          "utteranceId": "CUSTOMER:item_5f88c3"
+                        },
+                        {
+                          "seq": 13,
+                          "occurredAt": "2026-11-10T14:37:52.900Z",
+                          "speaker": "HUMAN_AGENT",
+                          "kind": "TEXT",
+                          "content": {
+                            "text": "I have booked a technician for Thursday morning."
+                          },
+                          "partyId": "01a1c5e2-88a4-77e8-8000-d4e5f6a1b2c3",
+                          "agentId": "01a1c478-a674-7333-8000-333344445555",
+                          "offsetMs": 333900,
+                          "language": "en",
+                          "source": "ASR",
+                          "provider": "openai",
+                          "utteranceId": "HUMAN_AGENT:item_9b40dd"
+                        },
+                        {
+                          "seq": 14,
+                          "occurredAt": "2026-11-10T14:37:58.400Z",
+                          "speaker": "CUSTOMER",
+                          "kind": "TEXT",
+                          "content": {
+                            "text": "Perfect — thank you."
+                          },
+                          "partyId": "01a1c5e2-88a4-77e8-8000-d4e5f6a1b2c3",
+                          "offsetMs": 339400,
+                          "language": "en",
+                          "source": "ASR",
+                          "provider": "openai",
+                          "utteranceId": "CUSTOMER:item_c62f11"
+                        },
+                        {
+                          "seq": 15,
+                          "occurredAt": "2026-11-10T14:38:01.800Z",
+                          "speaker": "HUMAN_AGENT",
+                          "kind": "TEXT",
+                          "content": {
+                            "text": "You are welcome. Goodbye."
+                          },
+                          "partyId": "01a1c5e2-88a4-77e8-8000-d4e5f6a1b2c3",
+                          "agentId": "01a1c478-a674-7333-8000-333344445555",
+                          "offsetMs": 342800,
+                          "language": "en",
+                          "source": "ASR",
+                          "provider": "openai",
+                          "utteranceId": "HUMAN_AGENT:item_e51b9a"
+                        }
+                      ],
+                      "recordings": [
+                        {
+                          "id": "01a1c5e5-2244-7888-8000-88889999aaaa",
+                          "callId": "01a1c5df-9644-78a1-8000-123456789abc",
+                          "backend": "FS",
+                          "objectKey": "2026/11/10/01a1c5df-9644-78a1-8000-123456789abc.wav",
+                          "sizeBytes": 11008044,
+                          "durationSec": 344,
+                          "format": "WAV",
+                          "createdAt": "2026-11-10T14:38:12Z"
+                        }
+                      ]
+                    },
+                    "description": "botSummary and botReason in userData are what the bot told the person it was handing to; the two QUEUE legs are the same queue entered twice, each wait its own."
+                  }
                 }
               }
             }
@@ -6858,7 +7777,8 @@
             "required": true,
             "schema": {
               "type": "string",
-              "format": "uuid"
+              "format": "uuid",
+              "example": "01a1c5df-9644-78a1-8000-123456789abc"
             }
           }
         ],
@@ -6868,6 +7788,19 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/PatchUserDataRequest"
+              },
+              "examples": {
+                "resolveAndTidy": {
+                  "summary": "Write what the CRM resolved, drop what it replaced",
+                  "value": {
+                    "userData": {
+                      "orderId": "ORD-2026-1177",
+                      "callbackReason": "technician visit",
+                      "triage": null
+                    }
+                  },
+                  "description": "RFC 7386 merge semantics: a value replaces the key, null removes it, keys not mentioned stay. Everyone on the call hears what moved as CALL_USER_DATA."
+                }
               }
             }
           }
@@ -6879,6 +7812,26 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/UserDataResponse"
+                },
+                "examples": {
+                  "merged": {
+                    "summary": "The call's business data after the merge",
+                    "value": {
+                      "userData": {
+                        "accountId": "ACC-2204",
+                        "callbackReason": "technician visit",
+                        "crmCaseId": "CASE-44821",
+                        "orderId": "ORD-2026-1177"
+                      },
+                      "changedKeys": [
+                        "callbackReason",
+                        "orderId"
+                      ],
+                      "deletedKeys": [
+                        "triage"
+                      ]
+                    }
+                  }
                 }
               }
             }
@@ -6896,7 +7849,33 @@
             "$ref": "#/components/responses/NotFound"
           },
           "409": {
-            "$ref": "#/components/responses/Conflict"
+            "description": "The request collides with current state: the patch would take the call past 32 keys. Nothing was written — the whole patch applies or none of it does — and params names the keys that would not fit.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "examples": {
+                  "noRoom": {
+                    "summary": "The call has no room for all of the keys",
+                    "value": {
+                      "error": {
+                        "code": "USER_DATA_TOO_LARGE",
+                        "message": "this call has no room for all of these keys, and none of them were written",
+                        "params": {
+                          "maxKeys": 32,
+                          "wouldNotFit": [
+                            "callbackReason",
+                            "orderId"
+                          ]
+                        }
+                      }
+                    },
+                    "description": "The call already holds the 32 a call may carry, so the patch's two new keys are the ones named in params.wouldNotFit. Retry without them, or delete keys first — nothing was written, so there is nothing to undo."
+                  }
+                }
+              }
+            }
           },
           "500": {
             "$ref": "#/components/responses/InternalError"
@@ -6972,6 +7951,26 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/WebhookSubscriptionWrite"
+              },
+              "examples": {
+                "cdrDeliveries": {
+                  "summary": "Deliver the floor's finished calls to the CRM",
+                  "value": {
+                    "name": "CRM call ledger",
+                    "url": "https://crm.example.com/aicc/cdr-deliveries",
+                    "filter": {
+                      "callType": [
+                        "OUTBOUND"
+                      ],
+                      "queueId": [
+                        "01a1c478-9ddc-7111-8000-111122223333"
+                      ]
+                    },
+                    "authToken": "crm-endpoint-token-replace-me",
+                    "isEnabled": true
+                  },
+                  "description": "Deliveries are the CDRs a filter lets through — {} would send every call. authToken rides each POST as Authorization: Bearer; it is write-only and never comes back."
+                }
               }
             }
           }
@@ -6983,6 +7982,28 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/WebhookSubscription"
+                },
+                "examples": {
+                  "created": {
+                    "summary": "The stored subscription — token reduced to hasAuthToken",
+                    "value": {
+                      "subscriptionId": "01a1c478-b3bc-7777-8000-777788889999",
+                      "name": "CRM call ledger",
+                      "url": "https://crm.example.com/aicc/cdr-deliveries",
+                      "filter": {
+                        "callType": [
+                          "OUTBOUND"
+                        ],
+                        "queueId": [
+                          "01a1c478-9ddc-7111-8000-111122223333"
+                        ]
+                      },
+                      "isEnabled": true,
+                      "hasAuthToken": true,
+                      "createdAt": "2026-11-10T14:40:22Z",
+                      "updatedAt": "2026-11-10T14:40:22Z"
+                    }
+                  }
                 }
               }
             }
@@ -7340,6 +8361,19 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/APIKeyWrite"
+              },
+              "examples": {
+                "crmDialler": {
+                  "summary": "A key for the system that places AI outbound calls and reads their records",
+                  "value": {
+                    "name": "CRM dialler",
+                    "scopes": [
+                      "calls:create",
+                      "calls:create:ai",
+                      "history:read:all"
+                    ]
+                  }
+                }
               }
             }
           }
@@ -7351,6 +8385,24 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/APIKeyCreated"
+                },
+                "examples": {
+                  "created": {
+                    "summary": "The key, and its secret — returned nowhere else",
+                    "value": {
+                      "id": "01a1c478-af70-7666-8000-666677778888",
+                      "name": "CRM dialler",
+                      "keyPrefix": "S9fK3mQ7",
+                      "status": "ENABLED",
+                      "scopes": [
+                        "calls:create",
+                        "calls:create:ai",
+                        "history:read:all"
+                      ],
+                      "createdAt": "2026-11-10T09:15:42Z",
+                      "secret": "S9fK3mQ7vT2R4pN8fG6hJ1wB5cYdE0u1qWxMn7vZoIA"
+                    }
+                  }
                 }
               }
             }
