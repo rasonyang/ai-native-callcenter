@@ -953,53 +953,111 @@ func TestAToolTalkTurnThatArmsTheHangupIsUnheardAndTheLineIsStillSaid(t *testing
 	}
 }
 
-// The closing line's own turn is only tool talk: it is dropped as a turn cut
-// before anything was heard, so it neither counts as the line nor runs the
-// ending, and the cap is neither restarted nor moved by it. The call is left
-// to the cap that was running, as when a line's turn is cut before any of it
-// was queued and nothing follows. Nothing asks for the line again: that is the
-// armed ending's to decide (#262), and it judges only turns that were heard.
-// The cap is long here, so that a loaded machine cannot run it out first; the
-// cap's own end is TestAModelThatNeverSpeaksTheOwedLineEndsAtTheCapWithAWarning's.
-func TestADroppedClosingLineNeitherCountsAsTheLineNorMovesTheCap(t *testing.T) {
+// sendTurn plays a whole response on the toolPath's model.
+func (h *toolPath) sendTurn(events []provider.Event) {
+	for _, e := range events {
+		h.model.events <- e
+	}
+}
+
+// The closing line's own turn is only tool talk: dropped, it is a turn that
+// missed the line (#262). The line is asked for once more as a closing line,
+// nothing counts as said, no interruption is counted, and the call ends on
+// the line's playback, not at the cap.
+func TestADroppedClosingLineIsAskedForAgainAndTheCallEndsOnTheLine(t *testing.T) {
 	t.Parallel()
-	h, _ := startOwedLinePath(t, talkProfile(provider.QwenProfile(), true), "en", time.Minute)
+	// A cap no loaded machine runs out first: the line's playback ends the call.
+	h, sink := startOwedLinePath(t, talkProfile(provider.QwenProfile(), true), "en", time.Minute)
+	t.Cleanup(h.actions.disarm)
+	freezeToolTalkClock(h.session)
+	line := owedLines["en"]
+	h.callTool(t, flow.ToolHangup, goodbyeHangup)
+	h.endResponse() // the turn that carried the tool call; no audio
+
+	h.sendTurn(talkTurn([]string{"工具调用"}, 3, 1))
+	awaitTalk(t, "the line to be asked for again", func() bool { return len(h.model.spokenLines()) == 1 })
+	if got, closing := h.model.spokenLines(), h.model.spokenLinesClosing(); got[0] != line || !closing[0] {
+		t.Errorf("asked for %q (closing %v), want the closing line, as one", got[0], closing[0])
+	}
+	if n := len(h.leg.sentFrames()); n != 0 {
+		t.Errorf("%d frames of the tool talk reached the leg", n)
+	}
+	h.actions.mu.Lock()
+	isSpoken, isAskedAgain, interruptions := h.actions.isLineSpoken, h.actions.isLineAskedAgain, h.actions.interruptions
+	h.actions.mu.Unlock()
+	if isSpoken || !isAskedAgain || interruptions != 0 {
+		t.Errorf("line spoken %v, asked again %v, interruptions %d; want asked again, not spoken, none",
+			isSpoken, isAskedAgain, interruptions)
+	}
+
+	// The line's own turn, heard.
+	h.sendTurn(talkTurn([]string{line}, 3, 20))
+	h.awaitCallEnded(t, 10*time.Second)
+	if len(h.leg.sentFrames()) == 0 {
+		t.Error("the line's turn did not play")
+	}
+	logs := sink.String()
+	if !strings.Contains(logs, "was dropped as tool talk; the line is asked for once more") {
+		t.Errorf("no line for the dropped turn:\n%s", logs)
+	}
+	if n := strings.Count(logs, "hanging up after the farewell"); n != 1 {
+		t.Errorf("the hangup ran %d times, want once", n)
+	}
+	if strings.Contains(logs, "at the cap") {
+		t.Errorf("the call ended at the cap, not on the line:\n%s", logs)
+	}
+}
+
+// The line asked for again is dropped as well: nothing is asked for a third
+// time, and the cap that the ask restarted ends the call, so a line dropped
+// every time cannot loop.
+func TestASecondDroppedClosingLineEndsAtTheCap(t *testing.T) {
+	t.Parallel()
+	h, sink := startOwedLinePath(t, talkProfile(provider.QwenProfile(), true), "en", time.Minute)
 	t.Cleanup(h.actions.disarm)
 	freezeToolTalkClock(h.session)
 	h.callTool(t, flow.ToolHangup, goodbyeHangup)
 	h.endResponse() // the turn that carried the tool call; no audio
+	// The cap the line's ask restarts: long enough for the next turn to be
+	// judged first on a loaded machine.
+	h.actions.mu.Lock()
+	h.actions.graceCap = 5 * time.Second
+	h.actions.mu.Unlock()
+
+	h.sendTurn(talkTurn([]string{"工具调用"}, 3, 1))
+	awaitTalk(t, "the line to be asked for again", func() bool { return len(h.model.spokenLines()) == 1 })
 	h.actions.mu.Lock()
 	capDue := h.actions.capDue
 	h.actions.mu.Unlock()
 
-	for _, e := range talkTurn([]string{"工具调用"}, 3, 1) {
-		h.model.events <- e
-	}
-	// A probe after it: a tool the closing phase does not offer, refused.
-	// Once it is answered, drive has handled the dropped turn's TURN_DONE.
-	h.model.events <- provider.Event{Type: provider.EventTypeResponseStarted}
-	h.model.events <- provider.Event{Type: provider.EventTypeToolCall, ToolCallID: "fc_probe",
-		ToolName: "note_name", ToolArgs: `{"value":"probe"}`}
-	awaitTalk(t, "the probe to be answered", func() bool { return len(h.model.recordedToolResults()) == 2 })
-
-	if n := len(h.leg.sentFrames()); n != 0 {
-		t.Errorf("%d frames of the tool talk reached the leg", n)
-	}
-	if h.isCallEnded() {
-		t.Fatal("the call ended on the dropped line")
+	// The line's turn, said as tool talk again.
+	again := talkTurn([]string{"工具调用"}, 3, 10)
+	again[0].IsSpokenLine = true
+	h.sendTurn(again)
+	awaitTalk(t, "the second drop to be judged", func() bool {
+		return strings.Contains(sink.String(), "asked for again was dropped as tool talk too")
+	})
+	if got := h.model.spokenLines(); len(got) != 1 {
+		t.Errorf("lines asked for = %v, want the one ask", got)
 	}
 	h.actions.mu.Lock()
-	defer h.actions.mu.Unlock()
-	if h.actions.armed == nil || h.actions.isLineSpoken || !h.actions.isLineOwed {
-		t.Errorf("armed %v, line spoken %v, owed %v; want the ending armed and the line still owed",
-			h.actions.armed != nil, h.actions.isLineSpoken, h.actions.isLineOwed)
+	isSpoken, interruptions, due := h.actions.isLineSpoken, h.actions.interruptions, h.actions.capDue
+	h.actions.mu.Unlock()
+	if isSpoken || interruptions != 0 || !due.Equal(capDue) {
+		t.Errorf("line spoken %v, interruptions %d, cap moved by %v; want none of them",
+			isSpoken, interruptions, due.Sub(capDue))
 	}
-	if !h.actions.capDue.Equal(capDue) || h.actions.interruptions != 0 {
-		t.Errorf("cap moved by %v, interruptions %d; want the cap as armed and no interruption",
-			h.actions.capDue.Sub(capDue), h.actions.interruptions)
+
+	h.awaitCallEnded(t, 15*time.Second)
+	logs := sink.String()
+	if !strings.Contains(logs, "running an armed action at the cap; no closing line was generated") {
+		t.Errorf("the call did not end at the cap:\n%s", logs)
 	}
-	if got := h.model.spokenLines(); len(got) != 0 {
-		t.Errorf("spoken = %v, want nothing asked for", got)
+	if n := strings.Count(logs, "hanging up after the farewell"); n != 1 {
+		t.Errorf("the hangup ran %d times, want once", n)
+	}
+	if n := len(h.leg.sentFrames()); n != 0 {
+		t.Errorf("%d frames of the tool talk reached the leg", n)
 	}
 }
 

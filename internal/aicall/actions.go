@@ -929,18 +929,10 @@ func (a *callActions) onTurnDone(turn int, isInterrupted, hasAudio bool) {
 			default:
 				a.log.Info("the turn after the closing move did not say the closing line; "+
 					"the line is asked for once more", "turn", turn, "coverage", coverage)
-				a.notLineThrough = turn
-				// The line generates while this turn's tail plays and plays
-				// behind it; the cap covers both.
-				a.startCapLocked(a.capAfterLineAskLocked())
-				if a.session.isTurnGenerating() {
-					a.log.Info("a later turn is already being made; judging it before asking",
-						"turn", turn)
+				if ask = a.missLineLocked(turn); ask == "" {
 					a.mu.Unlock()
 					return
 				}
-				a.isLineAskedAgain = true
-				ask = a.closingLine
 			}
 		}
 	}
@@ -952,11 +944,86 @@ func (a *callActions) onTurnDone(turn int, isInterrupted, hasAudio bool) {
 		}
 	}
 	a.mu.Unlock()
-	if ask != "" {
-		if err := a.session.Speak(ask, true); err != nil {
-			a.log.Warn("could not ask for the closing line again; the cap ends the call", "error", err)
+	a.askForLineAgain(ask)
+}
+
+// missLineLocked is the owed closing line missed by turn (#262): that turn's
+// playback does not end the call, the cap is restarted to cover the line
+// asked for behind the turn's tail, and the line is returned to be asked for
+// once more. It returns "" while a later turn is already being made: that turn
+// may be the line, and is judged first. The caller holds mu.
+func (a *callActions) missLineLocked(turn int) string {
+	a.notLineThrough = turn
+	// The line generates while this turn's tail plays and plays behind it;
+	// the cap covers both.
+	a.startCapLocked(a.capAfterLineAskLocked())
+	if a.session.isTurnGenerating() {
+		a.log.Info("a later turn is already being made; judging it before asking", "turn", turn)
+		return ""
+	}
+	a.isLineAskedAgain = true
+	return a.closingLine
+}
+
+// askForLineAgain asks for the closing line missLineLocked returned; "" asks
+// for nothing. Called off the lock.
+func (a *callActions) askForLineAgain(line string) {
+	if line == "" {
+		return
+	}
+	if err := a.session.Speak(line, true); err != nil {
+		a.log.Warn("could not ask for the closing line again; the cap ends the call", "error", err)
+	}
+}
+
+// onTurnEnd is a TURN_DONE for the armed ending: onTurnDone, or onTurnDropped
+// for a turn the session dropped unheard.
+func (a *callActions) onTurnEnd(done Event) {
+	if done.IsDropped {
+		a.onTurnDropped(done.Turn)
+		return
+	}
+	a.onTurnDone(done.Turn, done.IsInterrupted, done.HasAudio)
+}
+
+// onTurnDropped is a turn after the arming one that the session dropped
+// unheard, because its words were only tool talk (Event.IsDropped, #623). Its
+// TURN_DONE is an interrupted one, which onTurnDone leaves alone; but when the
+// owed closing line was due in it, the caller has not heard the line and
+// nothing else would ask for it. So while the line is owed and not yet counted
+// as said, a dropped turn misses it as a heard turn with other words does
+// (missLineLocked): the line is asked for once more on that path, with its
+// cap, and nothing is counted as said. No interruption is counted (#465):
+// nobody spoke over the line. Anything else stays the turn cut before it was
+// heard that it was reported as.
+//
+// Once only, as for a heard turn: a dropped turn after the line has been asked
+// for again asks for nothing, and the cap that the ask restarted (the grace on
+// top of the audio then queued) ends the call. A line that is dropped every
+// time therefore cannot loop.
+func (a *callActions) onTurnDropped(turn int) {
+	a.mu.Lock()
+	if a.armed == nil || turn <= a.armedInTurn || !a.isLineOwed || a.isLineSpoken ||
+		a.closingLine == "" {
+		a.mu.Unlock()
+		return
+	}
+	for judged := range a.said {
+		if judged <= turn {
+			delete(a.said, judged)
 		}
 	}
+	if a.isLineAskedAgain {
+		a.mu.Unlock()
+		a.log.Warn("the closing line asked for again was dropped as tool talk too; the cap ends the call",
+			"turn", turn)
+		return
+	}
+	a.log.Info("the turn after the closing move was dropped as tool talk; the line is asked for once more",
+		"turn", turn)
+	ask := a.missLineLocked(turn)
+	a.mu.Unlock()
+	a.askForLineAgain(ask)
 }
 
 // capAfterLineAskLocked is how long the wait for a requested line is bounded:

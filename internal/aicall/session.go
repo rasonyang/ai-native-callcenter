@@ -166,6 +166,11 @@ type Event struct {
 	// turn never reaches PLAYBACK_DONE, and what it produced is not a line
 	// anybody can count on having been said.
 	IsInterrupted bool
+	// IsDropped marks, beside IsInterrupted, the TURN_DONE of a turn the
+	// tool-talk gate dropped unheard: nobody cut it, and an armed ending whose
+	// closing line was due in it asks for the line again
+	// (callActions.onTurnDropped).
+	IsDropped bool
 
 	// IsAside marks the BOT_SAID, TURN_DONE and PLAYBACK_DONE of a turn that
 	// said an aside (SpeakAside): words the application put in while it
@@ -1938,8 +1943,9 @@ func (s *Session) currentTurn() int {
 // dropped. A dropped turn is one the caller heard none of. Its finals are
 // emitted muted, its turn timer is put back as for an abandoned response that
 // queued nothing (none of it reached queueFrame), and its TURN_DONE is an
-// interrupted one with no audio, so drive takes it for a turn cut before
-// anything was heard. Its marker publishes no PLAYBACK_DONE and still arms the
+// interrupted one with no audio (and IsDropped), so drive takes it for a turn
+// cut before anything was heard, but asks again for a closing line that was
+// owed in it. Its marker publishes no PLAYBACK_DONE and still arms the
 // dead-air watch once an earlier turn's tail has drained (watchPlayback), so
 // the call is never left without one; a dropped opening is said again.
 func (s *Session) endResponse(isAbandoned bool) {
@@ -1949,7 +1955,7 @@ func (s *Session) endResponse(isAbandoned bool) {
 	marker := s.finishTurn(isAbandoned || talk.isDropped)
 	marker.isDropped = talk.isDropped
 	s.emit(Event{Type: EventTypeTurnDone, Turn: marker.turn, HasAudio: marker.hasAudio,
-		IsInterrupted: talk.isDropped, IsAside: marker.isAside,
+		IsInterrupted: talk.isDropped, IsDropped: talk.isDropped, IsAside: marker.isAside,
 		soFar: responseSoFar{text: s.turnWords()}})
 	select {
 	case s.playbackDone <- marker:

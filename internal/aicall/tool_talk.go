@@ -38,8 +38,10 @@ import (
 //
 // A dropped turn is one the caller heard none of. Its TURN_DONE is an
 // interrupted one with no audio, so the turns-without-a-tool wall, an armed
-// ending and the claim watch treat it as a turn cut before anything was heard;
-// it is muted (its words are not the bot's in the transcript); the turn timer is
+// ending and the claim watch treat it as a turn cut before anything was heard,
+// with one difference its IsDropped flag makes: an owed closing line due in it
+// is asked for once more, as after a heard turn that missed it
+// (callActions.onTurnDropped); it is muted (its words are not the bot's in the transcript); the turn timer is
 // put back as for an abandoned response that queued nothing, so the dead air
 // after it is #448's when it answered the caller; the playback watcher is handed
 // a marker that arms the dead-air watch and publishes no PLAYBACK_DONE; and an
