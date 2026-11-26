@@ -1172,3 +1172,132 @@ func TestADroppedOpeningReplayIsSaidAgainOnce(t *testing.T) {
 		t.Errorf("spoken = %v, want the opening asked for again, then once more for the dropped replay", got)
 	}
 }
+
+//
+// With #715's opening-heard state: a turn nobody heard never counts as the
+// opening heard, and audio the gate holds is not on the leg.
+//
+
+// The opening, or a replay of it, dropped as tool talk leaves the call's
+// opening unheard (#715): no tail is queued for it, the playback watcher's
+// handling of its marker (the NO_INPUT that follows it) and caller speech after
+// it record nothing. The opening said in its place, heard in full, is heard.
+func TestADroppedOpeningOrReplayIsNotTheOpeningHeard(t *testing.T) {
+	t.Parallel()
+	for _, name := range []string{"the opening", "its replay"} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			cfg := talkConfig()
+			cfg.NoInput = 50 * time.Millisecond
+			cfg.Session.OpeningText = twoPartOpeningLine
+			r := newTalkRig(t, talkProfile(provider.QwenProfile(), true), cfg, talkTools...)
+			noInputs := func() int {
+				return len(r.all(func(e Event) bool { return e.Type == EventTypeNoInput }))
+			}
+			dropped, lines := 1, 1
+			if name == "its replay" {
+				// Turn 1 says a line check, heard in full: not the opening.
+				r.send(talkTurn([]string{lineCheckLine}, 3, 1)...)
+				r.playbackDone(t, 1)
+				awaitTalk(t, "the silence after the line check", func() bool { return noInputs() == 1 })
+				r.session.sayOpening(twoPartOpeningLine)
+				awaitTalk(t, "the replay to be asked for", func() bool { return len(r.model.spokenLines()) == 1 })
+				dropped, lines = 2, 2
+			}
+			before := noInputs()
+
+			talk := talkTurn([]string{"工具调用"}, 4, 10)
+			talk[0].IsSpokenLine = true
+			r.send(talk...)
+			if done := r.turnDone(t, dropped); !done.IsDropped {
+				t.Fatalf("turn %d was not dropped", dropped)
+			}
+			awaitTalk(t, "the silence after the drop", func() bool { return noInputs() == before+1 })
+			r.send(provider.Event{Type: provider.EventTypeSpeechStarted, ItemID: "u1"})
+			r.await(t, "the caller's speech", func(e Event) bool { return e.Type == EventTypeCallerSpeech })
+			r.session.mu.Lock()
+			isTail := r.session.isOpeningTailQueued
+			r.session.mu.Unlock()
+			if r.session.isOpeningHeard() || isTail {
+				t.Errorf("after the drop: heard %v, tail queued %v; want neither", r.session.isOpeningHeard(), isTail)
+			}
+
+			awaitTalk(t, "the opening to be said again", func() bool { return len(r.model.spokenLines()) == lines })
+			again := talkTurn([]string{twoPartOpeningLine}, 4, 30)
+			again[0].IsSpokenLine = true
+			r.send(again...)
+			r.playbackDone(t, dropped+1)
+			if !r.session.isOpeningHeard() {
+				t.Error("the opening said again and heard in full is not heard")
+			}
+		})
+	}
+}
+
+// Audio the gate holds is not on the leg, so it is not counted behind an
+// opening whose tail is still queued (#715): the opening is heard once its own
+// frames have left, and not while any of them are waiting. Released, the audio
+// is counted behind it like any later turn's.
+func TestAudioTheGateHoldsIsNotCountedBehindTheOpening(t *testing.T) {
+	t.Parallel()
+	// The opening, its last five frames still queued, then a turn whose first
+	// word could still be tool talk: its two chunks are held.
+	start := func(t *testing.T) *talkRig {
+		t.Helper()
+		cfg := talkConfig()
+		cfg.Session.OpeningText = twoPartOpeningLine
+		r := newTalkRig(t, talkProfile(provider.QwenProfile(), true), cfg, talkTools...)
+		r.leg.holdFrames(5)
+		r.send(talkTurn([]string{twoPartOpeningLine}, 4, 1)...)
+		r.turnDone(t, 1)
+		r.send(provider.Event{Type: provider.EventTypeResponseStarted},
+			provider.Event{Type: provider.EventTypeOutputTranscript, Text: "调"},
+			provider.Event{Type: provider.EventTypeAudioDelta, Audio: talkChunk(40)},
+			provider.Event{Type: provider.EventTypeAudioDelta, Audio: talkChunk(41)})
+		awaitTalk(t, "the turn's audio to be held", func() bool {
+			r.session.mu.Lock()
+			defer r.session.mu.Unlock()
+			return len(r.session.talk.held) == 2
+		})
+		return r
+	}
+	behind := func(r *talkRig) (frames int, isTail bool) {
+		r.session.mu.Lock()
+		defer r.session.mu.Unlock()
+		return r.session.framesBehindOpening, r.session.isOpeningTailQueued
+	}
+
+	t.Run("held", func(t *testing.T) {
+		t.Parallel()
+		r := start(t)
+		if frames, isTail := behind(r); frames != 0 || !isTail {
+			t.Fatalf("frames behind the opening %d, tail queued %v; want 0, queued", frames, isTail)
+		}
+		r.leg.holdFrames(2) // two of the opening's own frames still to play
+		if r.session.isOpeningHeard() {
+			t.Error("heard with two of its frames waiting: the held audio was counted behind it")
+		}
+		r.leg.holdFrames(0)
+		if !r.session.isOpeningHeard() {
+			t.Error("not heard once its frames have left, with the next turn's audio held")
+		}
+	})
+	t.Run("released", func(t *testing.T) {
+		t.Parallel()
+		r := start(t)
+		r.send(provider.Event{Type: provider.EventTypeOutputTranscript, Text: "整一下。"})
+		awaitTalk(t, "the held audio to be released", func() bool {
+			frames, _ := behind(r)
+			return frames > 0
+		})
+		frames, _ := behind(r)
+		r.leg.holdFrames(5 + frames)
+		if r.session.isOpeningHeard() {
+			t.Error("heard with its own frames still waiting ahead of the released ones")
+		}
+		r.leg.holdFrames(frames)
+		if !r.session.isOpeningHeard() {
+			t.Error("not heard with only the released frames left")
+		}
+	})
+}
