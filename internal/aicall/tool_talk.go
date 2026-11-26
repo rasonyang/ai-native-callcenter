@@ -611,10 +611,13 @@ func (s *Session) reportToolTalk(r toolTalkSettled) {
 
 // sayDroppedOpeningAgain says the opening line again when the turn the gate
 // dropped was the opening or its replay and made no tool call: the caller has
-// heard none of it, and nothing else would say it (the replay's budget and the
-// owed opening were spent when it was asked for). Once per call, and not over
-// an armed ending or a closed call. A turn that made a tool call is answered by
-// the tool's result instead, and the dead-air watch takes any other.
+// heard none of it, and nothing else would say it. A first opening dropped
+// unheard was never cut, so nothing owes it; a replay spent the owed opening,
+// and its share of the replay budget (openingReplays), when it was asked for.
+// This line is said outside that budget and spends none of it: it stands in
+// for a turn nobody heard. Once per call, and not over an armed ending or a
+// closed call. A turn that made a tool call is answered by the tool's result
+// instead, and the dead-air watch takes any other.
 func (s *Session) sayDroppedOpeningAgain(r toolTalkSettled) {
 	text := s.cfg.Session.OpeningText
 	if !r.isOpening || r.toolCalls > 0 || text == "" || s.isClosed() ||
