@@ -807,6 +807,7 @@
     "maxDurationSec": "通话时长上限（秒）",
     "maxDurationAtCap": "部署上限",
     "isCallerFirst": "先听后说（外呼）",
+    "isOfferInOpening": "听完开场白才记录意向",
     "off": "关闭",
     "on": "开启",
     "alwaysAllowed": "始终可用",

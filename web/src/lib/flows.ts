@@ -200,6 +200,16 @@ export interface FlowGlobal {
    */
   isCallerFirst?: boolean
   /**
+   * Says the entry phase's announce, the opening line, carries what the caller
+   * must hear before an interest can be recorded: the offer itself, not only a
+   * greeting. A tool call that would record a HIGH or MEDIUM lead is then
+   * refused until the caller has heard the opening, or its replay, to its
+   * final clause; the opening is said again at most twice per call, then the
+   * bot is told to close the call. Requires an announce on the entry phase.
+   * Unset is off.
+   */
+  isOfferInOpening?: boolean
+  /**
    * The words of the wait line a caller hears when an HTTP tool has not
    * returned a second after it started and nothing else is playing. Said as
    * written; must be a statement, never a question. A language left empty

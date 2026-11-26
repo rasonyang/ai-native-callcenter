@@ -128,8 +128,10 @@ func (s *Spec) validate() error {
 	}
 	if s.InitialNode == "" {
 		report("initialNode is not set")
-	} else if _, ok := s.Nodes[s.InitialNode]; !ok {
+	} else if entry, ok := s.Nodes[s.InitialNode]; !ok {
 		report("initialNode %q is not a phase in this flow", s.InitialNode)
+	} else if s.Global.IsOfferInOpening && entry.Announce.IsEmpty() {
+		report("global.isOfferInOpening is set but the entry phase %q has no announce: there is no opening line for the caller to hear the offer in", s.InitialNode)
 	}
 	if s.Global.Persona.IsEmpty() {
 		report("global.persona is empty, so the model has no character to adopt")

@@ -1121,6 +1121,9 @@ function Persona({ spec, lang }: { spec: FlowSpec; lang: SpecLang }) {
           <Fact label={t('bots.isCallerFirst')}>
             {spec.global?.isCallerFirst ? t('bots.on') : t('bots.off')}
           </Fact>
+          <Fact label={t('bots.isOfferInOpening')}>
+            {spec.global?.isOfferInOpening ? t('bots.on') : t('bots.off')}
+          </Fact>
           <Fact label={t('bots.alwaysAllowed')}>
             <span className="font-mono text-xs">
               {(spec.global?.alwaysAllowedTools ?? []).join(', ') || '—'}

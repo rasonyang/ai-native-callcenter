@@ -555,6 +555,12 @@ func (r *Runtime) ClaimsInterest(name, arguments string) bool {
 	return r.engine.wouldMoveIntoInterest(name, args, map[string]any{"ok": boolAsFlag(err == nil)}, slot, value)
 }
 
+// IsOfferInOpening reports whether the flow declares that its opening line
+// carries the offer (Global.IsOfferInOpening, #715): the application then
+// refuses a call that ClaimsInterest until the caller has heard the opening to
+// its final clause. It reads and changes nothing.
+func (r *Runtime) IsOfferInOpening() bool { return r.engine.Spec().Global.IsOfferInOpening }
+
 // RefuseAsUnheardOffer is the answer to a tool that would record the
 // customer's interest (ClaimsInterest) when the caller's words began before
 // they had heard the opening to its final clause (#612, #598): a callee

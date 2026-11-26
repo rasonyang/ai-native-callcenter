@@ -854,4 +854,20 @@ describe('the runtime panel', () => {
     const label = await screen.findByText('Listen before opening (outbound)')
     expect(label.nextElementSibling).toHaveTextContent('Off')
   })
+
+  it('says whether a lead waits for the opening to be heard', async () => {
+    historyServer({ ...SPEC, global: { ...SPEC.global, isOfferInOpening: true } })
+    const { user } = renderEditor()
+    await openTab(user, 'Persona & rules')
+    const label = await screen.findByText('Lead only after the opening is heard')
+    expect(label.nextElementSibling).toHaveTextContent('On')
+  })
+
+  it('shows the opening rule off when the flow does not declare it', async () => {
+    historyServer(SPEC)
+    const { user } = renderEditor()
+    await openTab(user, 'Persona & rules')
+    const label = await screen.findByText('Lead only after the opening is heard')
+    expect(label.nextElementSibling).toHaveTextContent('Off')
+  })
 })

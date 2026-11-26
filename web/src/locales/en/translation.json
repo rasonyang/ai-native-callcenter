@@ -814,6 +814,7 @@
     "off": "Off",
     "on": "On",
     "isCallerFirst": "Listen before opening (outbound)",
+    "isOfferInOpening": "Lead only after the opening is heard",
     "alwaysAllowed": "Always allowed",
     "builtinTool": "Built in — implemented by the platform, no HTTP call",
     "builtin": {
