@@ -125,7 +125,11 @@ func TestRingingThenEarlyMediaThenAnswer(t *testing.T) {
 	uac := newUAC(t, loopback, sim.Addr(), "13800000001")
 	uac.invite()
 	early := uac.waitResponse(183, "INVITE")
-	// Early media: the simulator already sends audio, before the 200.
+	// Early media: the simulator already sends audio, before the 200. Under
+	// load the first audible frame can reach the test UAC after the 200 has
+	// arrived, so the order is judged from the simulator's record — the
+	// uplink opened when the 183 went out, and the record says whether the
+	// 200 left after it (#566).
 	eventually(t, "uplink audio during early media", func() bool {
 		for _, f := range uac.uplinkFrames() {
 			if f.rms > silenceRMS {
@@ -134,10 +138,13 @@ func TestRingingThenEarlyMediaThenAnswer(t *testing.T) {
 		}
 		return false
 	})
-	if len(uac.statuses()) == 0 || uac.statuses()[len(uac.statuses())-1] != 183 {
-		t.Fatalf("the 200 arrived before the early media was heard: %v", uac.statuses())
-	}
 	final := uac.waitFinal()
+	rec := only(t, sim.Report())
+	if rec.UplinkStartedAfterInviteMs == nil || rec.Final == nil ||
+		*rec.UplinkStartedAfterInviteMs >= rec.Final.AfterInviteMs {
+		t.Fatalf("the 200 left before the early media: uplink started %v after the invite, final sent %v",
+			rec.UplinkStartedAfterInviteMs, rec.Final)
+	}
 	if final.status != 200 {
 		t.Fatalf("final = %d", final.status)
 	}
@@ -145,7 +152,6 @@ func TestRingingThenEarlyMediaThenAnswer(t *testing.T) {
 		t.Errorf("media address moved between the 183 and the 200: %s -> %s", want, got)
 	}
 
-	var rec DialogRecord
 	eventually(t, "the ACK to be recorded", func() bool {
 		rec = only(t, sim.Report())
 		return rec.AckAt != nil
@@ -784,12 +790,11 @@ func TestFirstAudioIsMeasuredAgainstAKnownSilentLeadIn(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	sent := make(chan struct{})
+	sent := make(chan int, 1)
 	go func() {
-		uac.sendDownlink(ctx, remoteRTP(t, final), lead, 600*time.Millisecond)
-		close(sent)
+		sent <- uac.sendDownlink(ctx, remoteRTP(t, final), lead, 600*time.Millisecond)
 	}()
-	<-sent
+	framesSent := <-sent
 	var rec DialogRecord
 	eventually(t, "the first audible frame", func() bool {
 		rec = only(t, sim.Report())
@@ -802,8 +807,16 @@ func TestFirstAudioIsMeasuredAgainstAKnownSilentLeadIn(t *testing.T) {
 		t.Errorf("first audio at %.1f ms, but the first %v were silent", got, lead)
 	}
 
-	if rec.Downlink.Frames < 40 {
-		t.Fatalf("frames = %d, want most of the 50 sent", rec.Downlink.Frames)
+	// The sender has finished; the receiver's count can still lag it under
+	// load, so wait for the frames to drain before judging how many arrived
+	// (#566). A receiver that really drops frames never reaches the count.
+	want := framesSent * 4 / 5
+	eventually(t, "most of the sent frames to be counted", func() bool {
+		rec = only(t, sim.Report())
+		return rec.Downlink.Frames >= want
+	})
+	if rec.Downlink.Frames < want {
+		t.Fatalf("frames = %d, want most of the %d sent", rec.Downlink.Frames, framesSent)
 	}
 	var silent, loud int
 	var lastSilentStart, firstLoudStart = -1, -1
