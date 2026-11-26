@@ -807,6 +807,43 @@ func RecordLeadGuard(reason, provider string) {
 		attribute.String("reason", reason), attribute.String("provider", provider)))
 }
 
+// Tool talk (#623): a bot turn whose words are a tool's name, "工具调用" or
+// "tool call". Kept in one block, its instrument registered by an init of its
+// own, so the registry above stays as it was.
+var botToolTalk metric.Int64Counter
+
+func init() {
+	botToolTalk, _ = otel.Meter("aicc").Int64Counter("aicc_bot_tool_talk_total",
+		metric.WithDescription("Bot turns whose words were tool talk (a tool's name, \"工具调用\", "+
+			"\"tool call\", \"调用\"), once per turn, by verdict and provider: DROPPED (the "+
+			"turn's words were nothing else and none of its audio reached the caller: the "+
+			"session held it and dropped it, on an engine whose transcript leads its audio), "+
+			"MISSED (words that were nothing else, played: on any other engine, or when the "+
+			"hold reached its cap first) and CONTAINED (tool talk among other words, played). "+
+			"Read from the bot's own transcript, so a signal rather than proof; a turn whose "+
+			"words may hold another turn's late transcript is not judged."))
+}
+
+// What the tool-talk gate concluded about a turn (RecordToolTalk, #623).
+const (
+	// ToolTalkDropped: only tool talk, and none of it was played.
+	ToolTalkDropped = "DROPPED"
+	// ToolTalkMissed: only tool talk, and it was played.
+	ToolTalkMissed = "MISSED"
+	// ToolTalkContained: tool talk among other words, played.
+	ToolTalkContained = "CONTAINED"
+)
+
+// RecordToolTalk counts one bot turn the tool-talk gate judged (#623), by its
+// verdict (ToolTalk*).
+func RecordToolTalk(verdict, provider string) {
+	if botToolTalk == nil {
+		return
+	}
+	botToolTalk.Add(context.Background(), 1, metric.WithAttributes(
+		attribute.String("verdict", verdict), attribute.String("provider", provider)))
+}
+
 // Outcome values of a claim cue (RecordClaimCue).
 const (
 	ClaimCueBacked    = "BACKED"
