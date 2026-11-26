@@ -223,10 +223,16 @@ func (s *Session) clearOpeningOwed() {
 
 // noteOpeningHeard is told that a turn finished playing to the caller in full.
 // A turn after the cut that made the opening owed, with audio, not muted,
-// clears it: the caller has been answered since.
+// clears it: the caller has been answered since. The opening line's own turn
+// or its replay's, with audio and not muted, has been heard to its end, and
+// the call records so (isOpeningHeard, #715); any other turn leaves that as
+// it is.
 func (s *Session) noteOpeningHeard(turn int, hasAudio bool) {
 	if !hasAudio || s.isMutedTurn(turn) {
 		return
+	}
+	if s.isOpeningTurn(turn) {
+		s.ct.markOpeningHeard()
 	}
 	s.bc.mu.Lock()
 	if s.bc.isOpeningOwed && turn > s.bc.owedAfterTurn {
