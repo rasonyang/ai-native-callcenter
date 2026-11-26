@@ -267,3 +267,22 @@ func TestTheToolFreeDirectionIsInTheSessionsLanguage(t *testing.T) {
 		t.Errorf("en direction: %q", en)
 	}
 }
+
+// The words right before the line are the say-it-word-for-word demand, and the
+// direction never names tool calls: one that ended in "…关于工具调用的规则：" is the
+// prime suspect of a qwen turn that said 工具调用 aloud (#623).
+func TestTheToolFreeDirectionEndsInTheDemandAndNamesNoToolCalls(t *testing.T) {
+	for _, c := range []struct{ line, language string }{
+		{"请稍等，我查一下。", "zh"}, {waitLine, "en"},
+	} {
+		direction := sayExactlyWithoutTools(c.line, c.language)
+		if !strings.HasSuffix(direction, SayExactly(c.line, c.language)) {
+			t.Errorf("%s direction does not end in the demand and the line: %q", c.language, direction)
+		}
+		for _, words := range []string{"工具调用", "tool call"} {
+			if strings.Contains(strings.ToLower(direction), words) {
+				t.Errorf("%s direction says %q: %q", c.language, words, direction)
+			}
+		}
+	}
+}

@@ -856,16 +856,20 @@ var sayExactly = SayExactly
 // as its example. The default wait line, "请稍等，我查一下。", is that sentence, so
 // a model that obeys the rule calls the tool to be allowed to say it, or calls
 // it and says nothing (qwen-findings W-Q8).
+//
+// The words right before the line are SayExactly's demand, and the direction
+// never says "工具调用" or "tool call": a direction that ended in "…关于工具调用的
+// 规则：" was the prime suspect of a qwen turn that said 工具调用 aloud (#623),
+// the model reading the direction's last words as the start of the line.
 func sayExactlyWithoutTools(text, language string) string {
 	if strings.HasPrefix(strings.ToLower(language), "zh") {
-		return "这一轮只做一件事：一字不差地说出下面这句话，不要添加任何其它内容，也不要调用任何工具。" +
-			"这句话提到的工具已经在运行或已经运行过，结果会另外交给你，" +
-			"所以说这句话不违反关于工具调用的规则：\n" + text
+		return "这一轮只做一件事，不要调用任何工具。" +
+			"下面这句话提到的事已经在运行或已经运行过，结果会另外交给你，" +
+			"所以说这句话不违反任何规则。" + SayExactly(text, language)
 	}
-	return "This turn does one thing only: say the sentence below word for word, " +
-		"add nothing else, and call no tool. Any tool the sentence mentions is " +
-		"already running or has already run, and its result will reach you " +
-		"separately, so saying it breaks no rule about tool calls:\n" + text
+	return "This turn does one thing only; call no tool in it. Whatever the sentence " +
+		"below mentions is already running or has already run, and its result will " +
+		"reach you separately, so saying it breaks no rule. " + SayExactly(text, language)
 }
 
 // sayExactlyAfterCall is the direction of a line asked for again because its
@@ -879,34 +883,36 @@ func sayExactlyWithoutTools(text, language string) string {
 // call hangup", the caller's last words were an agreement given to the phase
 // before, and the line's turn called hangup on them.
 //
-// isToolRunningNoted adds sayExactlyWithoutTools' last sentence, on a profile
-// that needs it (NeedsToolFreeLineDirection): a wait line's turn calls the very
-// tool still running, and a model that is told its call was dropped would
-// otherwise want to make it again.
+// isToolRunningNoted adds sayExactlyWithoutTools' running-tool sentence, on a
+// profile that needs it (NeedsToolFreeLineDirection): a wait line's turn calls
+// the very tool still running, and a model that is told its call was dropped
+// would otherwise want to make it again. There, as in sayExactlyWithoutTools,
+// the demand comes last, right before the line, and nothing says "工具调用" or
+// "tool call" (#623). The tools called are still named.
 func sayExactlyAfterCall(text string, tools []string, language string, isToolRunningNoted bool) string {
 	if strings.HasPrefix(strings.ToLower(language), "zh") {
 		called := strings.Join(tools, "、")
 		direction := "上一轮你没有说下面这句话，而是调用了 " + called + "。那次调用没有执行，现在也不需要执行。" +
-			"来电者还没有听到这句话，他之前说的话不是对这句话的回答。" +
-			"这一轮只做一件事：一字不差地说出下面这句话，不要添加任何其它内容，" +
-			"现在不要调用 " + called + "，也不要调用任何其它工具"
+			"来电者还没有听到这句话，他之前说的话不是对这句话的回答。"
 		if isToolRunningNoted {
-			direction += "。这句话提到的工具已经在运行或已经运行过，结果会另外交给你，" +
-				"所以说这句话不违反关于工具调用的规则"
+			return direction + "这一轮只做一件事，现在不要调用 " + called + "，也不要调用任何其它工具。" +
+				"下面这句话提到的事已经在运行或已经运行过，结果会另外交给你，" +
+				"所以说这句话不违反任何规则。" + SayExactly(text, language)
 		}
-		return direction + "：\n" + text
+		return direction + "这一轮只做一件事：一字不差地说出下面这句话，不要添加任何其它内容，" +
+			"现在不要调用 " + called + "，也不要调用任何其它工具：\n" + text
 	}
 	called := strings.Join(tools, ", ")
 	direction := "Last turn you called " + called + " instead of saying the sentence below. " +
 		"That call was not carried out, and it is not needed now. " +
-		"The caller has not heard the sentence yet, and nothing they said before was an answer to it. " +
-		"This turn does one thing only: say the sentence below word for word, add nothing else, " +
-		"and do not call " + called + " now, nor any other tool"
+		"The caller has not heard the sentence yet, and nothing they said before was an answer to it. "
 	if isToolRunningNoted {
-		direction += ". Any tool the sentence mentions is already running or has already run, " +
-			"and its result will reach you separately, so saying it breaks no rule about tool calls"
+		return direction + "This turn does one thing only; do not call " + called + " now, nor any other tool. " +
+			"Whatever the sentence below mentions is already running or has already run, and its " +
+			"result will reach you separately, so saying it breaks no rule. " + SayExactly(text, language)
 	}
-	return direction + ":\n" + text
+	return direction + "This turn does one thing only: say the sentence below word for word, add nothing else, " +
+		"and do not call " + called + " now, nor any other tool:\n" + text
 }
 
 // requestResponse asks the model for a turn and records that one is on its way
