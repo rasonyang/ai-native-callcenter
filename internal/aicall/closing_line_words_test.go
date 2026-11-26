@@ -213,7 +213,7 @@ func TestTheLineIsNotAskedOverATurnAlreadyBeingMade(t *testing.T) {
 	if !actions.isArmed() {
 		t.Fatal("the missed turn's playback ran the ending")
 	}
-	session.endTurn()
+	session.endResponse(false)
 	actions.onTurnDone(armedTurn+2, false, true)
 	if got := model.spokenLines(); len(got) != 0 {
 		t.Fatalf("asked for %v although the turn said the line", got)
