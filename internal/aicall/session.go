@@ -213,6 +213,10 @@ type Config struct {
 	// (global.isCallerFirst); on any other call it is false. It composes with
 	// IsGreetingGated: the opening waits for both.
 	IsCallerFirst bool
+	// CallerFirstWait is how long the listen-first wait holds for a callee
+	// who says nothing: the flow's global.callerFirstWaitMs (#603); zero
+	// reads as the platform default (callerFirstWait, 2000 ms).
+	CallerFirstWait time.Duration
 
 	// IsPlacedToCustomer says the platform placed this call to a customer
 	// (callFacts.isOutboundToCustomer). Only such a call's final caller
@@ -600,7 +604,7 @@ func (s *Session) Start(ctx context.Context) error {
 	// model's start blocks on the gate, and the callee's greeting is judged
 	// from the slots read meanwhile.
 	if s.cfg.IsCallerFirst {
-		s.listener = newGreetingListener(s.leg.Law())
+		s.listener = newGreetingListener(s.leg.Law(), s.cfg.CallerFirstWait)
 		s.listenBegan = time.Now()
 		s.listenAnsweredAt = s.leg.AnsweredAt()
 		s.isListening.Store(true)

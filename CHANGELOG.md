@@ -365,6 +365,12 @@ carries the one-line installer's files.
 
 ### Changed
 
+- **`isCallerFirst` flows can set the silent-callee wait** (#603): the optional
+  `global.callerFirstWaitMs` (integer, 500-4000 inclusive) replaces the fixed
+  2000 ms for the "callee said nothing" bound alone; a greeting's end and the
+  4000 ms hard cap are unchanged, and a flow without the field behaves exactly
+  as before. The field is rejected without `isCallerFirst` and outside the
+  range, and the flow panel shows it read-only.
 - **Campaign admission paces by each limit's own period** (#644). Session
   starts are judged over the session period, or over 10 seconds when the period
   is shorter, with the limit scaled to it; tokens over the token period. After

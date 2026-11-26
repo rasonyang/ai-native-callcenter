@@ -154,6 +154,14 @@ func (s *Spec) validate() error {
 	if d := s.Global.MaxDurationSec; d != nil && *d != 0 && (*d < MinDurationLimitSec || *d > MaxDurationLimitSec) {
 		report("global.maxDurationSec is %d; it is a number of seconds from %d to %d, or left out for the default", *d, MinDurationLimitSec, MaxDurationLimitSec)
 	}
+	if w := s.Global.CallerFirstWaitMs; w != nil {
+		switch {
+		case !s.Global.IsCallerFirst:
+			report("global.callerFirstWaitMs is set without global.isCallerFirst; it is the wait of the listen-first opening and has nothing to move")
+		case *w < MinCallerFirstWaitMs || *w > MaxCallerFirstWaitMs:
+			report("global.callerFirstWaitMs is %d; it is a number of milliseconds from %d to %d, or left out for the %d default", *w, MinCallerFirstWaitMs, MaxCallerFirstWaitMs, DefaultCallerFirstWaitMs)
+		}
+	}
 
 	for _, line := range []string{s.Global.ToolWaitLine.ZH, s.Global.ToolWaitLine.EN} {
 		if strings.ContainsAny(line, "?？") {

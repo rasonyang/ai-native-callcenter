@@ -555,9 +555,18 @@ type Global struct {
 	// never talks over it. It is the call-level counterpart of a phase's
 	// isCallerNext. It applies only to a call placed to a customer; on an
 	// inbound or internal call it is ignored, so a flow that also serves an
-	// inbound DID stays valid. The wait itself is a platform constant, not a
-	// flow setting.
+	// inbound DID stays valid. The wait is callerFirstWaitMs, 2000 ms when
+	// that is absent (#603).
 	IsCallerFirst bool `json:"isCallerFirst,omitempty"`
+	// CallerFirstWaitMs is how long the wait isCallerFirst sets holds for a
+	// callee who says nothing: an integer of milliseconds, MinCallerFirstWaitMs
+	// to MaxCallerFirstWaitMs inclusive, and only with isCallerFirst — a flow
+	// that sets it without listening first does not load. Absent is
+	// DefaultCallerFirstWaitMs, so a flow without the field waits exactly as
+	// before (#603). It moves only the silent-callee wait: the 4000 ms hard
+	// cap for a callee still speaking, and everything else, stays a platform
+	// constant.
+	CallerFirstWaitMs *int `json:"callerFirstWaitMs,omitempty"`
 	// ToolWaitLine replaces the words of the wait line: what the caller hears
 	// when an HTTP tool has not returned ToolWaitLineAfter after it started
 	// and nothing else is playing (#286). It is said as written, like a
@@ -596,6 +605,16 @@ const (
 	// seconds or more, long enough for one reply.
 	MinDurationLimitSec = 60
 	MaxDurationLimitSec = 3600
+)
+
+// The bounds of Global.CallerFirstWaitMs (#603).
+const (
+	// MinCallerFirstWaitMs and MaxCallerFirstWaitMs bound the silent-callee
+	// wait a flow may set; DefaultCallerFirstWaitMs is the wait of a flow
+	// that sets none.
+	MinCallerFirstWaitMs     = 500
+	MaxCallerFirstWaitMs     = 4000
+	DefaultCallerFirstWaitMs = 2000
 )
 
 // EffectiveMaxDuration is the time budget a call on this flow runs with under

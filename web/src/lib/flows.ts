@@ -200,6 +200,12 @@ export interface FlowGlobal {
    */
   isCallerFirst?: boolean
   /**
+   * How long the listen-first wait holds for a callee who says nothing, in
+   * milliseconds (500–4000). Absent is the 2000 ms default; ignored without
+   * isCallerFirst (#603).
+   */
+  callerFirstWaitMs?: number
+  /**
    * The words of the wait line a caller hears when an HTTP tool has not
    * returned a second after it started and nothing else is playing. Said as
    * written; must be a statement, never a question. A language left empty

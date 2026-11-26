@@ -1121,6 +1121,15 @@ function Persona({ spec, lang }: { spec: FlowSpec; lang: SpecLang }) {
           <Fact label={t('bots.isCallerFirst')}>
             {spec.global?.isCallerFirst ? t('bots.on') : t('bots.off')}
           </Fact>
+          {spec.global?.isCallerFirst && (
+            <Fact label={t('bots.callerFirstWait')}>
+              <span className="tabular">
+                {spec.global.callerFirstWaitMs != null
+                  ? t('bots.callerFirstWaitMs', { ms: spec.global.callerFirstWaitMs })
+                  : t('bots.callerFirstWaitDefault')}
+              </span>
+            </Fact>
+          )}
           <Fact label={t('bots.alwaysAllowed')}>
             <span className="font-mono text-xs">
               {(spec.global?.alwaysAllowedTools ?? []).join(', ') || '—'}

@@ -14,14 +14,15 @@ import (
 )
 
 // The constants of a call that listens before it opens (#594). The wait is a
-// platform constant, not a flow setting. The levels are the starting values
-// and are tuned on a live stack: docs/design/02-ai-voice.md section 4.
+// flow setting since #603 (global.callerFirstWaitMs, the default below when
+// absent); the cap and the levels stay platform constants tuned on a live
+// stack: docs/design/02-ai-voice.md section 4.
 const (
 	// callerFirstWait is how long after the answer the opening waits for a
-	// callee who says nothing.
+	// callee who says nothing, when the flow does not say (#603).
 	callerFirstWait = 2000 * time.Millisecond
 	// callerFirstHardCap is how long the opening waits for a callee who is
-	// still speaking at callerFirstWait. Past it the bot starts anyway.
+	// still speaking at the wait. Past it the bot starts anyway.
 	callerFirstHardCap = 4000 * time.Millisecond
 
 	// listenFloorMeanSquare is -40 dBFS: a slot quieter than this is never
@@ -99,6 +100,9 @@ func (v listenVerdict) String() string {
 // end is waited for until the hard cap; one who has not begun is not.
 type greetingListener struct {
 	law media.Law
+	// wait is the silent-callee bound: the flow's callerFirstWaitMs (#603),
+	// callerFirstWait by default.
+	wait time.Duration
 
 	// firstSince is the time the first slot was judged; the wait is measured
 	// from it for the log.
@@ -123,8 +127,13 @@ type greetingListener struct {
 	speechEnd   time.Duration
 }
 
-func newGreetingListener(law media.Law) *greetingListener {
-	return &greetingListener{law: law, speechStart: -1, speechEnd: -1}
+// wait is how long the listener holds the opening for a callee who says
+// nothing: the flow's callerFirstWaitMs (#603), or callerFirstWait.
+func newGreetingListener(law media.Law, wait time.Duration) *greetingListener {
+	if wait <= 0 {
+		wait = callerFirstWait
+	}
+	return &greetingListener{law: law, wait: wait, speechStart: -1, speechEnd: -1}
 }
 
 // feed judges one slot. since is where the slot ends, from the answer; frame
@@ -161,7 +170,7 @@ func (l *greetingListener) feed(since time.Duration, frame []byte) listenVerdict
 		return listenGreeting
 	case l.isOnset && since >= callerFirstHardCap:
 		return listenHardCap
-	case !l.isOnset && since >= callerFirstWait:
+	case !l.isOnset && since >= l.wait:
 		return listenTimeout
 	}
 	return listenPending
@@ -305,6 +314,7 @@ func (s *Session) endListening(reason string, waited time.Duration, out listenOu
 		s.log.Info("caller-first wait ended",
 			"reason", reason,
 			"waitedMs", ms,
+			"waitLimitMs", s.listener.wait.Milliseconds(),
 			"speechStartMs", out.speechStart.Milliseconds(),
 			"speechEndMs", out.speechEnd.Milliseconds(),
 			"voicedMs", out.voiced.Milliseconds(),
@@ -339,4 +349,15 @@ func (s *Session) watchListening(ctx context.Context) {
 // inbound call ignores it.
 func listensFirst(spec *flow.Spec, facts *callFacts) bool {
 	return spec != nil && spec.Global.IsCallerFirst && facts.isOutboundToCustomer()
+}
+
+// callerFirstWaitOf resolves the silent-callee wait of a call that listens
+// first (#603): the flow's global.callerFirstWaitMs, zero — the session's
+// callerFirstWait default — when the flow sets none or the call does not
+// listen first.
+func callerFirstWaitOf(spec *flow.Spec, callerFirst bool) time.Duration {
+	if spec == nil || !callerFirst || spec.Global.CallerFirstWaitMs == nil {
+		return 0
+	}
+	return time.Duration(*spec.Global.CallerFirstWaitMs) * time.Millisecond
 }

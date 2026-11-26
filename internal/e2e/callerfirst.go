@@ -87,6 +87,9 @@ type CallerFirstCase struct {
 	// after the wait, which proves the mock's measure is not blind); false says
 	// it must have seen none at all.
 	IsUplinkHeard bool
+	// Flow names an alternate flow file next to the case's own (empty: the
+	// run's FlowFile); the wait cases use the callerFirstWaitMs flow (#603).
+	Flow string
 }
 
 // CallerFirstCases are the calls, in the order they are placed.
@@ -119,6 +122,22 @@ var CallerFirstCases = []CallerFirstCase{
 		// The opening is the silent callee's; the burst long after the wait
 		// reaches the provider, so a mock that could not see voice would show.
 		FirstAudioMinMs: callerFirstEarliestMs, FirstAudioMaxMs: callerFirstTimeoutMaxMs, IsUplinkHeard: true,
+	},
+	// The wait cases run on the callerFirstWaitMs=1000 flow (#603).
+	{
+		ID: "F1-E", Number: "+12025550205", Flow: "flow.callerfirst-wait.json",
+		Callee: "says nothing at all, on a flow whose wait is 1000 ms",
+		// The first audio comes about 1000 ms after the media start, in the
+		// spirit of F1-C, not at the default 2000.
+		FirstAudioMinMs: 900, FirstAudioMaxMs: 2000, IsRunWhole: true,
+	},
+	{
+		ID: "F1-E2", Number: "+12025550206", Flow: "flow.callerfirst-wait.json",
+		Callee: "says a greeting at 800-1200 ms, then is silent, on a flow whose wait is 1000 ms",
+		Bursts: []calleesim.Burst{{AtMs: 800, DurationMs: 400}},
+		// The greeting's onset at 800 ms falls inside the 1000 ms wait, so the
+		// release comes at the greeting's end (1200+300), not at the wait.
+		FirstAudioMinMs: 1300, FirstAudioMaxMs: 2200, IsRunWhole: true,
 	},
 }
 
@@ -335,8 +354,24 @@ func (r *callerFirstRun) run(ctx context.Context) error {
 	}
 	r.note("published the caller-first flow on DID %s", did.Number)
 
+	// The wait cases dial a second DID, bound to the callerFirstWaitMs flow
+	// beside the case's own (#603).
+	dids := map[string]string{"": did.Number}
 	for _, cs := range CallerFirstCases {
-		res, err := r.call(ctx, cs, did.Number)
+		if cs.Flow == "" || dids[cs.Flow] != "" {
+			continue
+		}
+		waitDID, err := r.c.publishFlowAndDID(ctx, filepath.Join(filepath.Dir(r.cfg.FlowFile), cs.Flow),
+			CallerFirstFlowSlug+"-w-"+number, "e2e caller first wait "+number, number+"9", nil)
+		if err != nil {
+			return err
+		}
+		r.note("published the caller-first wait flow on DID %s", waitDID.Number)
+		dids[cs.Flow] = waitDID.Number
+	}
+
+	for _, cs := range CallerFirstCases {
+		res, err := r.call(ctx, cs, dids[cs.Flow])
 		if res != nil {
 			r.rep.Results = append(r.rep.Results, *res)
 		}

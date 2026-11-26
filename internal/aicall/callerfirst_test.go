@@ -53,7 +53,7 @@ func slots(kind byte, ms int) string { return strings.Repeat(string(kind), ms/fr
 // run feeds the scenario to a listener and reports the slot (as the time it
 // ends, from the answer) at which it decided, and what it decided.
 func run(law media.Law, line string) (decidedAt time.Duration, verdict listenVerdict, l *greetingListener) {
-	l = newGreetingListener(law)
+	l = newGreetingListener(law, callerFirstWait)
 	for i := 0; i < len(line); i++ {
 		var frame []byte
 		switch line[i] {
@@ -163,6 +163,77 @@ func TestTheListenerDecidesWhereTheCalleesGreetingEnds(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+// global.callerFirstWaitMs moves the silent-callee wait and nothing else
+// (#603): a silent callee gets TIMEOUT at the flow's wait, a greeting that
+// began before it is still released at its own end, a callee who starts one
+// slot too late is not waited for, the 4000 ms hard cap stands at every wait,
+// and the default gives verdicts and slots identical to before on every line.
+func TestTheSilentCalleeWaitIsTheFlows(t *testing.T) {
+	t.Parallel()
+	runAt := func(wait time.Duration, line string) (time.Duration, listenVerdict) {
+		l := newGreetingListener(media.LawMu, wait)
+		for i := 0; i < len(line); i++ {
+			var frame []byte
+			switch line[i] {
+			case 'v':
+				frame = squareFrame(media.LawMu, speechAmp)
+			case 'n':
+				frame = squareFrame(media.LawMu, noiseAmp)
+			}
+			since := time.Duration(i+1) * uplinkSlot
+			if v := l.feed(since, frame); v != listenPending {
+				return since, v
+			}
+		}
+		return 0, listenPending
+	}
+	for _, tc := range []struct {
+		name   string
+		wait   time.Duration
+		line   string
+		wantAt time.Duration
+		want   listenVerdict
+	}{
+		{"a silent callee, wait 500", 500 * time.Millisecond, slots('n', 2000), 500 * time.Millisecond, listenTimeout},
+		{"a silent callee, wait 1200", 1200 * time.Millisecond, slots('n', 2000), 1200 * time.Millisecond, listenTimeout},
+		{"a silent callee, wait 2000", 2000 * time.Millisecond, slots('n', 3000), callerFirstWait, listenTimeout},
+		{"a silent callee, wait 4000", 4000 * time.Millisecond, slots('n', 4500), 4000 * time.Millisecond, listenTimeout},
+		{"a greeting that crosses the wait ends at its own end",
+			1200 * time.Millisecond,
+			scenario(slots('n', 800), slots('v', 600), slots('n', 1000)),
+			1700 * time.Millisecond, listenGreeting},
+		{"a callee who begins one slot after the wait is not waited for",
+			1200 * time.Millisecond,
+			scenario(slots('n', 1220), slots('v', 400), slots('n', 500)),
+			1200 * time.Millisecond, listenTimeout},
+		{"a callee still speaking at the cap is capped at 4000, wait 500",
+			500 * time.Millisecond,
+			scenario(slots('n', 300), slots('v', 5000)),
+			callerFirstHardCap, listenHardCap},
+		{"a callee still speaking at the cap, wait 4000",
+			4000 * time.Millisecond,
+			scenario(slots('n', 500), slots('v', 5000)),
+			callerFirstHardCap, listenHardCap},
+		{"no packets until 1500 with a wait of 1200",
+			1200 * time.Millisecond,
+			scenario(slots('.', 1500), slots('n', 500)),
+			1200 * time.Millisecond, listenTimeout},
+		{"the noisy line at a 1000 ms wait times out, as at 2000",
+			1000 * time.Millisecond, slots('n', 3000),
+			1000 * time.Millisecond, listenTimeout},
+		{"an absent field waits as before: 2000, not earlier",
+			0, slots('n', 3000), callerFirstWait, listenTimeout},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			at, got := runAt(tc.wait, tc.line)
+			if got != tc.want || at != tc.wantAt {
+				t.Fatalf("decided %v at %v, want %v at %v", got, at, tc.want, tc.wantAt)
+			}
+		})
 	}
 }
 
@@ -713,6 +784,39 @@ func TestOnlyACallPlacedToACustomerListensFirst(t *testing.T) {
 	}
 }
 
+func TestTheFlowsWaitReachesTheSessionOnAPlacedToCustomerCall(t *testing.T) {
+	wait := 1200
+	spec := &flow.Spec{}
+	spec.Global.IsCallerFirst = true
+	spec.Global.CallerFirstWaitMs = &wait
+	for _, tc := range []struct {
+		name        string
+		spec        *flow.Spec
+		callerFirst bool
+		want        time.Duration
+	}{
+		{"a placed-to-customer call gets the flow's wait", spec, true, 1200 * time.Millisecond},
+		{"a call that does not listen first gets none", spec, false, 0},
+		{"a flow without the field gets the default", &flow.Spec{Global: flow.Global{IsCallerFirst: true}}, true, 0},
+	} {
+		if got := callerFirstWaitOf(tc.spec, tc.callerFirst); got != tc.want {
+			t.Errorf("%s: callerFirstWaitOf = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+	// And the session keeps it for the listener its Start builds.
+	session, err := New(newFakeLeg(media.LawMu), nopModel{}, provider.OpenAIProfile(), Config{
+		IsCallerFirst:   true,
+		CallerFirstWait: callerFirstWaitOf(spec, true),
+		Logger:          slog.New(slog.NewJSONHandler(&lockedBuffer{}, nil)),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if session.cfg.CallerFirstWait != 1200*time.Millisecond {
+		t.Fatalf("session's CallerFirstWait = %v, want 1200ms", session.cfg.CallerFirstWait)
+	}
+}
+
 func TestACallThatDoesNotListenFirstBehavesAsBefore(t *testing.T) {
 	leg := newFakeLeg(media.LawMu)
 	model := newGatedModel()
@@ -741,7 +845,7 @@ func TestACallThatDoesNotListenFirstBehavesAsBefore(t *testing.T) {
 func BenchmarkGreetingListener(b *testing.B) {
 	law := media.LawMu
 	speech, noise := squareFrame(law, speechAmp), squareFrame(law, noiseAmp)
-	l := newGreetingListener(law)
+	l := newGreetingListener(law, callerFirstWait)
 	since := time.Duration(0)
 	b.ReportAllocs()
 	var i int
@@ -756,7 +860,7 @@ func BenchmarkGreetingListener(b *testing.B) {
 		}
 		i++
 		if l.feed(since, frame) != listenPending {
-			*l = *newGreetingListener(law)
+			*l = *newGreetingListener(law, callerFirstWait)
 			since = 0
 		}
 	}
@@ -769,7 +873,7 @@ func BenchmarkUplinkClockListening(b *testing.B) {
 			b.Fatal(err)
 		}
 		session.isListening.Store(true)
-		session.listener = newGreetingListener(media.LawMu)
+		session.listener = newGreetingListener(media.LawMu, callerFirstWait)
 		epoch := time.Unix(1_000_000, 0)
 		// The answer is far in the future, so the listener never decides.
 		session.listenAnsweredAt = epoch.Add(24 * time.Hour)
