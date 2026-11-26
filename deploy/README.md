@@ -71,7 +71,8 @@ allowing the stack's ports ([Ports and firewall](#ports-and-firewall)).
   `XAI_API_KEY` for grok, `ALIYUN_API_KEY` for qwen, `DOUBAO_API_KEY`,
   `REALTIME_API_KEY` plus `AICC_PROVIDER_ENDPOINT` for gateway) or asked for at
   the terminal with the input hidden. With `sudo`, keep an exported key with
-  `sudo -E`. `none` runs without a bot: calls to the bot numbers go to their
+  `sudo --preserve-env=<KEY_NAME>` (`sudo -E` is ignored by sudo-rs, the
+  default sudo on Ubuntu 26.04). `none` runs without a bot: calls to the bot numbers go to their
   queues.
 - Secrets: `POSTGRES_PASSWORD`, `ESL_PASSWORD`, `LUA_PASSWORD` and
   `AICC_SEED_PASSWORD` are generated (32 random characters each) and written

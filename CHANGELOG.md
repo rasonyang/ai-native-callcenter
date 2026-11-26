@@ -71,6 +71,12 @@ carries the one-line installer's files.
 
 ### Fixed
 
+- **The installer's sudo advice works with sudo-rs** (#725). Ubuntu 26.04
+  ships sudo-rs, which ignores `sudo -E`, so the documented one-line install
+  failed with `no key for <provider>` and the error repeated the same advice.
+  The docs and the error now say `sudo --preserve-env=<KEY_NAME>`, which works
+  with both sudo and sudo-rs.
+
 - **The end of a bot turn is always reported before the end of its playback**
   (#627, #692; thanks @sanketpatel32). When a turn's audio had almost finished
   playing as the model finished the turn, the call could learn that the caller

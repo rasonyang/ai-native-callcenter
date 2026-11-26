@@ -34,12 +34,14 @@ environment variable, not an `AICC_*` setting:
 | `doubao` | `DOUBAO_API_KEY` |
 
 Export the key and pass `--provider` when there is no terminal to prompt at; on
-Linux keep the exported key through sudo with `sudo -E`:
+Linux keep the exported key through sudo with `sudo --preserve-env=<KEY_NAME>`.
+It works with both sudo and sudo-rs, the default sudo on Ubuntu 26.04, which
+ignores `sudo -E`:
 
 ```sh
 # Linux
 export ALIYUN_API_KEY='<your-key>'
-curl -fsSL https://github.com/rasonyang/ai-native-callcenter/releases/latest/download/install.sh | sudo -E sh -s -- --provider qwen
+curl -fsSL https://github.com/rasonyang/ai-native-callcenter/releases/latest/download/install.sh | sudo --preserve-env=ALIYUN_API_KEY sh -s -- --provider qwen
 
 # macOS
 export ALIYUN_API_KEY='<your-key>'
@@ -51,8 +53,8 @@ replaces a non-empty key; to change the provider or fix a key, edit `.env` in
 the install directory (`/opt/aicc/.env` on Linux, `~/.aicc/.env` on macOS) and
 rerun the installer, or `docker compose up -d` there. On Linux both need root:
 the install directory and its `.env` belong to root, so edit with `sudo`, run
-compose as `sudo docker compose`, and rerun the installer with `sudo -E` when
-the new key is exported. Turning the bot back on after `--provider none` also
+compose as `sudo docker compose`, and rerun the installer with `sudo --preserve-env=<KEY_NAME>`
+when the new key is exported. Turning the bot back on after `--provider none` also
 means removing the `AICC_BOT_ENABLED=false` line (or setting it to `true`).
 `aicc doctor`'s `provider_key` and `provider_session` checks say whether the
 key reached the app.
