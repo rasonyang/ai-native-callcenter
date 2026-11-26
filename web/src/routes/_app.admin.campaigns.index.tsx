@@ -67,12 +67,14 @@ function CampaignsPage() {
 
       <DataTable>
         <THead>
-          <Th>{t('campaign.name')}</Th>
-          <Th>{t('campaign.state')}</Th>
-          <Th>{t('campaign.contacts')}</Th>
-          <Th align="right">{t('campaign.inFlight')}</Th>
-          <Th>{t('campaign.did')}</Th>
-          <Th>{t('campaign.createdAt')}</Th>
+          {/* A header label is one unit — in zh a squeezed column would break
+            it a character a line (#650). */}
+          <Th className="whitespace-nowrap">{t('campaign.name')}</Th>
+          <Th className="whitespace-nowrap">{t('campaign.state')}</Th>
+          <Th className="whitespace-nowrap">{t('campaign.contacts')}</Th>
+          <Th align="right" className="whitespace-nowrap">{t('campaign.inFlight')}</Th>
+          <Th className="whitespace-nowrap">{t('campaign.did')}</Th>
+          <Th className="whitespace-nowrap">{t('campaign.createdAt')}</Th>
         </THead>
         <TBody>
           {isPending && <TableMessage colSpan={6}>{t('common.loading')}</TableMessage>}
@@ -101,10 +103,10 @@ function CampaignsPage() {
                 {row.status === 'RUNNING' ? (row.inFlight ?? 0) : '—'}
               </Td>
               <Td className="tabular text-xs text-muted-foreground">
-                <CellText maxWidth="max-w-40" minWidth="min-w-upto-29">{row.didNumber}</CellText>
+                <CellText maxWidth="max-w-40" minWidth="min-w-upto-20">{row.didNumber}</CellText>
               </Td>
               <Td className="tabular text-xs text-muted-foreground">
-                {created.format(new Date(row.createdAt))}
+                <span className="whitespace-nowrap">{created.format(new Date(row.createdAt))}</span>
               </Td>
             </Tr>
           ))}

@@ -131,6 +131,45 @@ function expectStatusWordOnOneLine(ctx: LayoutContext) {
   }
 }
 
+/**
+ * #650: a header label and a Created date are each one line, however narrow
+ * their columns are squeezed — Chinese breaks between any two characters, so
+ * the check has to measure, not read. Line tops are counted on the text nodes
+ * themselves, the same way expectOneLine does for body cells.
+ */
+function textLineCount(root: Element) {
+  const tops = new Set<number>()
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    if (!node.textContent?.trim()) continue
+    const range = document.createRange()
+    range.selectNodeContents(node)
+    for (const rect of range.getClientRects()) if (rect.width > 0) tops.add(Math.round(rect.top))
+  }
+  return tops.size
+}
+
+function expectHeadersAndDatesOnOneLine(ctx: LayoutContext) {
+  const problems: string[] = []
+  const headers = [...document.querySelectorAll('thead th')]
+  if (headers.length === 0) problems.push('  no table headers to measure')
+  for (const [i, th] of headers.entries()) {
+    const lines = textLineCount(th)
+    if (lines > 1) problems.push(`  header ${i + 1} "${th.textContent}" wraps onto ${lines} lines`)
+  }
+  for (const [r, tr] of [...document.querySelectorAll('tbody tr')].entries()) {
+    const cell = tr.querySelectorAll('td')[5]
+    if (!cell) continue
+    const lines = textLineCount(cell)
+    if (lines > 1) problems.push(`  row ${r + 1}: the date "${cell.textContent}" wraps onto ${lines} lines`)
+  }
+  if (problems.length > 0) {
+    throw new LayoutViolation(
+      `${ctx.screen} @ ${ctx.viewport.width}x${ctx.viewport.height} [${ctx.lang}]: a label or a date wraps:\n${problems.join('\n')}`,
+    )
+  }
+}
+
 function render(rows: Campaign[], total = rows.length) {
   return renderApp('/admin/campaigns', {
     handle: ({ path, method }) =>
@@ -146,6 +185,7 @@ describe('campaign list with ordinary campaigns', () => {
     render(statusRows(), 120)
     await waitForRows(5)
     await expectLayout(ctx)
+    expectHeadersAndDatesOnOneLine(ctx)
   })
 })
 
@@ -211,6 +251,7 @@ describe('campaign list in every state', () => {
       await waitForRows(rows.length)
       await expectLayout(ctx)
       expectStatusWordOnOneLine(ctx)
+      expectHeadersAndDatesOnOneLine(ctx)
     })
   }
 })
