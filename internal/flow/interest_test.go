@@ -242,3 +242,33 @@ func TestTheInterestRefusalsAreConversations(t *testing.T) {
 		}
 	}
 }
+
+// #715: once the opening cannot be said again, the refusal tells the model to
+// stop calling the tool and close the call. Its reason is the way on: it
+// carries no hint, since the phase's instruction asks for the offer's answer.
+func TestTheRefusalForAnOfferNeverHeardClosesTheCall(t *testing.T) {
+	t.Parallel()
+	for lang, want := range map[string][]string{
+		LangEN: {"Do not call classify again on this call", "end the call", "no interest was recorded"},
+		LangZH: {"这通电话不要再调用 classify", "结束通话", "没有记录任何意向"},
+	} {
+		r, logs := declaredLeadRuntime(t, &fakeActions{}, true, declaredLeadFlow, lang, nil)
+		started := logs.String()
+		output := r.RefuseAsOfferNeverHeard("classify")
+		got := decodeOutput(t, output)
+		if got["ok"] != "0" || got["hint"] != nil {
+			t.Errorf("%s: %s, want ok 0 and no hint", lang, output)
+		}
+		for _, phrase := range want {
+			if !strings.Contains(asString(got["error"]), phrase) {
+				t.Errorf("%s: %s lacks %q", lang, output, phrase)
+			}
+		}
+		if got := strings.TrimPrefix(logs.String(), started); got != "" {
+			t.Errorf("%s: the refusal logged %q; the caller logs the decision", lang, got)
+		}
+		if r.Engine().NodeID() != "pitch" {
+			t.Errorf("%s: the refusal moved the call to %q", lang, r.Engine().NodeID())
+		}
+	}
+}

@@ -1089,15 +1089,17 @@ func (o *Orchestrator) answerToolCall(ctx context.Context, event Event, batch *t
 		// timing and the words of the caller utterance it answers (#612,
 		// lead_guard.go), before anything runs. Refused, it is a conversation;
 		// under guard A the opening is said again once the refusal is answered,
-		// as on a cut the wait settled.
+		// as on a cut the wait settled, and under the offer rule (#715) on its
+		// budget of two.
 		var isRefused bool
-		output, replay, isRefused = o.refusesInterest(event, &guard.interest, session, runtime, actions, log)
+		var replays int
+		output, replay, replays, isRefused = o.refusesInterest(event, &guard.interest, session, runtime, actions, log)
 		if !isRefused {
 			output, moved = o.dispatch(ctx, event, batch, session, runtime, actions, log)
 			break
 		}
 		if replay != nil {
-			defer o.sayOpeningAgain(replay, session, runtime, actions, log)
+			defer o.sayOpeningAgainWithin(replay, replays, session, runtime, actions, log)
 		}
 	default:
 		output, moved = o.dispatch(ctx, event, batch, session, runtime, actions, log)
@@ -2072,8 +2074,16 @@ func (o *Orchestrator) refusesOnCut(event Event, session *Session, runtime *flow
 // the call is still in its entry phase, no ending is armed or under way, and the
 // opening has not been said again this call.
 func (o *Orchestrator) canSayOpeningAgain(session *Session, runtime *flow.Runtime, actions *callActions) bool {
+	return o.canSayOpeningAgainWithin(session, runtime, actions, 1)
+}
+
+// canSayOpeningAgainWithin is canSayOpeningAgain on a budget of replays per
+// call (Session.SayOpeningAgainWithin): the opening has been said again fewer
+// times than that.
+func (o *Orchestrator) canSayOpeningAgainWithin(session *Session, runtime *flow.Runtime, actions *callActions,
+	budget int) bool {
 	return runtime.Engine().NodeID() == runtime.Engine().Spec().InitialNode &&
-		!actions.IsEndingUnderway() && !session.isOpeningSaidAgain()
+		!actions.IsEndingUnderway() && session.openingReplayCount() < budget
 }
 
 // sayOpeningAgain says the opening line once more after a greeting cut it,
@@ -2083,6 +2093,13 @@ func (o *Orchestrator) canSayOpeningAgain(session *Session, runtime *flow.Runtim
 // way, and only once per call.
 func (o *Orchestrator) sayOpeningAgain(cut *openCut, session *Session, runtime *flow.Runtime,
 	actions *callActions, log *slog.Logger) {
+	o.sayOpeningAgainWithin(cut, 1, session, runtime, actions, log)
+}
+
+// sayOpeningAgainWithin is sayOpeningAgain on a budget of replays per call:
+// one, or maxOfferReplays for the lead guard's offer rule (#715).
+func (o *Orchestrator) sayOpeningAgainWithin(cut *openCut, budget int, session *Session, runtime *flow.Runtime,
+	actions *callActions, log *slog.Logger) {
 
 	if runtime.Engine().NodeID() != runtime.Engine().Spec().InitialNode || actions.IsEndingUnderway() {
 		log.Info("the opening was cut, but the call has moved on; not said again",
@@ -2090,5 +2107,5 @@ func (o *Orchestrator) sayOpeningAgain(cut *openCut, session *Session, runtime *
 		session.clearOpeningOwed()
 		return
 	}
-	session.SayOpeningAgain(cut)
+	session.SayOpeningAgainWithin(cut, budget)
 }

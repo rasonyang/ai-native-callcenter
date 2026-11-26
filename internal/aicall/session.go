@@ -379,16 +379,20 @@ type Session struct {
 	// (muteNextTurn): the turn a goodbye's hangup result brings.
 	isNextTurnMuted bool
 	// The opening said again (SayOpeningAgain, docs/design/11-backchannels.md):
-	// isOpeningReplayed is once per call, isReplayOwed says the next spoken-line
-	// turn is the replay and replayTurn is that turn, so a greeting that cuts
-	// it is judged as one over the opening. isReplayWaiting is a replay waiting
-	// for the model's own reply to the greeting to start (replayStop its
-	// backstop), so that line is not taken for that reply.
-	isOpeningReplayed bool
-	isReplayOwed      bool
-	replayTurn        int
-	isReplayWaiting   bool
-	replayStop        func() bool
+	// openingReplays counts the times it was asked for again, once per call
+	// on every path but the offer rule's, which may ask a second time (#715,
+	// maxOfferReplays). isReplayOwed says the next spoken-line turn is the
+	// replay, replayAskedTurn the turn in progress when it was asked for, and
+	// replayTurn is that turn, so a greeting that cuts it is judged as one over
+	// the opening. isReplayWaiting is a replay waiting for the model's own reply
+	// to the greeting to start (replayStop its backstop), so that line is not
+	// taken for that reply.
+	openingReplays  int
+	isReplayOwed    bool
+	replayAskedTurn int
+	replayTurn      int
+	isReplayWaiting bool
+	replayStop      func() bool
 	// The opening's tail (#715), from the moment the opening line or its
 	// replay finishes generating with audio, not muted, until the caller has
 	// heard all of it or a flush has taken some of it: isOpeningTailQueued says
