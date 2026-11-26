@@ -400,8 +400,17 @@ type Session struct {
 	// queued behind it. The leg's queue is first in, first out, so the opening
 	// has played in full once no more than those are left, whether or not its
 	// own playback marker outlived a later turn's start (settleOpeningTail).
+	// openingTailTurn is the turn whose tail it is. Only a turn whose words
+	// are the opening's, or that has none to judge, has one (openingWords).
 	isOpeningTailQueued bool
 	framesBehindOpening int
+	openingTailTurn     int
+	// openingWordsTurn and openingWordsOf keep what the latest turn taken for
+	// the opening or its replay said (#715, judgeOpeningWords), judged as the
+	// next turn starts: its words leave turnText then, and a hook that runs
+	// later (a tail heard behind that next turn) still needs them.
+	openingWordsTurn int
+	openingWordsOf   openingWords
 	// turnOwedUntil is when an asked-for turn that has not started yet stops
 	// counting as the bot's floor; zero is none. See askedForATurn.
 	turnOwedUntil time.Time
@@ -443,8 +452,10 @@ type Session struct {
 	// turnToolCalls counts the tool calls the turn has made. All three are
 	// reset by beginTurn and read into a TOOL_CALL or TURN_DONE when it is
 	// emitted (Event.soFar). The buffer is reused from turn to turn.
+	// isTurnTextCut says words past maxTurnTextBytes were dropped.
 	turnText          []byte
 	turnTextHasDeltas bool
+	isTurnTextCut     bool
 	turnToolCalls     int
 	// turnAnswers is the caller utterance the turn in progress answers, set by
 	// beginTurn (caller_turns.go); nil when there is none.
@@ -1626,7 +1637,7 @@ func (s *Session) stopPlaybackLocked(endsTheTurn bool) (playedMs int, hadQueued 
 	// frames queued behind it found it played in full (#715).
 	if s.isOpeningTailQueued {
 		s.isOpeningTailQueued = false
-		if cleared <= s.framesBehindOpening {
+		if cleared <= s.framesBehindOpening && s.openingWordsLocked(s.openingTailTurn) != openingWordsOther {
 			s.ct.markOpeningHeard()
 		}
 	}
@@ -1670,10 +1681,16 @@ func (s *Session) endInterruptedTurn() bool {
 // reply it would be judged as a claim no tool backs ("let me check").
 func (s *Session) beginTurn(isSpokenLine, isLineAskedAgain bool) {
 	s.mu.Lock()
+	if s.isOpeningTurnLocked(s.turnSeq) {
+		// Before its words go: hooks that run after this turn has started
+		// judge the opening's turn by them (openingWordsLocked, #715).
+		s.openingWordsTurn, s.openingWordsOf = s.turnSeq, s.judgeTurnWordsLocked()
+	}
 	s.framesQueued = 0
 	s.turnSeq++
 	s.turnText = s.turnText[:0]
 	s.turnTextHasDeltas = false
+	s.isTurnTextCut = false
 	s.turnToolCalls = 0
 	s.turnAnswers = s.answeredCallerTurnLocked()
 	if s.isReplayOwed && isSpokenLine {
@@ -1762,6 +1779,7 @@ func (s *Session) noteBotWords(text string, isFinal bool) {
 	}
 	room := maxTurnTextBytes - len(s.turnText)
 	if room <= 0 {
+		s.isTurnTextCut = true
 		return
 	}
 	if len(text) > room {
@@ -1769,6 +1787,7 @@ func (s *Session) noteBotWords(text string, isFinal bool) {
 			room--
 		}
 		text = text[:room]
+		s.isTurnTextCut = true
 	}
 	s.turnText = append(s.turnText, text...)
 }
@@ -1893,10 +1912,16 @@ func (s *Session) finishTurn(isAbandoned bool) playbackMarker {
 	if hasAudio {
 		s.audioTurns++
 		s.lastAudioTurn = s.turnSeq
-		if s.mutedTurn != s.turnSeq && s.isOpeningTurnLocked(s.turnSeq) {
+	}
+	if s.isOpeningTurnLocked(s.turnSeq) && s.mutedTurn != s.turnSeq {
+		// Its words are all in: every engine here reports a turn's transcript
+		// before the turn's end (opening_words.go).
+		words := s.judgeTurnWordsLocked()
+		if hasAudio && words != openingWordsOther {
 			// After the framer's flush: every frame of the opening is queued.
-			s.isOpeningTailQueued, s.framesBehindOpening = true, 0
+			s.isOpeningTailQueued, s.framesBehindOpening, s.openingTailTurn = true, 0, s.turnSeq
 		}
+		s.logOpeningWordsLocked(words, hasAudio)
 	}
 	if isAbandoned && !hasAudio {
 		s.timer.onResponseAbandoned()

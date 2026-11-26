@@ -4,6 +4,7 @@ package aicall
 
 import (
 	"context"
+	"errors"
 	"slices"
 	"strings"
 	"sync"
@@ -1802,6 +1803,123 @@ func TestOverAnEndingUnderwayTheOfferRuleDoesNotRefuse(t *testing.T) {
 		t.Errorf("record_lead = %s, want it run", out)
 	}
 	r.assertLine(t, 1, "guard=B", "verdict=WORDS", "isEndingUnderway=true", "isOpeningHeard=false")
+}
+
+// A live call (qwen, a probe flow): the first response, the opening's, was a
+// bare agreement tool call with no audio; it was refused and the opening asked
+// for again; the provider refused the request (an empty conversation); the
+// line the client still owed was asked for later and taken, as a spoken line,
+// for the replay, but the engine said a line check in it. That turn played in
+// full and counted as the opening heard; the callee confirmed the line and the
+// agreement recorded HIGH. The replay's turn said other words, so the opening
+// stays unheard: the agreement is refused, the opening said a second time, and
+// once that replay is heard the callee's agreement runs.
+func TestAReplayTakenByATurnWithOtherWordsIsNotTheOpeningHeard(t *testing.T) {
+	r := newOfferRig(t, true)
+	r.started()
+	r.agree("fc_1")
+	r.ended()
+	r.assertRefused(t, r.result(t, 1), "开场白会再对他说一遍")
+	r.assertLine(t, 1, "turn=1", "callerTurn=0", "guard=OFFER", "verdict=OPENING_UNHEARD", "isRefused=true",
+		"isOpeningSaidAgain=true", "isOpeningHeard=false")
+	waitFor(t, "the opening to be asked for again", func() bool { return len(r.model.spokenLines()) >= 1 })
+	r.send(provider.Event{Type: provider.EventTypeError, Text: "invalid_value",
+		Err: errors.New("invalid_value: Cannot create response: conversation has no messages or no user message.")})
+
+	// The client's line turn, taken for the replay, says a line check.
+	r.send(provider.Event{Type: provider.EventTypeResponseStarted, IsSpokenLine: true})
+	r.checksTheLine(t, true)
+	r.agreesAfterALineCheck("u1", "fc_2")
+	r.ended()
+	r.assertRefused(t, r.result(t, 2), "开场白会再对他说一遍")
+	r.assertLine(t, 2, "turn=3", "callerTurn=1", "guard=OFFER", "verdict=OPENING_UNHEARD", "isRefused=true",
+		"isOpeningSaidAgain=true", "isOpeningHeard=false")
+	waitFor(t, "the opening to be asked for a second time", func() bool { return len(r.model.spokenLines()) >= 2 })
+
+	r.replayHeardInFull(t)
+	r.callerSpoke("u2")
+	r.final("u2", "好的，我要续约。")
+	r.started()
+	r.agree("fc_3")
+	r.ended()
+	r.assertAgreed(t, r.result(t, 3))
+	r.assertLine(t, 3, "callerTurn=2", "guard=B", "verdict=WORDS", "isOpeningHeard=true")
+	r.probe(t)
+	r.assertReplays(t, 2)
+}
+
+// The call's first turn, the one taken for the opening, says other words and
+// plays in full: the opening is not heard, and the callee's confirmation
+// after it is refused, the opening said again.
+func TestAnOpeningTurnThatSaidOtherWordsIsNotTheOpeningHeard(t *testing.T) {
+	r := newOfferRig(t, true)
+	r.checksTheLine(t, false)
+	r.agreesAfterALineCheck("u1", "fc_1")
+	r.ended()
+	r.assertRefused(t, r.result(t, 1), "开场白会再对他说一遍")
+	r.assertLine(t, 1, "turn=2", "callerTurn=1", "guard=OFFER", "verdict=OPENING_UNHEARD", "isOpeningSaidAgain=true",
+		"isOpeningHeard=false")
+	r.probe(t)
+	r.assertReplays(t, 1)
+	if got := r.leads.intents(); len(got) != 0 {
+		t.Errorf("leads written = %v, want none", got)
+	}
+}
+
+// Speech that starts in the final clause, by the opening's timing, of the
+// turn taken for the opening finds the opening heard only when that turn said
+// it: over a turn that said other words, neither the speech start nor the
+// engine's cut of it counts, and the agreement is refused.
+func TestSpeechLateInAnOpeningTurnWithOtherWordsIsNotTheOpeningHeard(t *testing.T) {
+	r := newOfferRig(t, true)
+	frameBytes := 2 * media.RateProviderOut / 50
+	r.leg.holdFrames(1 << 20)
+	r.started()
+	for sent := 0; sent < heldOpeningFrames; sent += 50 {
+		r.send(provider.Event{Type: provider.EventTypeAudioDelta, Audio: make([]byte, 50*frameBytes)})
+	}
+	r.send(provider.Event{Type: provider.EventTypeOutputTranscript, Text: "您好，请问是机主本人吗？我这边是套餐服务中心的。", IsFinal: true})
+	r.ended()
+	waitLong(t, "the turn to be queued", func() bool {
+		r.session.mu.Lock()
+		defer r.session.mu.Unlock()
+		return r.session.turnSeq == 1 && !r.session.isResponding && r.session.framesQueued >= heldOpeningFrames-2
+	})
+	r.cutsLateInTheTurn(t)
+	r.agree("fc_1")
+	r.ended()
+	r.assertRefused(t, r.result(t, 1), "开场白会再对他说一遍")
+	r.assertLine(t, 1, "guard=OFFER", "verdict=OPENING_UNHEARD", "isOpeningHeard=false")
+}
+
+// cutsLateInTheTurn has the callee speak 1 s before the end of the 11 s turn
+// in progress (in the opening's final clause, by its timing) and the engine
+// cut it; the reply starts, and the callee's words are "好的，要的。".
+func (r *leadRig) cutsLateInTheTurn(t *testing.T) {
+	t.Helper()
+	r.heard(heldOpeningFrames - 50)
+	r.speechStarted("u1")
+	waitFor(t, "the cut", func() bool {
+		r.session.bc.mu.Lock()
+		defer r.session.bc.mu.Unlock()
+		return r.session.bc.cut != nil
+	})
+	r.leg.holdFrames(0)
+	r.speechStopped("u1")
+	r.final("u1", "好的，要的。")
+	r.started()
+}
+
+// The same moment over the opening's own words counts (the control): the
+// agreement runs.
+func TestSpeechLateInTheOpeningsOwnWordsIsTheOpeningHeard(t *testing.T) {
+	r := newOfferRig(t, true)
+	r.openingGenerated(t)
+	r.cutsLateInTheTurn(t)
+	r.agree("fc_1")
+	r.ended()
+	r.assertAgreed(t, r.result(t, 1))
+	r.assertLine(t, 1, "guard=B", "verdict=WORDS", "isOpeningHeard=true")
 }
 
 //

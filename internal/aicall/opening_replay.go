@@ -170,11 +170,16 @@ func (s *Session) hasOpeningLine() bool { return s.cfg.Session.OpeningText != ""
 
 // isOpeningOnItsWay reports whether the opening line or its replay is still on
 // its way to the caller (#715): asked for again and not started yet, being
-// made, or made and not yet all heard (isOpeningTailQueued, settled first). A
+// made and saying something already, or made with the opening's words (or
+// none to judge) and not yet all heard (isOpeningTailQueued, settled first). A
 // replay asked for meanwhile would only say it over itself. A replay asked
 // for and not started counts while at most one other turn (the model's reply
 // to the refusal that asked for it) has begun since: past that the line is not
-// coming, and is not waited for.
+// coming, and is not waited for. A turn taken for the opening that made a
+// tool call before any audio or words (a bare tool call), or that said other
+// words, is not the opening on its way: the replay it is owed is asked for,
+// so a request the provider refused, or one a turn with other words took,
+// leaves the offer rule its second replay and then the closing text.
 func (s *Session) isOpeningOnItsWay() bool {
 	s.settleOpeningTail()
 	s.mu.Lock()
@@ -182,8 +187,14 @@ func (s *Session) isOpeningOnItsWay() bool {
 	if s.isReplayWaiting || s.isOpeningTailQueued || (s.isReplayOwed && s.turnSeq <= s.replayAskedTurn+1) {
 		return true
 	}
-	return s.isOpeningTurnLocked(s.turnSeq) &&
-		(s.isResponding || s.isBotSpeaking || (s.framesQueued > 0 && s.leg.Pending() > 0))
+	if !s.isOpeningTurnLocked(s.turnSeq) {
+		return false
+	}
+	if s.isResponding {
+		return s.framesQueued > 0 || len(s.turnText) > 0
+	}
+	return s.openingWordsLocked(s.turnSeq) != openingWordsOther &&
+		(s.isBotSpeaking || (s.framesQueued > 0 && s.leg.Pending() > 0))
 }
 
 // isOpeningReplayable reports whether, as far as the session can tell, the
@@ -265,13 +276,13 @@ func (s *Session) clearOpeningOwed() {
 // A turn after the cut that made the opening owed, with audio, not muted,
 // clears it: the caller has been answered since. The opening line's own turn
 // or its replay's, with audio and not muted, has been heard to its end, and
-// the call records so (isOpeningHeard, #715); any other turn leaves that as
-// it is.
+// the call records so (isOpeningHeard, #715), unless its words were not the
+// opening's (isOpeningSaidIn); any other turn leaves that as it is.
 func (s *Session) noteOpeningHeard(turn int, hasAudio bool) {
 	if !hasAudio || s.isMutedTurn(turn) {
 		return
 	}
-	if s.isOpeningTurn(turn) {
+	if s.isOpeningSaidIn(turn) {
 		s.ct.markOpeningHeard()
 	}
 	s.bc.mu.Lock()

@@ -86,8 +86,11 @@ type callerTurns struct {
 	// replay, to its final clause at least once (#715): one of them played to
 	// the caller in full, with audio and not muted (noteOpeningHeard), or was
 	// cut inside its final clause (cutInFinalClause: noteOpeningCut, and a
-	// speech start dated there, isOverUnheardOpening). No other bot line sets
-	// it and no caller transcript does. False at the start; set once and never
+	// speech start dated there, isOverUnheardOpening). Only a turn whose own
+	// words are the opening's counts, or one with no transcript to judge
+	// (opening_words.go): a turn the session took for the opening or the
+	// replay that said something else never does. No other bot line sets it
+	// and no caller transcript does. False at the start; set once and never
 	// cleared.
 	isOpeningHeard bool
 }
@@ -127,7 +130,9 @@ func (s *Session) settleOpeningTail() {
 		return
 	}
 	s.isOpeningTailQueued = false
-	s.ct.markOpeningHeard()
+	if s.openingWordsLocked(s.openingTailTurn) != openingWordsOther {
+		s.ct.markOpeningHeard()
+	}
 }
 
 // noteCallerStarted records a caller utterance starting. It is called before
@@ -164,6 +169,7 @@ func (s *Session) noteCallerStarted(itemID string) {
 // (isOpeningHeard, #715).
 func (s *Session) isOverUnheardOpening() bool {
 	s.mu.Lock()
+	turn := s.turnSeq
 	isLine := s.isOpeningTurnLocked(s.turnSeq)
 	pending := s.leg.Pending()
 	isLive := isLine && (s.isResponding || s.isBotSpeaking || (s.framesQueued > 0 && pending > 0))
@@ -176,7 +182,7 @@ func (s *Session) isOverUnheardOpening() bool {
 			return true
 		}
 		_, isHeard := cutInFinalClause(s.cfg.Session.OpeningText, played, unplayed)
-		if isHeard {
+		if isHeard && s.isOpeningSaidIn(turn) {
 			s.ct.markOpeningHeard()
 		}
 		return !isHeard
@@ -199,7 +205,9 @@ func (s *Session) isOverUnheardOpening() bool {
 // that.
 func (s *Session) noteOpeningCut(cut *openCut) {
 	if _, isHeard := s.openingHeardToItsEnd(cut); isHeard {
-		s.ct.markOpeningHeard()
+		if cut.words != openingWordsOther {
+			s.ct.markOpeningHeard()
+		}
 		return
 	}
 	s.ct.mu.Lock()

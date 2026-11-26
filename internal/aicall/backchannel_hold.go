@@ -122,8 +122,12 @@ type openCut struct {
 	// within the opening (openingHeardToItsEnd).
 	isOpening     bool
 	isOpeningLine bool
-	verdict       cutVerdict
-	done          chan struct{}
+	// words is what the opening line's turn said, on a cut of it
+	// (isOpeningLine): a cut that fell in its final clause finds the opening
+	// heard only when they do not say otherwise (#715, noteOpeningCut).
+	words   openingWords
+	verdict cutVerdict
+	done    chan struct{}
 	// isOpeningUnheard says an acknowledgement cut the opening before its
 	// final clause while it could still be said again: no answer to an
 	// offer the callee has not heard, so the opening is owed once more (#610).
@@ -542,6 +546,11 @@ func (s *Session) openCut(cut Event) {
 	}
 	isOpeningLine := s.isOpeningTurn(cut.Turn)
 	isOpening := isOpeningLine
+	// Asked with no lock held, before bc.mu: mu is taken first (#715).
+	words := openingWordsNone
+	if isOpeningLine {
+		words = s.openingWordsOfTurn(cut.Turn)
+	}
 	// Where the cut fell is fixed now, not when it is counted (#626). Asked
 	// with no lock held: the actions take their own (Config.IsClosingLine).
 	isClosingLine := s.cfg.IsClosingLine != nil && s.cfg.IsClosingLine(cut.Turn)
@@ -560,7 +569,7 @@ func (s *Session) openCut(cut Event) {
 	case isClosingLine:
 		line = obs.TurnCutLineClosing
 	}
-	next := &openCut{event: cut, isOpening: isOpening, isOpeningLine: isOpeningLine, line: line,
+	next := &openCut{event: cut, isOpening: isOpening, isOpeningLine: isOpeningLine, words: words, line: line,
 		done: make(chan struct{})}
 	if isOpening {
 		// The lead guard's record of who spoke over the opening (#612).
