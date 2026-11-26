@@ -7,7 +7,6 @@ import (
 	"slices"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -99,8 +98,6 @@ type leadRig struct {
 	// openingFrames its length in 20 ms frames.
 	opening       string
 	openingFrames int
-	// playbacks counts the session's PLAYBACK_DONEs: a turn heard to its end.
-	playbacks *atomic.Int32
 }
 
 type leadRigOptions struct {
@@ -134,7 +131,7 @@ func newLeadRig(t *testing.T, opts leadRigOptions) *leadRig {
 		opts.openingFrames = heldOpeningFrames
 	}
 	r := &leadRig{finalWait: newVerdictWait(), cut: newVerdictWait(), replay: &holdClock{}, leads: &guardLeads{},
-		opening: opts.opening, openingFrames: opts.openingFrames, playbacks: &atomic.Int32{}}
+		opening: opts.opening, openingFrames: opts.openingFrames}
 	wrap := func(m *fakeModel) provider.VoiceSession {
 		switch {
 		case opts.profile.ControlsInterruption:
@@ -151,9 +148,6 @@ func newLeadRig(t *testing.T, opts leadRigOptions) *leadRig {
 			h.session.finalWait = r.finalWait.after
 			h.session.cutWait = r.cut.after
 			h.session.holdAfter = r.replay.after
-			// Set before any turn: the session reads it only after a turn's
-			// playback, which the test's events start.
-			h.session.afterPlaybackDone = func() { r.playbacks.Add(1) }
 			h.session.cfg.OnCutAcknowledged = h.actions.onCutAcknowledged
 			h.session.cfg.IsEndingArmed = h.actions.isArmed
 			h.session.cfg.Session.Language = opts.lang
@@ -1451,23 +1445,41 @@ func newOfferRig(t *testing.T, isDeclared bool) *leadRig {
 	return newLeadRig(t, leadRigOptions{opening: twoPartOpeningLine, flow: offerLeadFlowOf(isDeclared)})
 }
 
-// endsHeardInFull ends the turn in progress and waits until the caller has
-// heard it to its end (PLAYBACK_DONE). Nothing is held on the leg.
-func (r *leadRig) endsHeardInFull(t *testing.T) {
+// These helpers wait on the state of the turn they ended, never on a count of
+// PLAYBACK_DONEs: the session's event loop can run behind the test, and an
+// earlier turn's playback then lands after a count was read and before this
+// turn's own audio and end are handled.
+
+// awaitOpeningHeard waits until the call records its opening, or the replay,
+// as heard to its final clause (Session.isOpeningHeard): the state the offer
+// rule reads, set by that turn's own playback and by nothing else.
+func (r *leadRig) awaitOpeningHeard(t *testing.T) {
 	t.Helper()
-	before := r.playbacks.Load()
-	r.leg.holdFrames(0)
-	r.ended()
-	waitFor(t, "the turn to be heard to its end", func() bool { return r.playbacks.Load() > before })
+	waitFor(t, "the opening to be heard to its end", r.session.isOpeningHeard)
 }
 
-// replayCut has the replay the refusal asked for start as a line of its own,
-// play a little and be cut by the engine before its final clause, as qwen
+// awaitSaidInFull waits until the turn that said text, the latest, has
+// finished generating with audio queued and none of it is left on the leg:
+// the caller has heard all of it, and the test sends nothing that could cut it
+// before going on. A line that is not the opening leaves no state of its own
+// behind its PLAYBACK_DONE where the owed opening was already answered, so
+// this is the turn's own state read under the session's lock.
+func (r *leadRig) awaitSaidInFull(t *testing.T, text string) {
+	t.Helper()
+	waitFor(t, "the line to be heard to its end", func() bool {
+		r.session.mu.Lock()
+		defer r.session.mu.Unlock()
+		return string(r.session.turnText) == text && !r.session.isResponding &&
+			r.session.lastAudioTurn == r.session.turnSeq && r.session.leg.Pending() == 0
+	})
+}
+
+// replayCut has the replay the refusal asked for start as turn, a line of its
+// own, play a little and be cut by the engine before its final clause, as qwen
 // cancels it the moment it hears the callee.
-func (r *leadRig) replayCut(t *testing.T) {
+func (r *leadRig) replayCut(t *testing.T, turn int) {
 	t.Helper()
 	frameBytes := 2 * media.RateProviderOut / 50
-	turn := r.session.currentTurn() + 1
 	r.leg.holdFrames(40)
 	r.send(provider.Event{Type: provider.EventTypeResponseStarted, IsSpokenLine: true})
 	r.send(provider.Event{Type: provider.EventTypeAudioDelta, Audio: make([]byte, 50*frameBytes)})
@@ -1489,20 +1501,28 @@ func (r *leadRig) replayHeardInFull(t *testing.T) {
 	r.send(provider.Event{Type: provider.EventTypeResponseStarted, IsSpokenLine: true})
 	r.send(provider.Event{Type: provider.EventTypeAudioDelta, Audio: make([]byte, 100*frameBytes)})
 	r.send(provider.Event{Type: provider.EventTypeOutputTranscript, Text: r.opening, IsFinal: true})
-	r.endsHeardInFull(t)
+	r.leg.holdFrames(0)
+	r.ended()
+	r.awaitOpeningHeard(t)
 }
 
-// agreesAfterALineCheck has the bot answer what the callee said with a line
-// check heard in full (the reply already started, as cutOpeningWithWords
-// leaves it, when isReplyStarted), the callee confirm the line, and the next
-// response call the agreement.
-func (r *leadRig) agreesAfterALineCheck(t *testing.T, isReplyStarted bool, item, id string) {
+// checksTheLine has the bot answer what the callee said with a line check
+// heard in full (the reply already started, as cutOpeningWithWords leaves it,
+// when isReplyStarted).
+func (r *leadRig) checksTheLine(t *testing.T, isReplyStarted bool) {
 	t.Helper()
 	if !isReplyStarted {
 		r.started()
 	}
 	r.speaks(lineCheckLine)
-	r.endsHeardInFull(t)
+	r.leg.holdFrames(0)
+	r.ended()
+	r.awaitSaidInFull(t, lineCheckLine)
+}
+
+// agreesAfterALineCheck has the callee confirm the line once the line check
+// has been heard, and the next response call the agreement.
+func (r *leadRig) agreesAfterALineCheck(item, id string) {
 	r.callerSpoke(item)
 	r.final(item, lineConfirmation)
 	r.started()
@@ -1533,7 +1553,8 @@ func (r *leadRig) assertReplays(t *testing.T, n int) {
 func TestALineConfirmationAfterTheOpeningWasCutRecordsNoLead(t *testing.T) {
 	r := newOfferRig(t, true)
 	r.cutOpeningWithWords(t, offerCutFrames, "你说什么？")
-	r.agreesAfterALineCheck(t, true, "u2", "fc_1")
+	r.checksTheLine(t, true)
+	r.agreesAfterALineCheck("u2", "fc_1")
 	out := r.result(t, 1)
 	r.call("fc_2", flow.ToolRecordLead, `{"intent":"HIGH","notes":"confirmed"}`)
 	waitFor(t, "the opening to be said again", func() bool { return len(r.model.spokenLines()) >= 1 })
@@ -1556,7 +1577,8 @@ func TestALineConfirmationAfterTheOpeningWasCutRecordsNoLead(t *testing.T) {
 func TestWithoutTheFieldALineConfirmationAfterACutOpeningRunsAsBefore(t *testing.T) {
 	r := newOfferRig(t, false)
 	r.cutOpeningWithWords(t, offerCutFrames, "你说什么？")
-	r.agreesAfterALineCheck(t, true, "u2", "fc_1")
+	r.checksTheLine(t, true)
+	r.agreesAfterALineCheck("u2", "fc_1")
 	r.ended()
 	r.assertAgreed(t, r.result(t, 1))
 	r.assertLine(t, 1, "callerTurn=2", "guard=B", "verdict=WORDS", "isRefused=false", "final=BEFORE_CALL",
@@ -1578,10 +1600,19 @@ func (r *leadRig) cutTwiceThenConfirmed(t *testing.T) {
 	r.ended()
 	r.assertLine(t, 1, "guard=OFFER", "verdict=OPENING_UNHEARD", "isOpeningSaidAgain=true", "isOpeningHeard=false")
 
-	r.replayCut(t)
+	r.replayCut(t, 3)
 	r.callerSpoke("u2")
 	r.final("u2", "喂？")
-	r.agreesAfterALineCheck(t, false, "u3", "fc_2")
+	r.checksTheLine(t, false)
+	// The line check heard in full is what answers the opening owed since its
+	// replay was cut (the greeting over it left it owed): its PLAYBACK_DONE,
+	// the turn's own, clears the mark.
+	waitFor(t, "the line check to answer the owed opening", func() bool {
+		r.session.bc.mu.Lock()
+		defer r.session.bc.mu.Unlock()
+		return !r.session.bc.isOpeningOwed
+	})
+	r.agreesAfterALineCheck("u3", "fc_2")
 	r.assertRefused(t, r.result(t, 2), "开场白会再对他说一遍")
 	waitFor(t, "the opening to be said a second time", func() bool { return len(r.model.spokenLines()) >= 2 })
 	r.ended()
@@ -1610,7 +1641,7 @@ func TestAfterTheLastReplayIsCutTheAgreementIsToldToCloseTheCall(t *testing.T) {
 	r := newOfferRig(t, true)
 	r.cutTwiceThenConfirmed(t)
 
-	r.replayCut(t)
+	r.replayCut(t, 6)
 	r.callerSpoke("u4")
 	r.final("u4", "你说什么？")
 	for i, id := range []string{"fc_3", "fc_4"} {
@@ -1639,7 +1670,8 @@ func TestAfterTheLastReplayIsCutTheAgreementIsToldToCloseTheCall(t *testing.T) {
 	}
 	r.started()
 	r.speaks("再见。")
-	r.endsHeardInFull(t)
+	r.leg.holdFrames(0)
+	r.ended()
 	waitFor(t, "the call to end", func() bool {
 		select {
 		case <-r.done:
@@ -1664,9 +1696,6 @@ func TestAnAgreementAfterTheReplayWasHeardInFullRuns(t *testing.T) {
 	r.ended()
 
 	r.replayHeardInFull(t)
-	if !r.session.isOpeningHeard() {
-		t.Fatal("the replay played in full and the opening is not heard")
-	}
 	r.callerSpoke("u2")
 	r.final("u2", "好的，我要续约。")
 	r.started()
@@ -1683,9 +1712,8 @@ func TestAnAgreementAfterTheReplayWasHeardInFullRuns(t *testing.T) {
 func TestAnAgreementAfterTheOpeningWasHeardInFullRuns(t *testing.T) {
 	r := newOfferRig(t, true)
 	r.openingGenerated(t)
-	before := r.playbacks.Load()
 	r.leg.holdFrames(0)
-	waitFor(t, "the opening to be heard to its end", func() bool { return r.playbacks.Load() > before })
+	r.awaitOpeningHeard(t)
 	r.callerSpoke("u1")
 	r.final("u1", "好的，我要续约。")
 	r.started()
@@ -1724,7 +1752,7 @@ func TestAnAgreementWhileTheReplayIsStillOnItsWayAsksForNoSecondReplay(t *testin
 		"isOpeningSaidAgain=false", "isOpeningHeard=false")
 
 	r.leg.holdFrames(0)
-	waitFor(t, "the replay to be heard to its end", r.session.isOpeningHeard)
+	r.awaitOpeningHeard(t)
 	r.callerSpoke("u2")
 	r.final("u2", "好的，我要续约。")
 	r.started()
@@ -1745,10 +1773,9 @@ func TestOnOpenAIAnOpeningHeardInFullLetsTheAgreementRun(t *testing.T) {
 	r.leg.holdFrames(heldOpeningFrames)
 	r.started()
 	r.send(provider.Event{Type: provider.EventTypeAudioDelta, Audio: make([]byte, media.FrameSamples*heldOpeningFrames)})
-	r.endsHeardInFull(t)
-	if !r.session.isOpeningHeard() {
-		t.Fatal("the opening played in full and is not heard")
-	}
+	r.leg.holdFrames(0)
+	r.ended()
+	r.awaitOpeningHeard(t)
 	r.callerSpoke("u1")
 	waitFor(t, "the caller's turn to be asked for", func() bool { return len(r.hold.answers()) == 1 })
 	r.final("u1", "好的，我要续约。")
