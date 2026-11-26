@@ -84,6 +84,20 @@ carries the one-line installer's files.
   of the short grace after it. The turn's end is now reported first on every
   path, including an opening held for a callee who speaks first. Found in
   testing; not seen on a live call.
+- **The bot no longer says "工具调用" or a tool's name aloud** (#623, #692;
+  thanks @sanketpatel32). On a qwen call the callee once heard the bot say
+  "工具调用" ("tool call") right after noise cut the opening. The instruction
+  that asks qwen to say a line word for word ended in those words, just before
+  the line; it no longer names tool calls, and ends in the demand to say the
+  line as written. And a bot turn whose words are only a tool's name, "工具调用"
+  or "tool call" is now held on qwen and dropped before the caller hears any of
+  it, logged at WARN with its words: the call goes on as after a turn the
+  caller cut before hearing it, the dead-air prompt picks up the silence, and a
+  dropped opening line is said again. On the other engines such a turn is
+  counted and played. The new metric `aicc_bot_tool_talk_total` counts these
+  turns by verdict (`DROPPED`, `MISSED`, `CONTAINED` for such words among
+  others). Not reproduced on the development stack; the new wording and the
+  drop are not yet verified on a live call.
 
 ## v0.9.2 - 2026-11-25
 
