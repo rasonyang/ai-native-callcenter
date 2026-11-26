@@ -387,10 +387,13 @@ func TestTheLimitTransfersAtOnceWhereNoCueCanBeSent(t *testing.T) {
 	}
 }
 
-// driveHarness runs drive with a budget, as runCall does.
-func driveHarness(t *testing.T, budget sessionBudget) (*limitHarness, chan struct{}) {
+// driveHarness runs drive with a budget, as runCall does. The clock is
+// drive's: its waits fire when the test fires them, so a budget is a sequence
+// the test conducts, never a race it must win (#510).
+func driveHarness(t *testing.T, budget sessionBudget, clock *manualClock) (*limitHarness, chan struct{}) {
 	t.Helper()
 	h := newLimitHarness(t, limitSetup{queue: "support", hasClosingTarget: true})
+	h.o.budgetAfter = clock.after
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
@@ -413,10 +416,12 @@ func waitFor(t *testing.T, what string, isDone func() bool) {
 // A limit that comes due while the bot is mid-turn waits for the caller to
 // hear the turn, rather than asking for a line over it.
 func TestTheLimitWaitsForTheBotToFinishItsTurn(t *testing.T) {
+	clock := &manualClock{}
 	h, _ := driveHarness(t, sessionBudget{
 		wrapUpAfter: 10 * time.Millisecond, limitAfter: 60 * time.Millisecond,
 		floorWait: time.Minute,
-	})
+	}, clock)
+	clock.fire(t, 10*time.Millisecond)
 
 	// The wrap-up steer arrives first, as instructions.
 	waitFor(t, "the wrap-up steer", func() bool {
@@ -428,7 +433,8 @@ func TestTheLimitWaitsForTheBotToFinishItsTurn(t *testing.T) {
 	h.model.events <- provider.Event{Type: provider.EventTypeResponseStarted}
 	h.model.events <- provider.Event{Type: provider.EventTypeAudioDelta,
 		Audio: make([]byte, media.FrameSamples)}
-	time.Sleep(150 * time.Millisecond)
+	waitFor(t, "the bot to hold the floor", h.session.isHoldingTheFloor)
+	clock.fire(t, 60*time.Millisecond)
 	if cues := h.model.recordedUserText(); len(cues) != 0 {
 		t.Fatalf("cues = %v, want none while the bot holds the floor", cues)
 	}
@@ -443,10 +449,14 @@ func TestTheLimitWaitsForTheBotToFinishItsTurn(t *testing.T) {
 // A bot that never lets go of the floor does not keep the call past the limit
 // for long: at the backstop the transfer runs with no line.
 func TestTheLimitBackstopTransfersABotThatKeepsTheFloor(t *testing.T) {
+	clock := &manualClock{}
 	h, _ := driveHarness(t, sessionBudget{
 		limitAfter: 20 * time.Millisecond, floorWait: 50 * time.Millisecond,
-	})
+	}, clock)
 	h.model.events <- provider.Event{Type: provider.EventTypeResponseStarted}
+	waitFor(t, "the bot to hold the floor", h.session.isHoldingTheFloor)
+	clock.fire(t, 20*time.Millisecond)
+	clock.fire(t, 50*time.Millisecond)
 
 	waitFor(t, "the transfer", func() bool { return len(h.sw.recordedTransfers()) == 1 })
 	if cues := h.model.recordedUserText(); len(cues) != 0 {
@@ -460,7 +470,7 @@ func TestTheBudgetStopsWhenTheCallEnds(t *testing.T) {
 	h, done := driveHarness(t, sessionBudget{
 		wrapUpAfter: 40 * time.Millisecond, limitAfter: 60 * time.Millisecond,
 		floorWait: time.Second,
-	})
+	}, &manualClock{})
 	h.session.Close(context.Background())
 	select {
 	case <-done:
@@ -731,11 +741,13 @@ func TestAnOwedTurnThatNeverComesStopsHoldingTheFloor(t *testing.T) {
 // A limit that falls due right after a tool result waits for the answer turn,
 // and acts only once the caller has heard it.
 func TestTheLimitWaitsThroughTheGapAfterAToolResult(t *testing.T) {
-	h, _ := driveHarness(t, sessionBudget{limitAfter: 40 * time.Millisecond, floorWait: time.Minute})
+	clock := &manualClock{}
+	h, _ := driveHarness(t, sessionBudget{limitAfter: 40 * time.Millisecond, floorWait: time.Minute}, clock)
 	if err := h.session.AnswerTool("call-1", `{"ok":1}`); err != nil {
 		t.Fatal(err)
 	}
-	time.Sleep(150 * time.Millisecond)
+	clock.fire(t, 40*time.Millisecond)
+	time.Sleep(50 * time.Millisecond)
 	if cues := h.model.recordedUserText(); len(cues) != 0 {
 		t.Fatalf("cues = %v, want none: the answer turn is still to come", cues)
 	}
@@ -756,12 +768,14 @@ func TestTheLimitWaitsThroughTheGapAfterAToolResult(t *testing.T) {
 // A PLAYBACK_DONE already in the channel when the next turn began is stale:
 // consumed while the floor is held again, it does not enforce the limit.
 func TestAStalePlaybackDoneDoesNotEnforceTheLimitOverANewTurn(t *testing.T) {
-	h, _ := driveHarness(t, sessionBudget{limitAfter: 30 * time.Millisecond, floorWait: time.Minute})
+	clock := &manualClock{}
+	h, _ := driveHarness(t, sessionBudget{limitAfter: 30 * time.Millisecond, floorWait: time.Minute}, clock)
 	h.model.events <- provider.Event{Type: provider.EventTypeResponseStarted}
-	time.Sleep(120 * time.Millisecond) // the limit is due and waiting
+	waitFor(t, "the bot to hold the floor", h.session.isHoldingTheFloor)
+	clock.fire(t, 30*time.Millisecond) // the limit is due and waiting
 
 	h.session.emit(Event{Type: EventTypePlaybackDone, Turn: 0})
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(50 * time.Millisecond)
 	if cues := h.model.recordedUserText(); len(cues) != 0 {
 		t.Fatalf("cues = %v, want none: a new turn holds the floor", cues)
 	}

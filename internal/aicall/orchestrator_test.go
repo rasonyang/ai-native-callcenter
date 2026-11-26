@@ -247,12 +247,15 @@ func TestARepeatedEndingToolCallKeepsTheFirstArming(t *testing.T) {
 	model.events <- provider.Event{Type: provider.EventTypeResponseStarted}
 	time.Sleep(20 * time.Millisecond)
 	firstTurn := session.currentTurn()
-	armedAt := time.Now()
 	if result, err := actions.TransferToAgent(t.Context(), flow.TransferRequest{
 		Queue: "support", Reason: "BILLING", Summary: "wants a refund",
 	}); err != nil || !result.IsOK {
 		t.Fatalf("transfer refused: %+v %v", result, err)
 	}
+	actions.mu.Lock()
+	firstDue := actions.capDue
+	firstGeneration := actions.armedGeneration
+	actions.mu.Unlock()
 
 	// The next turn calls the tool again, then hangs up for good measure.
 	time.Sleep(200 * time.Millisecond)
@@ -275,22 +278,29 @@ func TestARepeatedEndingToolCallKeepsTheFirstArming(t *testing.T) {
 
 	actions.mu.Lock()
 	armedInTurn := actions.armedInTurn
+	dueNow := actions.capDue
+	generationNow := actions.armedGeneration
 	actions.mu.Unlock()
 	if armedInTurn != firstTurn {
 		t.Errorf("armed in turn %d, want the first call's turn %d", armedInTurn, firstTurn)
+	}
+	if dueNow != firstDue || generationNow != firstGeneration {
+		t.Errorf("the repeated call re-armed the cap: due %v -> %v, generation %d -> %d",
+			firstDue, dueNow, firstGeneration, generationNow)
 	}
 	if got := sw.variable("aicc_bot_summary"); got != "wants a refund" {
 		t.Errorf("summary variable = %q, want the first call's", got)
 	}
 
 	// Nothing plays out, so the cap runs it — counted from the first call.
+	// The wait is only "the transfer ran"; the cap's own fields above carry
+	// the was-not-restarted verdict (#512).
 	deadline := time.Now().Add(2 * time.Second)
 	for len(sw.recordedTransfers()) == 0 && time.Now().Before(deadline) {
 		time.Sleep(5 * time.Millisecond)
 	}
-	if elapsed := time.Since(armedAt); elapsed >= graceCap+200*time.Millisecond {
-		t.Errorf("the cap ran %v after the first call, want about %v: it was restarted",
-			elapsed, graceCap)
+	if got := sw.recordedTransfers(); len(got) != 1 {
+		t.Fatalf("transfers = %v, want the caller put through", got)
 	}
 	time.Sleep(graceCap)
 	if got := sw.recordedTransfers(); len(got) != 1 || got[0] != "caller-channel-1→7001" {
