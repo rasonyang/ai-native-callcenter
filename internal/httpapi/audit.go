@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -88,6 +89,10 @@ func (s *Server) auditTrail(next http.Handler) http.Handler {
 		}
 
 		recorder := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+		// The handler may name a target the path cannot express — a canonical
+		// number it resolved, where the route has no {xxxId} parameter.
+		target := &auditTarget{}
+		r = r.WithContext(context.WithValue(r.Context(), auditTargetKey{}, target))
 		next.ServeHTTP(recorder, r)
 
 		// Only what happened is audited; a rejected request changed nothing.
@@ -97,6 +102,9 @@ func (s *Server) auditTrail(next http.Handler) http.Handler {
 
 		action := r.Method + " " + routePattern(r)
 		targetKind, targetID := targetFrom(r)
+		if target.kind != "" {
+			targetKind, targetID = target.kind, target.id
+		}
 		s.writeAudit(r, action, targetKind, targetID, detail)
 	})
 }
@@ -228,6 +236,21 @@ func routePattern(r *http.Request) string {
 	return r.URL.Path
 }
 
+// auditTargetKey carries the target slot a handler fills when the route has no
+// id-shaped path parameter — the canonical number a create route resolved.
+type auditTargetKey struct{}
+
+type auditTarget struct{ kind, id string }
+
+// setAuditTarget lets a handler name what the request acted on when the path
+// cannot say it — a canonical number, whichever spelling was posted. It is a
+// no-op off the audited path (unit tests that call a handler bare).
+func setAuditTarget(ctx context.Context, kind, id string) {
+	if t, ok := ctx.Value(auditTargetKey{}).(*auditTarget); ok {
+		t.kind, t.id = kind, id
+	}
+}
+
 // targetFrom derives what the request acted on from its path parameters: the
 // last {xxxId} parameter names the kind, its value the instance.
 func targetFrom(r *http.Request) (kind, id string) {
@@ -239,10 +262,43 @@ func targetFrom(r *http.Request) (kind, id string) {
 	for i := len(params.Keys) - 1; i >= 0; i-- {
 		key := params.Keys[i]
 		if strings.HasSuffix(key, "Id") {
-			return strings.TrimSuffix(key, "Id"), params.Values[i]
+			id, _ := url.PathUnescape(params.Values[i])
+			return strings.TrimSuffix(key, "Id"), id
+		}
+	}
+	// A route keyed by a number rather than an id: the list segment before
+	// {number} names the kind, the parameter's canonical value the instance.
+	for i, key := range params.Keys {
+		if key == "number" {
+			id, _ := url.PathUnescape(params.Values[i])
+			return numberListKind(routePattern(r)), id
 		}
 	}
 	return "", ""
+}
+
+// numberListKind names the list a {number} parameter keys into from the route
+// pattern's segment before it, singularized: /dnc-numbers/{number} → dncNumber,
+// /test-numbers/{number} → testNumber.
+func numberListKind(pattern string) string {
+	parts := strings.Split(pattern, "/")
+	for i, part := range parts {
+		if part != "{number}" || i == 0 {
+			continue
+		}
+		var b strings.Builder
+		for _, word := range strings.Split(parts[i-1], "-") {
+			if word == "" {
+				continue
+			}
+			if b.Len() > 0 {
+				word = strings.ToUpper(word[:1]) + word[1:]
+			}
+			b.WriteString(word)
+		}
+		return strings.TrimSuffix(b.String(), "s")
+	}
+	return ""
 }
 
 // statusRecorder remembers what the handler answered.

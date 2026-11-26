@@ -84,6 +84,8 @@ func (s *Server) CreateTestNumber(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, CodeStorageDown, "cannot save the number", nil)
 		return
 	}
+	// The audit row names the canonical number, whichever spelling was posted.
+	setAuditTarget(r.Context(), "testNumber", number)
 	status := http.StatusOK
 	if isNew {
 		status = http.StatusCreated
