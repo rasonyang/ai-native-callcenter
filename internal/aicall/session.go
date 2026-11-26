@@ -1321,15 +1321,7 @@ func (s *Session) handleModelEvent(event provider.Event) {
 		s.onReplyStartedForReplay()
 
 	case provider.EventTypeResponseDone:
-		hasAudio, marker := s.finishTurn(event.IsAbandoned)
-		turn, isAside := s.turnState()
-		s.emit(Event{Type: EventTypeTurnDone, Turn: turn, HasAudio: hasAudio, IsAside: isAside,
-			soFar: responseSoFar{text: s.turnWords()}})
-		// TURN_DONE goes on the events channel before the marker is handed to
-		// the playback watcher, so its PLAYBACK_DONE can never be published
-		// first: every consumer in drive judges a turn's playback with the
-		// facts its TURN_DONE recorded (#627).
-		s.armPlaybackWatch(marker)
+		s.endResponse(event.IsAbandoned)
 
 	case provider.EventTypeInputTranscript:
 		s.onInputTranscript(event)
@@ -1832,20 +1824,39 @@ func (s *Session) currentTurn() int {
 	return s.turnSeq
 }
 
-// endTurn closes out generation and hands the turn to the playback watcher.
-func (s *Session) endTurn() (hasAudio bool) {
-	hasAudio, marker := s.finishTurn(false)
-	s.armPlaybackWatch(marker)
-	return hasAudio
+// endResponse closes out the turn whose response the provider has finished, in
+// the one order drive depends on: generation ends (finishTurn), the turn's
+// TURN_DONE goes on the events channel, and only then is its marker handed to
+// the playback watcher. Nothing else hands the watcher a marker, so a turn's
+// PLAYBACK_DONE is never published before its TURN_DONE, however long this
+// goroutine is held up in between (#627). Every consumer of PLAYBACK_DONE in
+// drive (the turns-without-a-tool wall, an armed ending, the claim re-ask, the
+// unhung-farewell grace) judges the playback with the facts TURN_DONE recorded.
+// Both events are built from the one marker, so they name the same turn.
+//
+// A call that listens first holds its ResponseDone with the rest of the opening
+// and replays it through here at the release (pumpModelEvents). An interrupted
+// turn's TURN_DONE hands over no marker: its flush retires any that is still
+// draining (stopPlaybackLocked), so no PLAYBACK_DONE follows it.
+func (s *Session) endResponse(isAbandoned bool) {
+	marker := s.finishTurn(isAbandoned)
+	s.emit(Event{Type: EventTypeTurnDone, Turn: marker.turn, HasAudio: marker.hasAudio,
+		IsAside: marker.isAside, soFar: responseSoFar{text: s.turnWords()}})
+	select {
+	case s.playbackDone <- marker:
+	default:
+		s.log.Warn("playback watcher is behind; a turn boundary was not tracked")
+	}
 }
 
-// finishTurn is endTurn. isAbandoned is the provider's word that its watchdog
-// gave this response up (provider.Event.IsAbandoned). Such a response that
-// queued no audio did not answer the caller, whatever it did to the turn timer
-// when it started, so the timer is put back before the playback watcher can
-// arm the dead-air watch (turnTimer.onResponseAbandoned). One that queued audio
-// was heard in part and is left as it is.
-func (s *Session) finishTurn(isAbandoned bool) (hasAudio bool, marker playbackMarker) {
+// finishTurn ends a turn's generation and returns the marker its playback is
+// followed by; endResponse hands it over. isAbandoned is the provider's word
+// that its watchdog gave this response up (provider.Event.IsAbandoned). Such a
+// response that queued no audio did not answer the caller, whatever it did to
+// the turn timer when it started, so the timer is put back before the playback
+// watcher can arm the dead-air watch (turnTimer.onResponseAbandoned). One that
+// queued audio was heard in part and is left as it is.
+func (s *Session) finishTurn(isAbandoned bool) playbackMarker {
 	s.mu.Lock()
 	// The tail of the last sentence is worth padding out rather than losing.
 	s.framer.flush(s.queueFrame)
@@ -1854,7 +1865,7 @@ func (s *Session) finishTurn(isAbandoned bool) (hasAudio bool, marker playbackMa
 	s.openTurns = max(s.openTurns-1, 0)
 	s.drainGeneration++
 	s.logMuted()
-	hasAudio = s.framesQueued > 0
+	hasAudio := s.framesQueued > 0
 	if hasAudio {
 		s.audioTurns++
 		s.lastAudioTurn = s.turnSeq
@@ -1862,21 +1873,10 @@ func (s *Session) finishTurn(isAbandoned bool) (hasAudio bool, marker playbackMa
 	if isAbandoned && !hasAudio {
 		s.timer.onResponseAbandoned()
 	}
-	marker = playbackMarker{generation: s.drainGeneration, turn: s.turnSeq, hasAudio: hasAudio,
+	marker := playbackMarker{generation: s.drainGeneration, turn: s.turnSeq, hasAudio: hasAudio,
 		isAside: s.asideTurn != 0 && s.turnSeq == s.asideTurn}
 	s.mu.Unlock()
-	return hasAudio, marker
-}
-
-// armPlaybackWatch hands a finished turn's marker to the playback watcher.
-// The caller emits the turn's TURN_DONE first, so the watcher's PLAYBACK_DONE
-// is always published after it (#627).
-func (s *Session) armPlaybackWatch(marker playbackMarker) {
-	select {
-	case s.playbackDone <- marker:
-	default:
-		s.log.Warn("playback watcher is behind; a turn boundary was not tracked")
-	}
+	return marker
 }
 
 // playbackMarker identifies one turn's handoff to the playback watcher.
