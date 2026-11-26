@@ -86,7 +86,7 @@ Usage: install.sh [options]
 The provider key comes from the environment (OPENAI_API_KEY, XAI_API_KEY
 for grok, ALIYUN_API_KEY for qwen, DOUBAO_API_KEY, REALTIME_API_KEY for gateway, which
 also needs AICC_PROVIDER_ENDPOINT) or a prompt. With sudo, keep it with
-`sudo -E`.
+`sudo --preserve-env=<KEY_NAME>` (sudo-rs ignores `sudo -E`).
 
 Installs into /opt/aicc on Linux (as root) and ~/.aicc on macOS (not as root).
 EOF
@@ -974,7 +974,7 @@ resolve_provider() {
             PROVIDER_KEY=$REPLY
         fi
         [ -n "$PROVIDER_KEY" ] ||
-            die "no key for $PROVIDER: export $PROVIDER_KEY_VAR (with sudo, use sudo -E) or run at a terminal"
+            die "no key for $PROVIDER: export $PROVIDER_KEY_VAR (with sudo, use sudo --preserve-env=$PROVIDER_KEY_VAR) or run at a terminal"
         value_ok "$PROVIDER_KEY" || die "$PROVIDER_KEY_VAR holds whitespace, a quote, \$, \\, \` or #, which .env cannot carry unquoted"
     fi
     if [ "$PROVIDER" = gateway ] && [ -z "$(env_get "$ENV_FILE" AICC_PROVIDER_ENDPOINT)" ]; then

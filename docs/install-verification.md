@@ -133,7 +133,7 @@ curl -fsSL "$URL" | sudo sh -s -- --provider qwen     # A; B and C without sudo
 ```
 
 Export the provider key first (`ALIYUN_API_KEY` for qwen; keep it through
-`sudo` with `sudo -E`), or type it at the prompt.
+`sudo` with `sudo --preserve-env=ALIYUN_API_KEY`), or type it at the prompt.
 
 ## Steps
 
