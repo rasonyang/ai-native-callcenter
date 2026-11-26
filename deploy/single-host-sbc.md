@@ -55,9 +55,9 @@ curl -fsSL https://github.com/rasonyang/ai-native-callcenter/releases/latest/dow
 ```
 
 It rewrites `FS_EXTERNAL_IP` and `FS_LOCAL_IP` in `.env` and recreates the
-switch. The closing hint then names `http://127.0.0.2:8080` and tells you to
-add `127.0.0.2` to the browser phone's Allow Sites; in this layout ignore both
-and use the name from step 4.
+switch. The closing message then names the host's own address for the web
+interface, and says that a browser phone needs `SIP_WSS_URL` (step 4) until
+it is set.
 
 ## 2. Install FreeSBC beside it
 
