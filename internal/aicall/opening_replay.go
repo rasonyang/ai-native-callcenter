@@ -82,6 +82,13 @@ func (s *Session) noteUnqueuedOpeningCut(turn int) {
 		Played: -1, IsGenerating: true, IsByProvider: true})
 }
 
+// maxOfferReplays is how many times per call the opening may be said again
+// for the offer rule of the lead guard (#715, global.isOfferInOpening), the
+// replay of #610's paths included: its first refusal says the opening again on
+// that once-per-call budget, or once more when another path has spent it.
+// Every other path keeps the budget of one (SayOpeningAgain).
+const maxOfferReplays = 2
+
 // SayOpeningAgain says the call's opening line once more, from its start, in
 // place of the model's own reply to a greeting that cut it, or to words that
 // cut it and that no transcript made known (#610). It is for the
@@ -93,14 +100,20 @@ func (s *Session) noteUnqueuedOpeningCut(turn int) {
 // muted when it has started, so the caller does not hear it; one
 // that has not started yet is waited for (replayWaitCap), because the line
 // would be taken for it.
-func (s *Session) SayOpeningAgain(cut *openCut) bool {
+func (s *Session) SayOpeningAgain(cut *openCut) bool { return s.SayOpeningAgainWithin(cut, 1) }
+
+// SayOpeningAgainWithin is SayOpeningAgain on a budget of replays per call:
+// one on every path but the lead guard's offer rule, which has
+// maxOfferReplays (#715). It reports false once the call has said the opening
+// again that many times, counting every path's replays.
+func (s *Session) SayOpeningAgainWithin(cut *openCut, budget int) bool {
 	text := s.cfg.Session.OpeningText
 	s.mu.Lock()
-	if text == "" || s.isOpeningReplayed {
+	if text == "" || s.openingReplays >= budget {
 		s.mu.Unlock()
 		return false
 	}
-	s.isOpeningReplayed = true
+	s.openingReplays++
 	s.clearOpeningOwed()
 	// Read with mu held: beginTurn, which sets the cut's answer turn, holds it.
 	s.bc.mu.Lock()
@@ -141,9 +154,47 @@ func (s *Session) SayOpeningAgain(cut *openCut) bool {
 // isOpeningSaidAgain reports whether the opening has been asked for again
 // (once per call).
 func (s *Session) isOpeningSaidAgain() bool {
+	return s.openingReplayCount() > 0
+}
+
+// openingReplayCount is how many times the opening has been asked for again,
+// on every path.
+func (s *Session) openingReplayCount() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.isOpeningReplayed
+	return s.openingReplays
+}
+
+// hasOpeningLine reports whether the call has an opening line at all.
+func (s *Session) hasOpeningLine() bool { return s.cfg.Session.OpeningText != "" }
+
+// isOpeningOnItsWay reports whether the opening line or its replay is still on
+// its way to the caller (#715): asked for again and not started yet, being
+// made and saying something already, or made with the opening's words (or
+// none to judge) and not yet all heard (isOpeningTailQueued, settled first). A
+// replay asked for meanwhile would only say it over itself. A replay asked
+// for and not started counts while at most one other turn (the model's reply
+// to the refusal that asked for it) has begun since: past that the line is not
+// coming, and is not waited for. A turn taken for the opening that made a
+// tool call before any audio or words (a bare tool call), or that said other
+// words, is not the opening on its way: the replay it is owed is asked for,
+// so a request the provider refused, or one a turn with other words took,
+// leaves the offer rule its second replay and then the closing text.
+func (s *Session) isOpeningOnItsWay() bool {
+	s.settleOpeningTail()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.isReplayWaiting || s.isOpeningTailQueued || (s.isReplayOwed && s.turnSeq <= s.replayAskedTurn+1) {
+		return true
+	}
+	if !s.isOpeningTurnLocked(s.turnSeq) {
+		return false
+	}
+	if s.isResponding {
+		return s.framesQueued > 0 || len(s.turnText) > 0
+	}
+	return s.openingWordsLocked(s.turnSeq) != openingWordsOther &&
+		(s.isBotSpeaking || (s.framesQueued > 0 && s.leg.Pending() > 0))
 }
 
 // isOpeningReplayable reports whether, as far as the session can tell, the
@@ -202,7 +253,7 @@ func (s *Session) onReplayWaitOver() {
 // turn as its replay.
 func (s *Session) sayOpening(text string) {
 	s.mu.Lock()
-	s.isReplayOwed = true
+	s.isReplayOwed, s.replayAskedTurn = true, s.turnSeq
 	s.mu.Unlock()
 	if err := s.Speak(text, false); err != nil {
 		s.mu.Lock()
@@ -223,10 +274,16 @@ func (s *Session) clearOpeningOwed() {
 
 // noteOpeningHeard is told that a turn finished playing to the caller in full.
 // A turn after the cut that made the opening owed, with audio, not muted,
-// clears it: the caller has been answered since.
+// clears it: the caller has been answered since. The opening line's own turn
+// or its replay's, with audio and not muted, has been heard to its end, and
+// the call records so (isOpeningHeard, #715), unless its words were not the
+// opening's (isOpeningSaidIn); any other turn leaves that as it is.
 func (s *Session) noteOpeningHeard(turn int, hasAudio bool) {
 	if !hasAudio || s.isMutedTurn(turn) {
 		return
+	}
+	if s.isOpeningSaidIn(turn) {
+		s.ct.markOpeningHeard()
 	}
 	s.bc.mu.Lock()
 	if s.bc.isOpeningOwed && turn > s.bc.owedAfterTurn {

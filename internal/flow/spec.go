@@ -558,6 +558,20 @@ type Global struct {
 	// inbound DID stays valid. The wait itself is a platform constant, not a
 	// flow setting.
 	IsCallerFirst bool `json:"isCallerFirst,omitempty"`
+	// IsOfferInOpening says the entry phase's announce, the call's opening
+	// line, carries what the caller must hear before an interest can be
+	// recorded: the offer itself, not only a greeting (#715). On a flow that
+	// declares it, a tool call that would record interest (a move into a phase
+	// declaring a HIGH or MEDIUM lead, or record_lead with one) is refused as a
+	// conversation until the caller has heard the opening, or its replay, to
+	// its final clause, from a turn whose own words were the opening's (the
+	// bot's transcript, compared loosely; another line, or a turn meant for the
+	// opening that said something else, never counts); the opening is said
+	// again at most twice per call, and
+	// after that the model is told to close the call. Absent is false, and the
+	// guard judges as before. Load refuses it on a flow whose entry phase has no
+	// announce: there is no opening line to hear.
+	IsOfferInOpening bool `json:"isOfferInOpening,omitempty"`
 	// ToolWaitLine replaces the words of the wait line: what the caller hears
 	// when an HTTP tool has not returned ToolWaitLineAfter after it started
 	// and nothing else is playing (#286). It is said as written, like a

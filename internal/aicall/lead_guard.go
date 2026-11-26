@@ -55,6 +55,27 @@ import (
 //     earlier utterance made refuses the call that answers a later "好的", and
 //     one that came after a response's first verdict refuses its later calls.
 //     A and a refusal keep their own verdicts.
+//   - The offer (#715), on a flow that declares global.isOfferInOpening only:
+//     its opening line carries what the caller must hear before an interest
+//     can be recorded. While the call's opening, or its replay, has not been
+//     heard to its final clause (Session.isOpeningHeard: played in full, or
+//     cut or spoken over inside that clause; nothing else sets it and nothing
+//     clears it), a guarded call is refused as a conversation with A's verdict,
+//     OPENING_UNHEARD, judged before A and before B's wait, whatever the
+//     caller turn it answers. Three production calls show why A is not
+//     enough: the opening was cut before its offer, the bot asked whether the
+//     callee could hear it, the callee said they could, and the agreement
+//     tool ran on that answer, a new caller turn begun after the line check
+//     had played in full. The rule's own way out is bounded: while the
+//     opening or a replay is still on its way to the caller nothing more is
+//     asked for; otherwise the opening is said again, on #610's budget or,
+//     once that is spent, a second time (maxOfferReplays); after that, or
+//     where it cannot be said again (the call has left its entry phase), the
+//     model is told to stop calling the tool and close the call politely
+//     (Runtime.RefuseAsOfferNeverHeard), and the call ends by the flow's
+//     ordinary endings with no lead. Not over an ending under way or in a
+//     terminal phase, where A and B judge as on any flow; a flow without the
+//     field is judged as before.
 //
 // B judges the caller's words, which the answer guard of #484 and #553 never
 // does (answer_guard.go): there a hangup is judged on the bot's own words,
@@ -80,8 +101,9 @@ import (
 // that follows asks for the one turn it always did.
 //
 // One line per judged call (the verdict, the guard, when the final came
-// against the call, the wait), never the words; one count per call
-// (aicc_bot_lead_guard_total{reason, provider}).
+// against the call, the wait, and whether the call's opening had been heard to
+// its final clause by then, isOpeningHeard, #715), never the words; one count
+// per call (aicc_bot_lead_guard_total{reason, provider}).
 
 // leadFinalWait is how long a guarded tool waits for the final transcript of
 // the caller utterance it answered. Owner decision, 2026-11-19.
@@ -93,7 +115,7 @@ type interestVerdict int
 const (
 	// interestWords: the caller's words were not a refusal; the tool runs.
 	interestWords interestVerdict = iota
-	// interestOpeningUnheard: guard A; refused.
+	// interestOpeningUnheard: guard A, or the offer rule (#715); refused.
 	interestOpeningUnheard
 	// interestDeclined: the final was only refusal phrases; refused.
 	interestDeclined
@@ -140,11 +162,13 @@ type interestGuard struct {
 	hasUnconfirmed                  bool
 	// last is the latest decision and the response and caller turn it was
 	// made for: a later guarded call of the same response, on the same caller
-	// turn, gets the same one.
+	// turn, gets the same one. isOffer says the offer rule (#715) made it, and
+	// isClosing that it told the model to close the call.
 	last struct {
 		turn, seq          int
 		verdict            interestVerdict
 		isRefused, isAgain bool
+		isOffer, isClosing bool
 		isSet              bool
 	}
 }
@@ -152,23 +176,33 @@ type interestGuard struct {
 // refusesInterest judges a guarded tool call (flow.Runtime.ClaimsInterest)
 // and reports whether it is refused, with the refusal in output. replay is
 // the cut to say the opening again on once the refusal is answered, nil for
-// none (guard A, while the opening can still be said again). It may wait for
-// the final transcript (Session.awaitCallerFinal).
+// none (guard A or the offer rule, while the opening can still be said
+// again), and replays the per-call budget it is said within
+// (Session.SayOpeningAgainWithin). It may wait for the final transcript
+// (Session.awaitCallerFinal).
 func (o *Orchestrator) refusesInterest(event Event, g *interestGuard, session *Session,
-	runtime *flow.Runtime, actions *callActions, log *slog.Logger) (output string, replay *openCut, isRefused bool) {
+	runtime *flow.Runtime, actions *callActions, log *slog.Logger) (output string, replay *openCut, replays int,
+	isRefused bool) {
 
 	answered := event.answered
 	seq := 0
 	if answered != nil {
 		seq = answered.seq
 	}
+	// Logged on every flow and every engine (#715): read before anything
+	// waits, as the state the call was made in.
+	isOpeningHeard := session.isOpeningHeard()
 	var verdict interestVerdict
 	isSameResponse := g.last.isSet && g.last.turn == event.Turn && g.last.seq == seq
-	isSaidAgain := false
+	isSaidAgain, isOffer, isClosing := false, false, false
 	var waited time.Duration
 	switch {
 	case isSameResponse:
 		verdict, isRefused, isSaidAgain = g.last.verdict, g.last.isRefused, g.last.isAgain
+		isOffer, isClosing = g.last.isOffer, g.last.isClosing
+	case o.isOfferUnheard(isOpeningHeard, session, runtime, actions):
+		// The offer rule (#715): before A, and before B's wait.
+		verdict, isOffer = interestOpeningUnheard, true
 	case answered == nil:
 		verdict = interestNoCallerTurn
 	default:
@@ -202,6 +236,17 @@ func (o *Orchestrator) refusesInterest(event Event, g *interestGuard, session *S
 	}
 	if !isSameResponse {
 		switch {
+		case isOffer:
+			isRefused = true
+			switch {
+			case session.isOpeningOnItsWay():
+				// The opening, or a replay, is still being said: it is not
+				// asked for over itself, and nothing of the budget is spent.
+			case o.canSayOpeningAgainWithin(session, runtime, actions, maxOfferReplays):
+				isSaidAgain = true
+			default:
+				isClosing = true
+			}
 		case verdict == interestOpeningUnheard:
 			isRefused = true
 			isSaidAgain = o.canSayOpeningAgain(session, runtime, actions)
@@ -218,6 +263,7 @@ func (o *Orchestrator) refusesInterest(event Event, g *interestGuard, session *S
 		}
 		g.last.turn, g.last.seq, g.last.verdict = event.Turn, seq, verdict
 		g.last.isRefused, g.last.isAgain, g.last.isSet = isRefused, isSaidAgain, true
+		g.last.isOffer, g.last.isClosing = isOffer, isClosing
 	} else if verdict == interestMachine {
 		isRefused = !isEndingNear
 	}
@@ -227,7 +273,10 @@ func (o *Orchestrator) refusesInterest(event Event, g *interestGuard, session *S
 	}
 
 	guardName, final := "B", "NONE"
-	if verdict == interestOpeningUnheard {
+	switch {
+	case isOffer:
+		guardName = "OFFER"
+	case verdict == interestOpeningUnheard:
 		guardName = "A"
 	}
 	if answered != nil {
@@ -242,14 +291,19 @@ func (o *Orchestrator) refusesInterest(event Event, g *interestGuard, session *S
 		"tool", event.ToolName, "turn", event.Turn, "callerTurn", seq, "guard", guardName,
 		"verdict", verdict.reason(), "isRefused", isRefused, "final", final,
 		"waitedMs", waited.Milliseconds(), "isOpeningSaidAgain", isSaidAgain,
-		"isSameResponse", isSameResponse, "isEndingUnderway", isEndingNear)
+		"isSameResponse", isSameResponse, "isEndingUnderway", isEndingNear,
+		"isOpeningHeard", isOpeningHeard)
 	obs.RecordLeadGuard(reason, o.cfg.Profile.Name)
 	if !isRefused {
-		return "", nil, false
+		return "", nil, 0, false
 	}
 
 	switch verdict {
 	case interestOpeningUnheard:
+		if isClosing {
+			output = runtime.RefuseAsOfferNeverHeard(event.ToolName)
+			break
+		}
 		output = runtime.RefuseAsUnheardOffer(event.ToolName, isSaidAgain)
 		if isSaidAgain && !isSameResponse {
 			// The reply that made the call is muted when the opening is said
@@ -259,6 +313,10 @@ func (o *Orchestrator) refusesInterest(event Event, g *interestGuard, session *S
 			if replay == nil {
 				replay = &openCut{isOpening: true, answerTurn: event.Turn, done: make(chan struct{})}
 			}
+			replays = 1
+			if isOffer {
+				replays = maxOfferReplays
+			}
 		}
 	case interestDeclined:
 		output = runtime.RefuseAsDeclined(event.ToolName)
@@ -267,7 +325,18 @@ func (o *Orchestrator) refusesInterest(event Event, g *interestGuard, session *S
 	default:
 		output = runtime.RefuseAsUnconfirmed(event.ToolName)
 	}
-	return output, replay, true
+	return output, replay, replays, true
+}
+
+// isOfferUnheard reports whether the offer rule (#715) refuses a guarded call
+// now: the flow declares that its opening carries the offer
+// (Runtime.IsOfferInOpening), the call has an opening line, the caller has not
+// heard it, or its replay, to its final clause (isOpeningHeard, read by the
+// caller), and no ending is under way and the phase is not terminal.
+func (o *Orchestrator) isOfferUnheard(isOpeningHeard bool, session *Session, runtime *flow.Runtime,
+	actions *callActions) bool {
+	return !isOpeningHeard && runtime.IsOfferInOpening() && session.hasOpeningLine() &&
+		!actions.IsEndingUnderway() && !runtime.Engine().IsTerminal()
 }
 
 // refusalMaxPhrases is how many phrases an utterance may be made of and still

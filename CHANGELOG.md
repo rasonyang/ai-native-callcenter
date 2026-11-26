@@ -27,6 +27,34 @@ carries the one-line installer's files.
 - One setting added: `AICC_LEAD_JUDGE_INTENTS` (default `HIGH`, #723), above.
   An unknown value, a repeated one or an empty item refuses startup. None
   removed. No API contract change and no migration.
+- A flow can set the new `global.isOfferInOpening` (#715); a flow that does
+  not is judged as before, and no seeded flow sets it. The lead guard's line
+  gains `isOpeningHeard` on every flow.
+
+### Added
+
+- **`global.isOfferInOpening`: no lead before the opening is heard** (#715).
+  A flow whose opening line carries the offer says so, and a tool call that
+  would record `HIGH` or `MEDIUM` is then refused as a conversation until the
+  callee has heard the opening, or its replay, to its final clause: played in
+  full, or cut or spoken over inside that clause, by a turn whose own words
+  were the opening's. Another line the bot says ("can you hear me?") and the
+  callee's answer to it do not count, nor does a turn meant to be the opening
+  or its replay in which the engine said something else: the bot's transcript
+  of the turn is compared with the opening, loosely enough for a numeral
+  written another way, and such a turn logs `the turn taken for the opening
+  did not say the opening's words`. So a callee whose opening was cut before
+  the offer and who only confirms the line records no lead; a callee who
+  hears the opening and agrees still does.
+  The refusal says the opening again, at most twice per call, and after that
+  the model is told to stop calling the tool and close the call politely, so
+  the refusal cannot repeat without end. The flow is refused at load when its
+  entry phase has no `announce`, and the bot's runtime panel shows the field.
+  Every judged call's `a tool that would record the customer's interest was
+  judged` line now says whether the opening had been heard (`isOpeningHeard`),
+  on every flow, and a refusal by this rule logs `guard=OFFER` with
+  `verdict=OPENING_UNHEARD`. `docs/flow-authoring.md` sections 2.2 and 2.7.1
+  say how to write such an opening (thanks @Yshuro).
 
 ### Changed
 

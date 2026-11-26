@@ -133,6 +133,87 @@ func TestAToolWhoseResultIsUnknownIsJudgedOnItsRules(t *testing.T) {
 	}
 }
 
+// offerFlow opens with the offer, in the entry phase's announce: the first %s
+// is spliced into global, the second into the entry phase.
+const offerFlow = `{
+  "id": "offer_in_opening", "specVersion": "v2", "initialNode": "offer",
+  "global": {"persona": "p"%s},
+  "nodes": {
+    "offer": {"instruction": "Make the offer."%s, "tools": []}
+  }
+}`
+
+func offerSpec(global, announce string) ([]byte, func() (*Spec, error)) {
+	if announce != "" {
+		announce = `, "announce": ` + announce
+	}
+	doc := []byte(strings.Replace(strings.Replace(offerFlow, "%s", global, 1), "%s", announce, 1))
+	return doc, func() (*Spec, error) { return Load(doc) }
+}
+
+// #715: a flow declares that its opening carries the offer; absent is false.
+func TestAFlowCanDeclareThatItsOpeningCarriesTheOffer(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		global string
+		want   bool
+	}{
+		{`, "isOfferInOpening": true`, true},
+		{``, false},
+		{`, "isOfferInOpening": false`, false},
+	} {
+		_, load := offerSpec(tc.global, `{"en": "Hello. Renew now at 20% off, would you like it?"}`)
+		spec, err := load()
+		if err != nil {
+			t.Fatalf("load with %q: %v", tc.global, err)
+		}
+		logs := &logCapture{}
+		r := NewRuntime(NewEngine(spec, LangEN, nil, logs.logger()), &fakeActions{}, NewBackend(""), nil, logs.logger())
+		if spec.Global.IsOfferInOpening != tc.want || r.IsOfferInOpening() != tc.want {
+			t.Errorf("global %q: isOfferInOpening = %v, runtime %v; want %v",
+				tc.global, spec.Global.IsOfferInOpening, r.IsOfferInOpening(), tc.want)
+		}
+	}
+}
+
+// Load refuses the field on a flow whose entry phase says no line of its own:
+// there is no opening for the caller to hear the offer in. An announce in one
+// language is a line in both (Text.For falls back).
+func TestIsOfferInOpeningIsRejectedWithoutAnOpeningLine(t *testing.T) {
+	t.Parallel()
+	want := `global.isOfferInOpening is set but the entry phase "offer" has no announce`
+	for name, announce := range map[string]string{
+		"no announce":    ``,
+		"empty announce": `""`,
+		"both empty":     `{"en": "", "zh": ""}`,
+	} {
+		_, load := offerSpec(`, "isOfferInOpening": true`, announce)
+		if _, err := load(); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%s: Load = %v, want an error containing %q", name, err, want)
+		}
+		_, load = offerSpec(``, announce)
+		if _, err := load(); err != nil {
+			t.Errorf("%s without the field: %v", name, err)
+		}
+	}
+	_, load := offerSpec(`, "isOfferInOpening": true`, `{"zh": "您好，现在续约可以打八折，请问您需要吗？"}`)
+	if _, err := load(); err != nil {
+		t.Errorf("an opening in one language: %v", err)
+	}
+}
+
+func TestIsOfferInOpeningIsKnownToTheUnknownFieldCheck(t *testing.T) {
+	t.Parallel()
+	doc, _ := offerSpec(`, "isOfferInOpening": true`, `"Hello."`)
+	if found := unknownFields(doc); len(found) != 0 {
+		t.Errorf("isOfferInOpening reported as unknown: %v", found)
+	}
+	found := unknownFields([]byte(strings.Replace(string(doc), "isOfferInOpening", "isOfferInOpenning", 1)))
+	if len(found) != 1 || found[0].Suggestion != "isOfferInOpening" {
+		t.Errorf("a near miss = %v, want one suggesting isOfferInOpening", found)
+	}
+}
+
 // The refusals are conversations: ok 0, a reason that names the tool, and
 // the phase's instruction as the way on, in the call's language.
 func TestTheInterestRefusalsAreConversations(t *testing.T) {
@@ -158,6 +239,36 @@ func TestTheInterestRefusalsAreConversations(t *testing.T) {
 		}
 		if again, not := r.RefuseAsUnheardOffer("classify", true), r.RefuseAsUnheardOffer("classify", false); again == not {
 			t.Errorf("%s: the opening said again or not reads the same", lang)
+		}
+	}
+}
+
+// #715: once the opening cannot be said again, the refusal tells the model to
+// stop calling the tool and close the call. Its reason is the way on: it
+// carries no hint, since the phase's instruction asks for the offer's answer.
+func TestTheRefusalForAnOfferNeverHeardClosesTheCall(t *testing.T) {
+	t.Parallel()
+	for lang, want := range map[string][]string{
+		LangEN: {"Do not call classify again on this call", "end the call", "no interest was recorded"},
+		LangZH: {"这通电话不要再调用 classify", "结束通话", "没有记录任何意向"},
+	} {
+		r, logs := declaredLeadRuntime(t, &fakeActions{}, true, declaredLeadFlow, lang, nil)
+		started := logs.String()
+		output := r.RefuseAsOfferNeverHeard("classify")
+		got := decodeOutput(t, output)
+		if got["ok"] != "0" || got["hint"] != nil {
+			t.Errorf("%s: %s, want ok 0 and no hint", lang, output)
+		}
+		for _, phrase := range want {
+			if !strings.Contains(asString(got["error"]), phrase) {
+				t.Errorf("%s: %s lacks %q", lang, output, phrase)
+			}
+		}
+		if got := strings.TrimPrefix(logs.String(), started); got != "" {
+			t.Errorf("%s: the refusal logged %q; the caller logs the decision", lang, got)
+		}
+		if r.Engine().NodeID() != "pitch" {
+			t.Errorf("%s: the refusal moved the call to %q", lang, r.Engine().NodeID())
 		}
 	}
 }

@@ -555,6 +555,12 @@ func (r *Runtime) ClaimsInterest(name, arguments string) bool {
 	return r.engine.wouldMoveIntoInterest(name, args, map[string]any{"ok": boolAsFlag(err == nil)}, slot, value)
 }
 
+// IsOfferInOpening reports whether the flow declares that its opening line
+// carries the offer (Global.IsOfferInOpening, #715): the application then
+// refuses a call that ClaimsInterest until the caller has heard the opening to
+// its final clause. It reads and changes nothing.
+func (r *Runtime) IsOfferInOpening() bool { return r.engine.Spec().Global.IsOfferInOpening }
+
 // RefuseAsUnheardOffer is the answer to a tool that would record the
 // customer's interest (ClaimsInterest) when the caller's words began before
 // they had heard the opening to its final clause (#612, #598): a callee
@@ -581,6 +587,29 @@ func (r *Runtime) RefuseAsUnheardOffer(name string, isOpeningSaidAgain bool) str
 		}
 	}
 	return Failed(reason, r.phasePreamble()+r.engine.Instruction()).asToolOutput()
+}
+
+// RefuseAsOfferNeverHeard is the answer to a tool that would record the
+// customer's interest on a flow that declares its offer is in the opening
+// (Global.IsOfferInOpening, #715) when the caller has still not heard the
+// opening to its final clause and it cannot be said to them again: it has been
+// said again as often as the rule allows, or the call has left its entry
+// phase. Nothing the caller says can then be an answer to the offer, so the
+// model is told to stop calling the tool on this call and to close it
+// politely; the call ends by the flow's ordinary endings, with no lead. A
+// refusal as a conversation, ok=0, carrying no hint: the reason is the way on,
+// and a phase instruction that asks for the offer's answer would contradict
+// it. It runs nothing and logs nothing; the caller logs the decision.
+func (r *Runtime) RefuseAsOfferNeverHeard(name string) string {
+	reason := "the caller has not heard the opening to the end, and it cannot be said to them again, so " +
+		"they have not heard the offer and nothing they say is an answer to it: " + name +
+		" was not carried out and no interest was recorded. Do not call " + name + " again on this call. " +
+		"Thank them, say goodbye politely and end the call"
+	if r.engine.Lang() == LangZH {
+		reason = "来电者一直没有听完开场白,开场白也不能再说一遍了,对方没有听到完整的内容,说的话都不能当作对它的回答," +
+			"所以没有执行 " + name + ",也没有记录任何意向。这通电话不要再调用 " + name + "。礼貌地感谢对方、道别并结束通话"
+	}
+	return Failed(reason, "").asToolOutput()
 }
 
 // RefuseAsDeclined is the answer to a tool that would record the customer's

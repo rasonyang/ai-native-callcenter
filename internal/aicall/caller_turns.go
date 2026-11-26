@@ -82,6 +82,57 @@ type callerTurns struct {
 	// as answered by one (obs.Machine*, machine_wording.go), empty while it is
 	// not marked. Set once and never cleared.
 	machineCategory string
+	// isOpeningHeard says the caller has heard the call's opening line, or its
+	// replay, to its final clause at least once (#715): one of them played to
+	// the caller in full, with audio and not muted (noteOpeningHeard), or was
+	// cut inside its final clause (cutInFinalClause: noteOpeningCut, and a
+	// speech start dated there, isOverUnheardOpening). Only a turn whose own
+	// words are the opening's counts, or one with no transcript to judge
+	// (opening_words.go): a turn the session took for the opening or the
+	// replay that said something else never does. No other bot line sets it
+	// and no caller transcript does. False at the start; set once and never
+	// cleared.
+	isOpeningHeard bool
+}
+
+// markOpeningHeard records that the caller has heard the opening to its final
+// clause (isOpeningHeard). It takes only mu, a leaf, so it may be called with
+// Session.mu or bc.mu held.
+func (c *callerTurns) markOpeningHeard() {
+	c.mu.Lock()
+	c.isOpeningHeard = true
+	c.mu.Unlock()
+}
+
+// isOpeningHeard reports whether the caller has heard the opening, or its
+// replay, to its final clause at least once (callerTurns.isOpeningHeard).
+// A call with no opening line never has. An opening whose audio has all left
+// the queue by now counts, though no playback marker has said so yet
+// (settleOpeningTail).
+func (s *Session) isOpeningHeard() bool {
+	s.settleOpeningTail()
+	s.ct.mu.Lock()
+	defer s.ct.mu.Unlock()
+	return s.ct.isOpeningHeard
+}
+
+// settleOpeningTail records the opening as heard when its tail, queued when
+// it finished generating (Session.isOpeningTailQueued), has all left the leg's
+// queue: no more frames are waiting than later turns queued behind it. Its own
+// playback marker can miss that, because a turn that starts while the opening
+// still plays (the response a tool result asks for while the replay is heard)
+// makes the marker stale; the flush that ends the tail without it being heard
+// is judged in stopPlaybackLocked.
+func (s *Session) settleOpeningTail() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.isOpeningTailQueued || s.leg.Pending() > s.framesBehindOpening {
+		return
+	}
+	s.isOpeningTailQueued = false
+	if s.openingWordsLocked(s.openingTailTurn) != openingWordsOther {
+		s.ct.markOpeningHeard()
+	}
 }
 
 // noteCallerStarted records a caller utterance starting. It is called before
@@ -113,9 +164,12 @@ func (s *Session) noteCallerStarted(itemID string) {
 // (bc.isOpeningOwed: it was cut before it played in full and nothing has
 // answered it since) begins over it too, as any cut then is judged over it.
 // The cut itself dates the same utterance by the same clause
-// (noteOpeningCut), so both of rule A's inputs agree.
+// (noteOpeningCut), so both of rule A's inputs agree. Speech that starts in the
+// final clause finds the opening heard to it, and the call records so
+// (isOpeningHeard, #715).
 func (s *Session) isOverUnheardOpening() bool {
 	s.mu.Lock()
+	turn := s.turnSeq
 	isLine := s.isOpeningTurnLocked(s.turnSeq)
 	pending := s.leg.Pending()
 	isLive := isLine && (s.isResponding || s.isBotSpeaking || (s.framesQueued > 0 && pending > 0))
@@ -128,6 +182,9 @@ func (s *Session) isOverUnheardOpening() bool {
 			return true
 		}
 		_, isHeard := cutInFinalClause(s.cfg.Session.OpeningText, played, unplayed)
+		if isHeard && s.isOpeningSaidIn(turn) {
+			s.ct.markOpeningHeard()
+		}
 		return !isHeard
 	}
 	if s.isHolding() {
@@ -143,9 +200,14 @@ func (s *Session) isOverUnheardOpening() bool {
 // (openingHeardToItsEnd, as isOverUnheardOpening dates a speech start) marks
 // the utterance under way as begun over the unheard opening; with none under
 // way, the engine cut before it reported the speech, and the next speech start
-// is marked (openingCutWindow).
+// is marked (openingCutWindow). A cut inside the final clause finds the opening
+// heard to it, and the call records so (isOpeningHeard, #715); nothing clears
+// that.
 func (s *Session) noteOpeningCut(cut *openCut) {
 	if _, isHeard := s.openingHeardToItsEnd(cut); isHeard {
+		if cut.words != openingWordsOther {
+			s.ct.markOpeningHeard()
+		}
 		return
 	}
 	s.ct.mu.Lock()
