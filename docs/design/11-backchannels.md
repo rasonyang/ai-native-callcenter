@@ -181,7 +181,9 @@ a. Flow. If the verdict is `ack`, a tool call in the response that answers the
    (#612, design 02 section 6): words that began before the opening's final
    clause, dated as the acknowledgement's cut is below (`cutInFinalClause`,
    #598), refuse it whatever their verdict, on every engine, and the opening
-   is said again under the same once-per-call budget.
+   is said again under the same once-per-call budget. On a flow that declares
+   `global.isOfferInOpening` it is refused while the opening has not been
+   heard at all (#715, "The opening heard" below).
 b. Closing line. A cut that landed on an armed closing line that had finished
    generating was counted as the first interruption before the verdict existed.
    When the verdict arrives as `ack` the cut becomes the second-interruption
@@ -408,6 +410,46 @@ and was judged against that one. So the opening is owed at call level:
   neither muted nor cut, has played to the
   caller in full (`PLAYBACK_DONE`), or when the flow leaves the entry phase or an
   ending is under way.
+
+### The opening heard (#715)
+
+The owed mark says the opening is owed *now*, and it clears for reasons that
+have nothing to do with the caller having heard it: words in the final
+transcript of the cut (a fragment is words), or a later turn played in full.
+The line a bot says after a cut, "can you hear me?", plays in full, and the
+callee's "I can" was then judged as an answer to an offer they never heard.
+So the call keeps a second, separate state, `isOpeningHeard`
+(`internal/aicall/caller_turns.go`), that only the opening can set:
+
+- False at the start. Set, once and for good, when the opening line or its
+  replay has played to the caller in full, with audio and not muted, or was
+  cut inside its final clause, or caller speech started there (both dated by
+  `cutInFinalClause`, as above). Played in full is the turn's own
+  `PLAYBACK_DONE`, or its tail draining behind a later turn whose start made
+  that marker stale: the frames queued behind the opening are counted from
+  the end of its generation, and once no more than those are left on the leg
+  it has played (`settleOpeningTail`; a flush that takes only those frames
+  finds it heard, one that takes any of the opening's own ends the tail
+  unheard).
+- No other bot line sets it, however it plays, and no caller transcript does.
+  The owed mark keeps its own rules above; this state never clears it and is
+  never cleared by it.
+- It is logged on every guarded call of the lead guard, on every flow and
+  every engine (`isOpeningHeard`), openai's opening played in full included.
+
+The rule that reads it is opt-in: on a flow that declares
+`global.isOfferInOpening` (the entry phase's `announce` carries the offer,
+refused at load without one) the lead guard refuses a call that would record
+interest while the state is false, verdict `OPENING_UNHEARD`, guard `OFFER`,
+before rule A and before rule B's wait, never over an ending under way. Its
+replays are bounded: while the opening or a replay is still on its way
+nothing is asked for; otherwise the opening is said again on the
+once-per-call budget of this section, or a second time when that is spent
+(two per call in all, counting every path's replay); after that, or once the
+call has left its entry phase, the model is told to stop calling the tool and
+close the call politely, and the call ends by the flow's ordinary endings
+with no lead. Every other path keeps the budget of one. A flow without the
+field is judged exactly as before.
 
 ## Known limits
 
