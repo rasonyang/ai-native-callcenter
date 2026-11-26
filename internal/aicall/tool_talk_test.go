@@ -8,6 +8,7 @@ import (
 	"encoding/binary"
 	"io"
 	"log/slog"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -597,6 +598,51 @@ func TestTheHoldEndsAtItsCapAndAToolTalkTurnPastItIsMissed(t *testing.T) {
 			t.Errorf("counts = %v, want one MISSED", got)
 		}
 	})
+}
+
+// A release says how long the audio was held: at DEBUG, with the turn, the
+// held milliseconds and chunks, and at INFO once the hold lasted 200 ms, which
+// is what a live round reads to confirm the hold costs an ordinary turn
+// nothing.
+func TestAReleaseSaysHowLongTheAudioWasHeld(t *testing.T) {
+	t.Parallel()
+	for name, held := range map[string]time.Duration{"short": 0, "long": 250 * time.Millisecond} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			clock := &talkClock{now: time.Now()}
+			r := newTalkRigWith(t, talkProfile(provider.QwenProfile(), true), talkConfig(),
+				func(s *Session) { s.talkNow = clock.read }, talkTools...)
+			r.send(provider.Event{Type: provider.EventTypeResponseStarted},
+				provider.Event{Type: provider.EventTypeOutputTranscript, Text: "调"},
+				provider.Event{Type: provider.EventTypeAudioDelta, Audio: talkChunk(1)},
+				provider.Event{Type: provider.EventTypeAudioDelta, Audio: talkChunk(2)})
+			awaitTalk(t, "the chunks to be held", func() bool {
+				r.session.mu.Lock()
+				defer r.session.mu.Unlock()
+				return len(r.session.talk.held) == 2
+			})
+			clock.advance(held)
+			r.send(provider.Event{Type: provider.EventTypeOutputTranscript, Text: "整一下。"})
+			awaitTalk(t, "the held audio to play", func() bool { return len(r.leg.sentFrames()) > 0 })
+
+			var line string
+			for _, l := range strings.Split(r.logs.String(), "\n") {
+				if strings.Contains(l, "released a turn's held audio") {
+					line = l
+				}
+			}
+			level := "level=DEBUG"
+			if held > 0 {
+				level = "level=INFO"
+			}
+			for _, want := range []string{level, "turn=1", "heldMs=" + strconv.FormatInt(held.Milliseconds(), 10),
+				"heldChunks=2", "isWordsDiverged=true"} {
+				if !strings.Contains(line, want) {
+					t.Errorf("release line %q lacks %s", line, want)
+				}
+			}
+		})
+	}
 }
 
 // talkClock is the gate's clock, moved by the test.

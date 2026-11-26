@@ -4,6 +4,8 @@ package aicall
 
 import (
 	"bytes"
+	"context"
+	"log/slog"
 	"strings"
 	"time"
 	"unicode"
@@ -56,6 +58,24 @@ import (
 // that holds, where the transcript leads the audio (design 02 §5): only a turn
 // whose transcript lags or never comes waits for the cap, once, at its start.
 const toolTalkHoldCap = 2 * time.Second
+
+// toolTalkHoldNoted is how long a hold must have lasted for its release to be
+// logged at INFO rather than DEBUG (releaseToolTalkLocked). An ordinary turn on
+// the engine that holds should not be held at all, its words arriving before
+// its audio; a hold this long is one a caller could hear as a late start.
+const toolTalkHoldNoted = 200 * time.Millisecond
+
+// Why the gate let a turn's held audio go (releaseToolTalkLocked).
+type toolTalkRelease uint8
+
+const (
+	// releasedDiverged: the words diverged from tool talk.
+	releasedDiverged toolTalkRelease = iota
+	// releasedAtEnd: the response ended and the words were not tool talk.
+	releasedAtEnd
+	// releasedAtCap: the hold reached toolTalkHoldCap.
+	releasedAtCap
+)
 
 // toolTalkPhrases are tool talk on their own, beside the call's tool names.
 var toolTalkPhrases = []string{"工具调用", "tool call", "调用"}
@@ -364,7 +384,7 @@ func (s *Session) holdToolTalkLocked(audio []byte) bool {
 	}
 	now := s.toolTalkClock()
 	if len(g.held) > 0 && (now.Sub(g.heldSince) >= toolTalkHoldCap || g.heldBytes+len(audio) > g.capBytes) {
-		s.releaseToolTalkLocked(true)
+		s.releaseToolTalkLocked(releasedAtCap)
 		return false
 	}
 	if len(g.held) == 0 {
@@ -390,17 +410,23 @@ func (s *Session) noteToolTalkWordsLocked(text string) {
 	}
 	switch {
 	case g.words.isDiverged:
-		s.releaseToolTalkLocked(false)
+		s.releaseToolTalkLocked(releasedDiverged)
 	case len(g.held) > 0 && s.toolTalkClock().Sub(g.heldSince) >= toolTalkHoldCap:
-		s.releaseToolTalkLocked(true)
+		s.releaseToolTalkLocked(releasedAtCap)
 	}
 }
 
 // releaseToolTalkLocked ends the turn's hold: what is held plays, in order,
 // as it would have on arrival, unless the call is hushed or the turn is fenced
-// off by now, when it goes as anything arriving then would. isAtCap says the
-// cap ended it. The caller holds mu.
-func (s *Session) releaseToolTalkLocked(isAtCap bool) {
+// off by now, when it goes as anything arriving then would. why says what
+// ended it.
+//
+// Each release of held audio is logged with how long it was held, so a live
+// round can confirm that the hold costs an ordinary qwen turn nothing: at the
+// cap at INFO, otherwise at DEBUG, or at INFO once the hold has lasted
+// toolTalkHoldNoted. The DEBUG line is built only when DEBUG is on. The caller
+// holds mu.
+func (s *Session) releaseToolTalkLocked(why toolTalkRelease) {
 	g := &s.talk
 	g.isReleased = true
 	if len(g.finals) > 0 {
@@ -409,10 +435,20 @@ func (s *Session) releaseToolTalkLocked(isAtCap bool) {
 	if len(g.held) == 0 {
 		return
 	}
-	if isAtCap {
+	held := s.toolTalkClock().Sub(g.heldSince)
+	switch {
+	case why == releasedAtCap:
 		s.log.Info("released a turn's held audio at the cap; its words could still be tool talk",
-			"turn", g.turn, "heldMs", s.toolTalkClock().Sub(g.heldSince).Milliseconds(),
+			"turn", g.turn, "heldMs", held.Milliseconds(), "heldChunks", len(g.held),
 			"heldBytes", g.heldBytes)
+	case held >= toolTalkHoldNoted:
+		s.log.Info("released a turn's held audio; it was held long enough to be heard as a late start",
+			"turn", g.turn, "heldMs", held.Milliseconds(), "heldChunks", len(g.held),
+			"isWordsDiverged", why == releasedDiverged)
+	case s.log.Enabled(context.Background(), slog.LevelDebug):
+		s.log.Debug("released a turn's held audio",
+			"turn", g.turn, "heldMs", held.Milliseconds(), "heldChunks", len(g.held),
+			"isWordsDiverged", why == releasedDiverged)
 	}
 	isGone := s.isHushed.Load() || s.isCutOff
 	for i, chunk := range g.held {
@@ -539,7 +575,7 @@ func (s *Session) settleToolTalkLocked(isResponseEnd, isAbandoned bool) toolTalk
 		s.mutedTurn = g.turn
 		r.verdict = obs.ToolTalkDropped
 	default:
-		s.releaseToolTalkLocked(false)
+		s.releaseToolTalkLocked(releasedAtEnd)
 		switch {
 		case isTalk && g.hasPlayed:
 			r.verdict = obs.ToolTalkMissed
