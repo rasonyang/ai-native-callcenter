@@ -431,6 +431,33 @@ So the call keeps a second, separate state, `isOpeningHeard`
   it has played (`settleOpeningTail`; a flush that takes only those frames
   finds it heard, one that takes any of the opening's own ends the tail
   unheard).
+- Only from a turn whose own words are the opening's. The session takes the
+  call's first turn for the opening and the first spoken-line turn after a
+  replay is asked for as the replay, and neither is sure to say it: on a
+  live qwen call the opening's turn was a bare tool call, the replay request
+  was refused (an empty conversation), the line the client still owed was
+  asked for later, and the turn taken for the replay said "您好，能听到我说话吗？"
+  and played in full. So the turn's transcript (`turnText`) is judged
+  against the rendered opening (`judgeOpeningWords`,
+  `internal/aicall/opening_words.go`): both compacted (width folded,
+  letters and digits lower-cased, Han characters, nothing else) and aligned
+  in order, they must match four in five of the opening's letters and four
+  in five of its final clause's. In order and not exactly, because an
+  engine's transcript of a line it was told to say is its own (a numeral
+  written out, a word added); most of the line, so a bare "请问您需要吗？"
+  is not the offer; most of the final clause, so a turn that stops before
+  the question has not asked it. A turn that said other words never sets the
+  state on any path (playback, tail, flush, cut or speech in the final
+  clause), queues no tail, and logs "the turn taken for the opening did not
+  say the opening's words" with the turn, `isReplay`, `words` (`OTHER`, or
+  `NONE` for a turn with neither words nor audio) and `hasAudio`, never the
+  words. The words are complete at the turn's end on every engine here: the
+  Realtime clients (openai, grok, qwen, gateway) deliver the transcript and
+  its done before the response's done, qwen ahead of its audio, and doubao's
+  client reports a line's text itself as the line's turn starts. A turn with
+  no transcript at all counts by its audio, as before, and logs that it
+  does, so an engine (a gateway) that sends none is not left unable to hear
+  its opening.
 - No other bot line sets it, however it plays, and no caller transcript does.
   The owed mark keeps its own rules above; this state never clears it and is
   never cleared by it.
@@ -443,7 +470,9 @@ refused at load without one) the lead guard refuses a call that would record
 interest while the state is false, verdict `OPENING_UNHEARD`, guard `OFFER`,
 before rule A and before rule B's wait, never over an ending under way. Its
 replays are bounded: while the opening or a replay is still on its way
-nothing is asked for; otherwise the opening is said again on the
+nothing is asked for (a turn taken for it that made a bare tool call or said
+other words is not on its way, so a refused request or one such a turn took
+leaves the second replay and the closing text to come); otherwise the opening is said again on the
 once-per-call budget of this section, or a second time when that is spent
 (two per call in all, counting every path's replay); after that, or once the
 call has left its entry phase, the model is told to stop calling the tool and

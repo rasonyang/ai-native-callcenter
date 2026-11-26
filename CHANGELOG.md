@@ -37,10 +37,15 @@ carries the one-line installer's files.
   A flow whose opening line carries the offer says so, and a tool call that
   would record `HIGH` or `MEDIUM` is then refused as a conversation until the
   callee has heard the opening, or its replay, to its final clause: played in
-  full, or cut or spoken over inside that clause. Another line the bot says
-  ("can you hear me?") and the callee's answer to it do not count, so a
-  callee whose opening was cut before the offer and who only confirms the
-  line records no lead; a callee who hears the opening and agrees still does.
+  full, or cut or spoken over inside that clause, by a turn whose own words
+  were the opening's. Another line the bot says ("can you hear me?") and the
+  callee's answer to it do not count, nor does a turn meant to be the opening
+  or its replay in which the engine said something else: the bot's transcript
+  of the turn is compared with the opening, loosely enough for a numeral
+  written another way, and such a turn logs `the turn taken for the opening
+  did not say the opening's words`. So a callee whose opening was cut before
+  the offer and who only confirms the line records no lead; a callee who
+  hears the opening and agrees still does.
   The refusal says the opening again, at most twice per call, and after that
   the model is told to stop calling the tool and close the call politely, so
   the refusal cannot repeat without end. The flow is refused at load when its

@@ -564,7 +564,10 @@ type Global struct {
 	// declares it, a tool call that would record interest (a move into a phase
 	// declaring a HIGH or MEDIUM lead, or record_lead with one) is refused as a
 	// conversation until the caller has heard the opening, or its replay, to
-	// its final clause; the opening is said again at most twice per call, and
+	// its final clause, from a turn whose own words were the opening's (the
+	// bot's transcript, compared loosely; another line, or a turn meant for the
+	// opening that said something else, never counts); the opening is said
+	// again at most twice per call, and
 	// after that the model is told to close the call. Absent is false, and the
 	// guard judges as before. Load refuses it on a flow whose entry phase has no
 	// announce: there is no opening line to hear.
