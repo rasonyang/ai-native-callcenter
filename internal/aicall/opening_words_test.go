@@ -160,3 +160,51 @@ func TestATurnTakenForTheOpeningCountsByItsWords(t *testing.T) {
 		}
 	})
 }
+
+// Between a turn's TURN_DONE and the hand-off of its playback marker (#627,
+// endResponse), finishTurn has run and the watcher has nothing yet. A guarded
+// call judged there finds an opening that said its words and is fully queued
+// on its way, and heard as soon as its audio has left the leg, with no marker
+// at all; one that said other words is neither, so the offer rule replays it.
+func TestBeforeItsPlaybackMarkerIsHandedOverTheOpeningIsOnItsWayOrHeard(t *testing.T) {
+	newEndedTurn := func(t *testing.T, words string) (*Session, *fakeLeg) {
+		t.Helper()
+		leg := newFakeLeg(media.LawMu)
+		cfg := quietConfig()
+		cfg.Logger = slog.New(slog.NewTextHandler(&syncBuffer{}, nil))
+		cfg.Session.OpeningText = twoPartOpeningLine
+		s, err := New(leg, newFakeModel(), provider.QwenProfile(), cfg)
+		if err != nil {
+			t.Fatalf("new session: %v", err)
+		}
+		s.beginTurn(false, false)
+		s.noteBotWords(words, true)
+		s.mu.Lock()
+		s.framesQueued = 100
+		s.mu.Unlock()
+		leg.holdFrames(100)
+		// The marker finishTurn returns is not handed to any watcher.
+		s.finishTurn(false)
+		return s, leg
+	}
+	t.Run("the opening's words", func(t *testing.T) {
+		s, leg := newEndedTurn(t, twoPartOpeningLine)
+		if !s.isOpeningOnItsWay() || s.isOpeningHeard() {
+			t.Errorf("queued: on its way = %v, heard = %v; want on its way", s.isOpeningOnItsWay(), s.isOpeningHeard())
+		}
+		leg.holdFrames(0)
+		if !s.isOpeningHeard() || s.isOpeningOnItsWay() {
+			t.Errorf("played: heard = %v, on its way = %v; want heard", s.isOpeningHeard(), s.isOpeningOnItsWay())
+		}
+	})
+	t.Run("other words", func(t *testing.T) {
+		s, leg := newEndedTurn(t, lineCheckLine)
+		if s.isOpeningOnItsWay() || s.isOpeningHeard() {
+			t.Errorf("queued: on its way = %v, heard = %v; want neither", s.isOpeningOnItsWay(), s.isOpeningHeard())
+		}
+		leg.holdFrames(0)
+		if s.isOpeningOnItsWay() || s.isOpeningHeard() {
+			t.Errorf("played: on its way = %v, heard = %v; want neither", s.isOpeningOnItsWay(), s.isOpeningHeard())
+		}
+	})
+}
