@@ -547,6 +547,21 @@ func TestTheDirectionAskedAgainNamesTheTools(t *testing.T) {
 	if !strings.HasSuffix(en, ":\n"+phaseLine) {
 		t.Errorf("en direction: %q", en)
 	}
+	// With the running-tool note (qwen) the demand comes last, right before
+	// the line, and nothing names tool calls (#623).
+	for _, noted := range []struct{ direction, line, language string }{
+		{sayExactlyAfterCall("请稍等，我查一下。", []string{"kb_search"}, "zh", true), "请稍等，我查一下。", "zh"},
+		{en, phaseLine, "en"},
+	} {
+		if !strings.HasSuffix(noted.direction, SayExactly(noted.line, noted.language)) {
+			t.Errorf("%s direction does not end in the demand and the line: %q", noted.language, noted.direction)
+		}
+		for _, words := range []string{"工具调用", "tool call"} {
+			if strings.Contains(strings.ToLower(noted.direction), words) {
+				t.Errorf("%s direction says %q: %q", noted.language, words, noted.direction)
+			}
+		}
+	}
 
 	f, session, _ := startLineCall(t, QwenProfile(), "en")
 	if err := session.SpeakText(phaseLine, false); err != nil {

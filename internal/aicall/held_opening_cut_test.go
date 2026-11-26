@@ -100,7 +100,7 @@ func newHeldOpeningRigWith(t *testing.T, line string) *heldOpeningRig {
 	// What handle builds for a campaign call on a flow with isCallerFirst
 	// (orchestrator.go): the session's logs go to the same buffer, so the
 	// verdict lines can be looked for.
-	session, err := New(r.leg, r.model, profile, Config{
+	session, err := New(r.leg, r.model, withoutToolTalkHold(profile), Config{
 		Session: provider.SessionConfig{
 			Instructions: r.runtime.Instructions(),
 			Language:     "zh",

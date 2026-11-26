@@ -161,10 +161,16 @@ type Event struct {
 	calledAt time.Time
 
 	// IsInterrupted marks a TURN_DONE whose turn was cut short — by the
-	// caller, by a keypress, or to make room for another turn. Such a turn
-	// never reaches PLAYBACK_DONE, and what it produced is not a line anybody
-	// can count on having been said.
+	// caller, by a keypress, or to make room for another turn — or dropped
+	// unheard because its words were only tool talk (tool_talk.go). Such a
+	// turn never reaches PLAYBACK_DONE, and what it produced is not a line
+	// anybody can count on having been said.
 	IsInterrupted bool
+	// IsDropped marks, beside IsInterrupted, the TURN_DONE of a turn the
+	// tool-talk gate dropped unheard: nobody cut it, and an armed ending whose
+	// closing line was due in it asks for the line again
+	// (callActions.onTurnDropped).
+	IsDropped bool
 
 	// IsAside marks the BOT_SAID, TURN_DONE and PLAYBACK_DONE of a turn that
 	// said an aside (SpeakAside): words the application put in while it
@@ -457,6 +463,11 @@ type Session struct {
 	turnTextHasDeltas bool
 	isTurnTextCut     bool
 	turnToolCalls     int
+	// talk is the tool-talk gate (tool_talk.go): the turn's words judged as
+	// they come, and its audio held while they could still be only tool talk.
+	// talkNow is its clock, nil for time.Now; a test sets it before Start.
+	talk    toolTalkGate
+	talkNow func() time.Time
 	// turnAnswers is the caller utterance the turn in progress answers, set by
 	// beginTurn (caller_turns.go); nil when there is none.
 	turnAnswers *callerTurn
@@ -561,6 +572,7 @@ func New(leg Leg, model provider.VoiceSession, profile provider.Profile,
 		downlink:      downlink,
 		framer:        newFramer(law),
 		playBuffer:    make([]byte, 0, 8*media.FrameSamples),
+		talk:          newToolTalkGate(profile.TranscriptLeadsAudio, output),
 		events:        make(chan Event, 128),
 		playbackDone:  make(chan playbackMarker, 8),
 		rearm:         make(chan struct{}, 1),
@@ -604,6 +616,8 @@ func (s *Session) Start(ctx context.Context) error {
 	law := s.leg.Law()
 	sessionCfg.InputFormat = s.uplink.To()
 	sessionCfg.OutputFormat = s.downlink.From()
+	// Before any event is pumped: a tool's name said alone is tool talk.
+	s.talk.setTools(sessionCfg.Tools)
 
 	// The first-media watch always runs, for the measurement. The opening gate
 	// holds for the deployment's media (IsGreetingGated) only. A call that
@@ -1114,18 +1128,35 @@ func (s *Session) finishUplink(clock *uplinkClock) {
 		"maxBacklogFrames", st.MaxBacklog)
 }
 
-// playAudio converts one chunk of model speech and queues it on the leg.
-func (s *Session) playAudio(audio []byte) {
+// playAudio converts one chunk of model speech and queues it on the leg, or
+// holds it while the turn's words could still be only tool talk
+// (tool_talk.go). It reports whether final transcripts the gate held back are
+// now due (emitDueBotFinals), which the gate's cap can make them.
+func (s *Session) playAudio(audio []byte) (isFinalDue bool) {
 	if s.isHushed.Load() {
-		return
+		return false
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	if s.isCutOff {
 		s.cutOffChunks++
-		return
+		return false
 	}
+	// After the hush and the fence, before the turn counts as speaking: a held
+	// turn is not speaking, and its turn timer, audibleSince and played time
+	// start when it is released.
+	if s.holdToolTalkLocked(audio) {
+		return false
+	}
+	s.playChunkLocked(audio)
+	return s.talk.isFinalsDue
+}
+
+// playChunkLocked plays one chunk of the turn's audio: the turn is speaking
+// from here on. The caller holds mu.
+func (s *Session) playChunkLocked(audio []byte) {
+	s.talk.hasPlayed = true
 	if !s.isBotSpeaking {
 		s.isBotSpeaking = true
 	}
@@ -1257,7 +1288,9 @@ func (s *Session) pumpModelEvents() {
 func (s *Session) handleModelEvent(event provider.Event) {
 	switch event.Type {
 	case provider.EventTypeAudioDelta:
-		s.playAudio(event.Audio)
+		if s.playAudio(event.Audio) {
+			s.emitDueBotFinals()
+		}
 
 	case provider.EventTypeSpeechStarted:
 		// The caller is talking, so there is no dead air to report whether or
@@ -1340,11 +1373,20 @@ func (s *Session) handleModelEvent(event provider.Event) {
 			// greeting, and then the opening is owed once more.
 			s.noteUnqueuedOpeningCut(turn)
 		}
+		if isCurrent {
+			// The turn's end, cut short: its verdict, after the flush took
+			// whatever the tool-talk gate held (tool_talk.go).
+			talk := s.settleToolTalk(false, false)
+			s.emitDueBotFinals()
+			s.reportToolTalk(talk)
+		}
 		s.emit(Event{Type: EventTypeTurnDone, Turn: turn, IsInterrupted: true, IsAside: isAside,
 			soFar: responseSoFar{text: s.turnWords()}})
 
 	case provider.EventTypeResponseStarted:
 		s.beginTurn(event.IsSpokenLine, event.IsLineAskedAgain)
+		// A turn the new one replaced before it ended may owe its finals.
+		s.emitDueBotFinals()
 		s.onReplyStartedForReplay()
 
 	case provider.EventTypeResponseDone:
@@ -1360,8 +1402,14 @@ func (s *Session) handleModelEvent(event provider.Event) {
 		// The turn rides along so the line can be judged with the tool calls
 		// of its own response (claimWatch).
 		turn, isAside := s.turnState()
-		s.emit(Event{Type: EventTypeBotSaid, Text: event.Text, IsFinal: event.IsFinal,
-			Turn: turn, IsAside: isAside})
+		said := Event{Type: EventTypeBotSaid, Text: event.Text, IsFinal: event.IsFinal,
+			Turn: turn, IsAside: isAside}
+		// The final of a turn the tool-talk gate holds waits for its verdict:
+		// a dropped turn is muted before drive sees its words (tool_talk.go).
+		if !said.IsFinal || !s.deferBotFinal(said) {
+			s.emitDueBotFinals()
+			s.emit(said)
+		}
 
 	case provider.EventTypeToolCall:
 		turn, soFar := s.toolCallSoFar()
@@ -1641,6 +1689,8 @@ func (s *Session) stopPlaybackLocked(endsTheTurn bool) (playedMs int, hadQueued 
 			s.ct.markOpeningHeard()
 		}
 	}
+	// What the tool-talk gate holds is queued audio in all but name.
+	s.discardToolTalkLocked()
 
 	// What was queued, less what never made it out of the queue. Anything
 	// already handed to the wire counts as heard.
@@ -1686,12 +1736,17 @@ func (s *Session) beginTurn(isSpokenLine, isLineAskedAgain bool) {
 		// judge the opening's turn by them (openingWordsLocked, #715).
 		s.openingWordsTurn, s.openingWordsOf = s.turnSeq, s.judgeTurnWordsLocked()
 	}
+	// A turn replaced before it ended is judged first, with its own words.
+	s.settleUnendedToolTalkLocked()
 	s.framesQueued = 0
 	s.turnSeq++
 	s.turnText = s.turnText[:0]
 	s.turnTextHasDeltas = false
 	s.isTurnTextCut = false
 	s.turnToolCalls = 0
+	// Before openTurns counts this turn: whether the last one was still open
+	// decides whether this one's words can be judged.
+	s.beginToolTalkLocked()
 	s.turnAnswers = s.answeredCallerTurnLocked()
 	if s.isReplayOwed && isSpokenLine {
 		s.isReplayOwed = false
@@ -1790,6 +1845,7 @@ func (s *Session) noteBotWords(text string, isFinal bool) {
 		s.isTurnTextCut = true
 	}
 	s.turnText = append(s.turnText, text...)
+	s.noteToolTalkWordsLocked(text)
 }
 
 // turnWords is the words of the turn in progress so far.
@@ -1881,14 +1937,33 @@ func (s *Session) currentTurn() int {
 // and replays it through here at the release (pumpModelEvents). An interrupted
 // turn's TURN_DONE hands over no marker: its flush retires any that is still
 // draining (stopPlaybackLocked), so no PLAYBACK_DONE follows it.
+//
+// The tool-talk gate gives the turn its verdict first (tool_talk.go): what it
+// held plays before the turn's end, or, for a turn that was only tool talk, is
+// dropped. A dropped turn is one the caller heard none of. Its finals are
+// emitted muted, its turn timer is put back as for an abandoned response that
+// queued nothing (none of it reached queueFrame), and its TURN_DONE is an
+// interrupted one with no audio (and IsDropped), so drive takes it for a turn
+// cut before anything was heard, but asks again for a closing line that was
+// owed in it. Its marker publishes no PLAYBACK_DONE and still arms the
+// dead-air watch once an earlier turn's tail has drained (watchPlayback), so
+// the call is never left without one; a dropped opening is said again.
 func (s *Session) endResponse(isAbandoned bool) {
-	marker := s.finishTurn(isAbandoned)
+	talk := s.settleToolTalk(true, isAbandoned)
+	s.emitDueBotFinals()
+	s.reportToolTalk(talk)
+	marker := s.finishTurn(isAbandoned || talk.isDropped)
+	marker.isDropped = talk.isDropped
 	s.emit(Event{Type: EventTypeTurnDone, Turn: marker.turn, HasAudio: marker.hasAudio,
-		IsAside: marker.isAside, soFar: responseSoFar{text: s.turnWords()}})
+		IsInterrupted: talk.isDropped, IsDropped: talk.isDropped, IsAside: marker.isAside,
+		soFar: responseSoFar{text: s.turnWords()}})
 	select {
 	case s.playbackDone <- marker:
 	default:
 		s.log.Warn("playback watcher is behind; a turn boundary was not tracked")
+	}
+	if talk.isDropped {
+		s.sayDroppedOpeningAgain(talk)
 	}
 }
 
@@ -1898,7 +1973,8 @@ func (s *Session) endResponse(isAbandoned bool) {
 // response that queued no audio did not answer the caller, whatever it did to
 // the turn timer when it started, so the timer is put back before the playback
 // watcher can arm the dead-air watch (turnTimer.onResponseAbandoned). One that
-// queued audio was heard in part and is left as it is.
+// queued audio was heard in part and is left as it is. endResponse passes a
+// turn the tool-talk gate dropped as abandoned: it queued nothing either.
 func (s *Session) finishTurn(isAbandoned bool) playbackMarker {
 	s.mu.Lock()
 	// The tail of the last sentence is worth padding out rather than losing.
@@ -1940,6 +2016,10 @@ type playbackMarker struct {
 	hasAudio bool
 	// isAside says the turn said an aside (SpeakAside).
 	isAside bool
+	// isDropped says the tool-talk gate dropped the turn unheard: the watcher
+	// publishes no PLAYBACK_DONE for it and arms the dead-air watch all the
+	// same (endResponse).
+	isDropped bool
 }
 
 //
@@ -1978,11 +2058,15 @@ func (s *Session) watchPlayback() {
 		// The queue has drained: an opening queued ahead of this turn has been
 		// heard too, its own marker spent or not (#715).
 		s.settleOpeningTail()
-		s.noteOpeningHeard(marker.turn, marker.hasAudio)
-		s.emit(Event{Type: EventTypePlaybackDone, Turn: marker.turn, HasAudio: marker.hasAudio,
-			IsAside: marker.isAside})
-		if s.afterPlaybackDone != nil {
-			s.afterPlaybackDone()
+		// A dropped turn was heard by nobody: no PLAYBACK_DONE, as for a cut
+		// one, but the silence after it is watched like any other.
+		if !marker.isDropped {
+			s.noteOpeningHeard(marker.turn, marker.hasAudio)
+			s.emit(Event{Type: EventTypePlaybackDone, Turn: marker.turn, HasAudio: marker.hasAudio,
+				IsAside: marker.isAside})
+			if s.afterPlaybackDone != nil {
+				s.afterPlaybackDone()
+			}
 		}
 		s.drainRearm()
 		var fired bool

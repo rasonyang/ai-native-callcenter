@@ -799,7 +799,7 @@ func (o *Orchestrator) drive(ctx context.Context, session *Session,
 				if out, ok := claims.takeCueOutcome(); ok {
 					o.reportClaimCueOutcome(out, event.Turn, event.IsInterrupted, log)
 				}
-				actions.onTurnDone(event.Turn, event.IsInterrupted, event.HasAudio)
+				actions.onTurnEnd(event)
 				wall.onTurnDone(event.Turn, event.IsInterrupted, runtime)
 				// After the claim watch and the wall: both note a tool-call turn
 				// as one whose reply is a tool's, which a quiet close undoes.

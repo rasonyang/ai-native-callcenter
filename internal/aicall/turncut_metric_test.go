@@ -164,7 +164,7 @@ func startTurnCutRigOn(t *testing.T, base provider.Profile, opening string,
 	if configure != nil {
 		configure(&cfg)
 	}
-	session, err := New(r.leg, voice, profile, cfg)
+	session, err := New(r.leg, voice, withoutToolTalkHold(profile), cfg)
 	if err != nil {
 		t.Fatalf("new session: %v", err)
 	}

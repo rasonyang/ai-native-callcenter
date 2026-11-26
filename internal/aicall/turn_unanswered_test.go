@@ -124,7 +124,7 @@ func startTurnRig(t *testing.T, profile provider.Profile, noInput time.Duration)
 			Turn:         provider.DefaultTurnDetection(),
 		},
 	}
-	session, err := New(leg, model, profile, cfg)
+	session, err := New(leg, model, withoutToolTalkHold(profile), cfg)
 	if err != nil {
 		t.Fatalf("new session: %v", err)
 	}

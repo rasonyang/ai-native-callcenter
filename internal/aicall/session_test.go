@@ -372,7 +372,7 @@ func startBridgeModel(t *testing.T, profile provider.Profile, cfg Config,
 	}
 	cfg.Logger = slog.New(slog.NewTextHandler(io.Discard, nil))
 
-	session, err := New(leg, voice, profile, cfg)
+	session, err := New(leg, voice, withoutToolTalkHold(profile), cfg)
 	if err != nil {
 		t.Fatalf("new session: %v", err)
 	}

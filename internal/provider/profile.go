@@ -220,6 +220,21 @@ type Profile struct {
 	// orchestrator, not by a client, so it is set on doubao's profile.
 	DropsToolResultAfterLine bool
 
+	// TranscriptLeadsAudio means the transcript of the model's own speech
+	// reaches this client ahead of the audio it transcribes: by the time a
+	// response's first audio arrives, the words it says are already known.
+	// Measured on qwen alone: the transcript came first in all 43 responses
+	// of the 2026-11-19 probes (the margins are in docs/design/02-ai-voice.md
+	// §5, "Tool talk"); unmeasured on the other engines.
+	//
+	// It is what lets the session hold a turn's audio, without delaying an
+	// ordinary turn, while the turn's words could still be only tool talk (a
+	// tool's name, 工具调用), and drop that turn unplayed (aicall, tool_talk.go,
+	// #623). Where it is false the session only detects and counts such a turn:
+	// holding audio for words that come after it would delay every turn.
+	// Unlike the traits above it is read by aicall, not by a client.
+	TranscriptLeadsAudio bool
+
 	// SessionLimit and TokenLimit are the provider's quota, each a count over
 	// its period (SessionPeriod, TokenPeriod; ProfileFor makes a zero period
 	// QuotaPeriod), where a vendor document states it for the profile's
@@ -337,6 +352,9 @@ func QwenProfile() Profile {
 		// Measured 2026-10-22 (qwen-findings W-Q8): the plain SayExactly line
 		// over a running tool was silent 3 of 3, this one said 6 of 6.
 		NeedsToolFreeLineDirection: true,
+		// Measured 2026-11-19 (#623 probes): the transcript came before the
+		// audio in all 43 responses (docs/design/02-ai-voice.md §5).
+		TranscriptLeadsAudio: true,
 		// Documented for qwen-audio-3.1-realtime-flash in the Beijing region,
 		// which is this profile's endpoint and model: 60 connection
 		// establishments and 100,000 tokens (input and output) per minute, and
