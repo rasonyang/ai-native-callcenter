@@ -586,5 +586,37 @@ for _os in linux macos; do
     done
 done
 
+# The switch on a loopback address, behind an edge SBC on the same host
+# (#727): 127.0.0.2 is where the switch listens, not an address to open or to
+# put in Allow Sites, so the message names the host's own address and the
+# setting a browser phone needs instead.
+OS=linux
+FIRST_INSTALL=0
+ENV_FILE="$TMP/output-demo.env"
+EXTERNAL_IP=127.0.0.2
+INFERRED=192.0.2.9
+final_output >"$TMP/output-loopback.txt"
+ok 'final_output: loopback switch names the host address for the web' grep -q 'http://192.0.2.9:8080' "$TMP/output-loopback.txt"
+notok 'final_output: loopback switch prints no loopback URL' grep -q 'http://127.0.0.2' "$TMP/output-loopback.txt"
+notok 'final_output: loopback switch does not put loopback in Allow Sites' grep -q 'add 127.0.0.2' "$TMP/output-loopback.txt"
+ok 'final_output: loopback switch asks for SIP_WSS_URL' grep -q 'set SIP_WSS_URL=wss://' "$TMP/output-loopback.txt"
+env="$TMP/output-loopback-wss.env"
+cat >"$env" <<'EOF'
+AICC_SEED=demo
+AICC_SEED_PASSWORD=secret
+HTTP_PORT=8080
+SIP_WSS_URL=wss://cc.example.com:7443/
+EOF
+ENV_FILE="$env"
+final_output >"$TMP/output-loopback-wss.txt"
+ok 'final_output: loopback switch reports a SIP_WSS_URL that is set' grep -q 'SIP_WSS_URL is wss://cc.example.com:7443/' "$TMP/output-loopback-wss.txt"
+notok 'final_output: loopback switch with SIP_WSS_URL set asks for nothing' grep -q 'set SIP_WSS_URL' "$TMP/output-loopback-wss.txt"
+INFERRED=''
+final_output >"$TMP/output-loopback-noinfer.txt"
+ok 'final_output: loopback switch without an inferred address says so' grep -q "http://<this host's address>:8080" "$TMP/output-loopback-noinfer.txt"
+EXTERNAL_IP=192.0.2.1
+final_output >"$TMP/output-lan-again.txt"
+ok 'final_output: a LAN address is still the URL and the Allow Sites entry' grep -q 'add 192.0.2.1 in' "$TMP/output-lan-again.txt"
+
 printf '\n%d tests, %d failed\n' "$tests" "$failures"
 [ "$failures" = 0 ]

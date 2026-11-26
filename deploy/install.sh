@@ -1153,7 +1153,21 @@ final_output() {
     say ""
     say "The call center is running."
     say ""
-    say "  Web:        http://$EXTERNAL_IP:$(env_get "$ENV_FILE" HTTP_PORT | grep . || echo 8080)"
+    _fo_port=$(env_get "$ENV_FILE" HTTP_PORT | grep . || echo 8080)
+    # With the switch on a loopback address (an edge SBC on this host forwards
+    # to it, deploy/single-host-sbc.md) EXTERNAL_IP is where the switch
+    # listens, not an address a browser or a phone can open. The web interface
+    # still listens on the host's own address.
+    _fo_loopback=0
+    case $EXTERNAL_IP in 127.*) _fo_loopback=1 ;; esac
+    if [ "$_fo_loopback" = 1 ]; then
+        _fo_host=${INFERRED:-}
+        [ -n "$_fo_host" ] || _fo_host="<this host's address>"
+        say "  Web:        http://$_fo_host:$_fo_port"
+        say "              (the switch is on $EXTERNAL_IP, behind the edge SBC on this host)"
+    else
+        say "  Web:        http://$EXTERNAL_IP:$_fo_port"
+    fi
     if [ "$_fo_seed" = demo ]; then
         if [ "$FIRST_INSTALL" = 1 ]; then
             say "  Sign in:    admin / $(env_get "$ENV_FILE" AICC_SEED_PASSWORD)"
@@ -1167,7 +1181,19 @@ final_output() {
         say "              cd $DIR && $_fo_dc exec aicc aicc useradd -username admin -password '<password>' -role ADMIN"
     fi
     say "  Phone:      install the browser phone, $EXTENSION_URL"
-    say "              and add $EXTERNAL_IP in the extension's Allow Sites"
+    if [ "$_fo_loopback" = 1 ]; then
+        say "              and add the name agents open the web interface at in the"
+        say "              extension's Allow Sites. A browser phone reaches the switch"
+        say "              through the SBC's WSS listener only:"
+        if [ -n "$(env_get "$ENV_FILE" SIP_WSS_URL)" ]; then
+            say "              SIP_WSS_URL is $(env_get "$ENV_FILE" SIP_WSS_URL)"
+        else
+            say "              set SIP_WSS_URL=wss://<name>:<port>/ in $ENV_FILE and rerun"
+            say "              this installer (deploy/single-host-sbc.md)."
+        fi
+    else
+        say "              and add $EXTERNAL_IP in the extension's Allow Sites"
+    fi
     # `aicc doctor` already printed a WARN; this says what it means for the
     # first thing an operator tries to do. A stack has no trunk of its own, so
     # campaigns would dial nothing until a gateway is configured.

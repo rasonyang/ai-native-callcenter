@@ -953,3 +953,5 @@ hand instead of pulling it.
   trunk.
 - [production-checklist.md](production-checklist.md): passwords, demo data, TLS
   and firewalling before the stack faces anyone.
+- [single-host-sbc.md](single-host-sbc.md): the stack and FreeSBC on one cloud
+  host, with the switch on loopback.
